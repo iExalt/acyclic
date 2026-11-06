@@ -2,6 +2,7 @@ use hegel::TestCase;
 use hegel::generators as gs;
 
 use super::*;
+use crate::ids;
 use crate::model::{self, By, Evidence, add_item, item_key, link, set, set_parent, set_state};
 use crate::schema::{item as field, kind, repository, thread as thread_field};
 use crate::state::{Key, Replica, ReplicaId};
@@ -85,7 +86,7 @@ fn a_done_dependency_is_met_in_any_thread() {
     // No git runs: a done dependency is met wherever its dependent is, and the commit was checked when written.
     assert_eq!(status(&r, "same"), Readiness::Ready);
     assert_eq!(status(&r, "other"), Readiness::Ready);
-    assert_eq!(status(&r, "loose"), Readiness::Unthreaded);
+    assert_eq!(status(&r, "loose"), Readiness::Ready);
     assert_eq!(status(&r, "dep"), Readiness::Done);
 }
 
@@ -313,7 +314,7 @@ fn a_threads_claim_shows_on_its_members_and_a_contest_names_its_winner_first() {
 }
 
 #[test]
-fn an_unthreaded_leaf_is_never_ready_but_what_holds_it_back_shows_first() {
+fn a_leaf_in_no_thread_is_ready_as_a_thread_of_one_unless_something_holds_it_back() {
     let mut r = replica("a");
     for id in ["loose", "ghostly", "dep", "waiting"] {
         add_item(&mut r, id, id, by(1)).unwrap();
@@ -322,14 +323,19 @@ fn an_unthreaded_leaf_is_never_ready_but_what_holds_it_back_shows_first() {
     model::put(&mut r, &item_key("ghostly").unwrap(), field::THREAD, Some(&"ghost"), by(2))
         .unwrap();
     link(&mut r, "waiting", "dep", by(2)).unwrap();
-    for id in ["loose", "ghostly"] {
-        assert_eq!(status(&r, id), Readiness::Unthreaded, "{id}");
+    for id in ["loose", "ghostly", "dep"] {
+        assert_eq!(status(&r, id), Readiness::Ready, "{id}");
     }
     assert_eq!(status(&r, "waiting"), waiting_on(&[("dep", Wait::Open)]));
     let model = Model::read(&r.state).unwrap();
     let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
-    assert_eq!(readiness.ready("session/s").unwrap(), []);
+    // Each ready one is its own thread, named for it; a thread with no record that isn't derived stays missing.
+    let ready = readiness.ready("session/s").unwrap();
+    let ones: Vec<(String, Vec<String>)> = ready.into_iter().map(|t| (t.thread, t.items)).collect();
+    let one = |id: &str| (ids::one(id), vec![id.to_owned()]);
+    assert_eq!(ones, [one("dep"), one("ghostly"), one("loose")]);
     assert_eq!(readiness.thread("ghost").unwrap(), ThreadReadiness::Missing);
+    assert_eq!(readiness.thread(&ids::one("waiting")).unwrap(), ThreadReadiness::NothingReady);
 }
 
 #[test]
@@ -556,9 +562,9 @@ fn a_leaf_in_a_claimed_thread_reads_in_progress_unless_it_waits() {
     assert_eq!(stage(&r, "y"), Some(Stage::Parked));
     done_with(&mut r, "dep", Some("c1"));
     assert_eq!(stage(&r, "dep"), Some(Stage::Done));
-    // Work in no thread is unthreaded.
+    // Work in no thread is a thread of one, ready to start.
     add_item(&mut r, "loose", "loose", by(6)).unwrap();
-    assert_eq!(stage(&r, "loose"), Some(Stage::Unthreaded));
+    assert_eq!(stage(&r, "loose"), Some(Stage::Ready));
 }
 
 #[test]
@@ -726,6 +732,29 @@ fn threads_come_in_waves_after_the_threads_they_wait_on() {
 }
 
 #[test]
+fn a_loose_task_is_a_thread_of_one_in_the_waves_and_a_thread_waiting_on_it_comes_after() {
+    let mut r = replica("a");
+    items(&mut r, &["w", "w2"]);
+    thread(&mut r, "w", "t");
+    thread(&mut r, "w2", "t");
+    add_item(&mut r, "l", "l", by(1)).unwrap();
+    link(&mut r, "w", "l", by(2)).unwrap();
+    let one = ids::one("l");
+    let found = waves(&r);
+    assert_eq!(found.waves, ids(&[&[one.as_str()], &["t"]]));
+    assert_eq!(found.waits_for["t"], std::slice::from_ref(&one));
+    assert_eq!(found.waits_for[&one], Vec::<String>::new());
+    // A loose task nothing orders stands apart, and a done one is no thread at all.
+    add_item(&mut r, "free", "free", by(1)).unwrap();
+    assert_eq!(waves(&r).anytime, [ids::one("free")]);
+    done_with(&mut r, "l", None);
+    done_with(&mut r, "free", None);
+    let found = waves(&r);
+    assert_eq!(found.waves, Vec::<Vec<String>>::new());
+    assert_eq!(found.anytime, ["t"]);
+}
+
+#[test]
 fn finished_work_frees_its_waiters_and_a_cycle_shares_a_wave() {
     let mut r = replica("a");
     waits(&mut r, ("b", "t2"), ("a", "t1"));
@@ -811,15 +840,14 @@ fn waves_order_threads_as_their_leaves_wait(tc: TestCase) {
         .collect();
     let placed: Vec<&str> =
         found.waves.iter().flatten().chain(&found.anytime).map(String::as_str).collect();
-    let left: BTreeSet<&str> = model
+    let left: BTreeSet<String> = model
         .items
         .keys()
         .filter(|id| readiness.stage(id).unwrap().is_some_and(|stage| stage != Stage::Done))
-        .filter_map(|id| model.thread_of(id))
-        .filter(|thread| model.threads.contains_key(*thread))
+        .filter_map(|id| model.held_thread(id).map(std::borrow::Cow::into_owned))
         .collect();
     assert_eq!(placed.len(), left.len(), "each once: {found:?}");
-    assert_eq!(placed.iter().copied().collect::<BTreeSet<_>>(), left);
+    assert_eq!(placed.iter().map(|id| (*id).to_owned()).collect::<BTreeSet<_>>(), left);
     let reaches = |from: &str, to: &str| {
         let mut stack = vec![from];
         let mut seen = BTreeSet::new();
@@ -848,7 +876,7 @@ fn waves_order_threads_as_their_leaves_wait(tc: TestCase) {
     }
     for id in model.items.keys() {
         let Some(Readiness::Waiting { waiting }) = readiness.of(id).unwrap() else { continue };
-        let Some(thread) = model.thread_of(id).filter(|t| model.threads.contains_key(*t)) else {
+        let Some(thread) = model.held_thread(id) else {
             continue;
         };
         if model.items[id].is_done() || readiness.stage(id).unwrap().is_none() {
@@ -861,12 +889,12 @@ fn waves_order_threads_as_their_leaves_wait(tc: TestCase) {
                 if !seen.insert(at) {
                     continue;
                 }
-                if let Some(other) = model.thread_of(at).filter(|t| left.contains(t))
+                if let Some(other) = model.held_thread(at).filter(|t| left.contains(t.as_ref()))
                     && other != thread
                     && readiness.stage(at).unwrap().is_some_and(|stage| stage != Stage::Done)
                 {
                     assert!(
-                        found.waits_for[thread].iter().any(|t| t == other),
+                        found.waits_for[thread.as_ref()].iter().any(|t| *t == other),
                         "{id} waits on {at}: {found:?}"
                     );
                 }
@@ -893,7 +921,6 @@ fn an_actor_may_finish_what_is_ready_its_own_or_done_already() {
         (Readiness::Done, true),
         (Readiness::Parent, false),
         (waiting_on(&[]), false),
-        (Readiness::Unthreaded, false),
     ] {
         assert_eq!(status.finishable_by(me), may, "{status:?}");
     }
@@ -902,36 +929,34 @@ fn an_actor_may_finish_what_is_ready_its_own_or_done_already() {
 #[test]
 fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what_is_left_is_parked()
 {
-    let of = |done, in_progress, ready, waiting, parked, unthreaded| Stages {
+    let of = |done, in_progress, ready, waiting, parked| Stages {
         done,
         in_progress,
         ready,
         waiting,
         parked,
-        unthreaded,
         canceled: 0,
         stalled: 0,
     };
     for (stages, claimed, stage) in [
-        (of(0, 0, 0, 0, 0, 0), false, None),
-        (of(3, 0, 0, 0, 0, 0), false, Some(Stage::Done)),
+        (of(0, 0, 0, 0, 0), false, None),
+        (of(3, 0, 0, 0, 0), false, Some(Stage::Done)),
         // Started wins over what is still ready.
-        (of(1, 0, 2, 0, 0, 0), false, Some(Stage::InProgress)),
-        (of(0, 1, 0, 3, 0, 0), false, Some(Stage::InProgress)),
+        (of(1, 0, 2, 0, 0), false, Some(Stage::InProgress)),
+        (of(0, 1, 0, 3, 0), false, Some(Stage::InProgress)),
         // A live claim below starts it, even with only waiting work.
-        (of(0, 0, 0, 2, 0, 0), true, Some(Stage::InProgress)),
-        (of(0, 0, 2, 1, 1, 1), false, Some(Stage::Ready)),
+        (of(0, 0, 0, 2, 0), true, Some(Stage::InProgress)),
+        (of(0, 0, 2, 1, 1), false, Some(Stage::Ready)),
         // Stalled work reads before ready work, and once started counts as started.
-        (Stages { stalled: 1, ..of(0, 0, 2, 0, 0, 0) }, false, Some(Stage::Stalled)),
-        (Stages { stalled: 1, ..of(1, 0, 0, 0, 0, 0) }, false, Some(Stage::InProgress)),
-        (of(0, 0, 0, 1, 1, 1), false, Some(Stage::Waiting)),
+        (Stages { stalled: 1, ..of(0, 0, 2, 0, 0) }, false, Some(Stage::Stalled)),
+        (Stages { stalled: 1, ..of(1, 0, 0, 0, 0) }, false, Some(Stage::InProgress)),
+        (of(0, 0, 0, 1, 1), false, Some(Stage::Waiting)),
         // What is left all parked, by hand or under a parked part, reads parked however much is done.
-        (of(2, 0, 0, 0, 3, 0), false, Some(Stage::Parked)),
-        (of(0, 0, 0, 0, 0, 2), false, Some(Stage::Unthreaded)),
+        (of(2, 0, 0, 0, 3), false, Some(Stage::Parked)),
         // Canceled leaves are left out; with nothing else the parent reads canceled.
-        (Stages { canceled: 2, ..of(0, 0, 0, 0, 0, 0) }, false, Some(Stage::Canceled)),
-        (Stages { canceled: 2, ..of(1, 0, 0, 0, 0, 0) }, false, Some(Stage::Done)),
-        (Stages { canceled: 1, ..of(0, 0, 1, 0, 0, 0) }, false, Some(Stage::Ready)),
+        (Stages { canceled: 2, ..of(0, 0, 0, 0, 0) }, false, Some(Stage::Canceled)),
+        (Stages { canceled: 2, ..of(1, 0, 0, 0, 0) }, false, Some(Stage::Done)),
+        (Stages { canceled: 1, ..of(0, 0, 1, 0, 0) }, false, Some(Stage::Ready)),
     ] {
         assert_eq!(stages.rolled_up(claimed), stage, "{stages:?} claimed {claimed}");
     }
@@ -1042,4 +1067,28 @@ fn ready_lists_a_stalled_thread_in_id_order_among_the_unclaimed_marked_stalled()
     let rows: Vec<(&str, bool)> = listed.iter().map(|t| (t.thread.as_str(), t.stalled)).collect();
     // The actor's own claimed thread first, then the unclaimed and stalled by id.
     assert_eq!(rows, [("t3", false), ("t0", false), ("t1", false), ("t2", true)]);
+}
+
+#[test]
+fn a_loose_task_is_one_ready_thread_until_claimed_and_is_counted_once_at_each_stage() {
+    let mut r = replica("a");
+    add_item(&mut r, "x", "x", by(1)).unwrap();
+    let one = ids::one("x");
+    let listed = |r: &Replica, actor: &str| -> Vec<String> {
+        let model = Model::read(&r.state).unwrap();
+        let ready = ReadinessEvaluator::new(&r.state, &model, NOW).ready(actor).unwrap();
+        ready.into_iter().map(|t| t.thread).collect()
+    };
+    let counted = |r: &Replica| -> Stages {
+        let model = Model::read(&r.state).unwrap();
+        let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
+        Stages::of_leaves(&readiness, ["x"]).unwrap()
+    };
+    assert_eq!(listed(&r, "session/a"), std::slice::from_ref(&one));
+    assert_eq!(counted(&r), Stages { ready: 1, ..Stages::default() });
+    claim::claim(&mut r, &one, "session/a", 900, (500, 1_000), true).unwrap();
+    assert_eq!(listed(&r, "session/a"), std::slice::from_ref(&one), "its holder still sees it");
+    assert_eq!(listed(&r, "session/b"), Vec::<String>::new());
+    assert_eq!(counted(&r), Stages { in_progress: 1, ..Stages::default() });
+    assert_eq!(status(&r, "x"), Readiness::Claimed { holder: "session/a".into() });
 }

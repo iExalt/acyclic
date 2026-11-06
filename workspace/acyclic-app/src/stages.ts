@@ -11,8 +11,6 @@ export const STAGE_ICONS: Record<Stage, string> = {
   // A clock: it waits for something, rather than being barred.
   waiting: '<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8h2.8"/>',
   parked: '<path d="M6 3.5v9M10 3.5v9"/>',
-  // The dashed ring an item with no thread carries where its badge would be: one mark for one fact everywhere.
-  unthreaded: '<circle cx="8" cy="8" r="6" stroke-dasharray="3 2.4"/>',
   // A circle struck through: dropped on purpose, never done.
   canceled: '<circle cx="8" cy="8" r="6"/><path d="M3.8 12.2l8.4-8.4"/>',
   // A circle with an exclamation mark: ready, yet its holder's lease ran out and it wants a new one.
@@ -26,20 +24,17 @@ export const STAGE_WORDS: Record<Stage, string> = {
   ready: "Ready",
   waiting: "Waiting",
   parked: "Parked",
-  // A status, and what settles it: an item in no thread is never ready.
-  unthreaded: "Needs a thread",
   canceled: "Canceled",
   stalled: "Stalled",
 };
 
-/** `count` leaves at `stage`, as a parent's counts say it: "3 ready", "1 needs a thread", "3 need a thread". */
-export function stageCountWords(stage: Stage, count: number): string {
-  if (stage === "unthreaded") return count === 1 ? "needs a thread" : "need a thread";
+/** `count` leaves at `stage`, as a parent's counts say it: "3 ready", "1 in progress". */
+export function stageCountWords(stage: Stage): string {
   return STAGE_WORDS[stage].toLowerCase();
 }
 
 /** The stages whose work is finished, set aside or dropped, drawn quieter. */
-export const QUIET: ReadonlySet<Stage> = new Set(["done", "waiting", "parked", "unthreaded", "canceled"]);
+export const QUIET: ReadonlySet<Stage> = new Set(["done", "waiting", "parked", "canceled"]);
 
 /** A parent's leaves by stage, in the order work moves through them, leaving out stages with none. */
 export function stageCounts(counts: Counts): { stage: Stage; count: number }[] {
@@ -50,7 +45,6 @@ export function stageCounts(counts: Counts): { stage: Stage; count: number }[] {
     ["ready", counts.ready],
     ["waiting", counts.waiting],
     ["parked", counts.parked],
-    ["unthreaded", counts.unthreaded],
     ["canceled", counts.canceled],
   ];
   return all.filter(([, count]) => count > 0).map(([stage, count]) => ({ stage, count }));

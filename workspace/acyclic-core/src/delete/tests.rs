@@ -197,3 +197,31 @@ fn a_thread_is_deleted_only_with_no_members_and_no_live_claim() {
     assert_eq!(delete_thread(&mut r, "u", user(NOW)), Ok(false), "deleting again writes nothing");
     assert_eq!(delete_thread(&mut r, "v", user(NOW)), Err(DeleteError::NoThread("v".into())));
 }
+
+#[test]
+fn a_tasks_thread_of_one_is_never_deleted_but_deleting_the_task_lets_its_own_claim_go() {
+    let mut r = with_items(&["x", "y"]);
+    let one = crate::ids::one("x");
+    claim::claim(&mut r, &one, "actor/user", 5, (10_000, 10_000), true).unwrap();
+    // Not while the task is in it, nor once it is empty: a tombstone would make the task unclaimable.
+    let refused =
+        Err(DeleteError::ThreadInUse { thread: one.clone(), reasons: vec![Reason::TaskThread] });
+    assert_eq!(delete_thread(&mut r, &one, user(6)), refused);
+    assert!(delete_item(&mut r, "x", user(6)).unwrap());
+    assert_eq!(delete_thread(&mut r, &one, user(6)), refused);
+    // Deleting the task releases the actor's own claim in the same write, so nothing holds an emptied thread.
+    let model = Model::read(&r.state).unwrap();
+    assert!(!model.items.contains_key("x"));
+    assert_eq!(claim::live(&r.state, &claim::thread_key(&one).unwrap(), 7).unwrap().len(), 0);
+    assert!(model.is_emptied_one(&one));
+    let readiness = ReadinessEvaluator::new(&r.state, &model, 7);
+    assert!(
+        needs_you(&r.state, &model, &readiness, 7).unwrap().is_empty(),
+        "emptied and unheld is hidden"
+    );
+
+    // Someone else's claim still refuses the delete, as on any thread.
+    let one_y = crate::ids::one("y");
+    claim::claim(&mut r, &one_y, "session/other", 8, (10_000, 10_000), true).unwrap();
+    assert_eq!(refusal(&mut r, "y", user(9)), ["claimed"]);
+}

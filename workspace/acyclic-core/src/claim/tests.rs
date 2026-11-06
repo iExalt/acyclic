@@ -1,5 +1,5 @@
 use super::*;
-use crate::model::{By, ItemState, add_item, item_key, put, set, set_state};
+use crate::model::{By, ItemState, Value, add_item, item_key, put, set, set_state};
 use crate::schema::{item as field, thread as thread_field};
 use crate::state::ReplicaId;
 
@@ -240,4 +240,120 @@ fn a_release_drops_only_its_holders_claim_whatever_races_it() {
     assert!(release(&mut a, &t, "session/one"));
     a.join(&b.state).unwrap();
     assert_eq!(holder(&a, "t", 50).as_deref(), Some("session/two"));
+}
+
+/// Two replicas holding the same loose task `x`.
+fn loose_pair() -> (Replica, Replica) {
+    let mut a = replica("a");
+    add_item(&mut a, "x", "X", by("actor/user", 1)).unwrap();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    (a, b)
+}
+
+#[test]
+fn claiming_a_loose_task_makes_its_thread_and_names_it_on_the_task_in_one_go() {
+    let mut r = replica("a");
+    add_item(&mut r, "x", "X", by("actor/user", 1)).unwrap();
+    assert_eq!(Model::read(&r.state).unwrap().items["x"].thread, Value::None);
+    claim(&mut r, &crate::ids::one("x"), "session/s", 10, (LEASE, LEASE), true).unwrap();
+
+    // What is stored: the task names its thread, and the thread's record holds the claim and nothing else.
+    assert_eq!(r.state.field(&item_key("x").unwrap(), field::THREAD).unwrap().len(), 1);
+    let model = Model::read(&r.state).unwrap();
+    assert_eq!(model.items["x"].thread, Value::One("x.one".into()));
+    let thread = r.state.entity(&thread_key("x.one").unwrap()).unwrap();
+    assert_eq!(thread.keys().map(String::as_str).collect::<Vec<_>>(), ["claim"]);
+    let stored: Vec<&serde_json::Value> =
+        thread["claim"].values().map(|stamped| &stamped.value).collect();
+    assert_eq!(
+        stored,
+        [&serde_json::json!({
+            "holder": "session/s", "replica": "a", "lease_start": 10, "lease_expires": 1_010,
+        })]
+    );
+    assert_eq!(model.threads["x.one"].title, Value::None);
+    // Claiming again renews the same record, and the task stays in it.
+    claim(&mut r, "x.one", "session/s", 20, (LEASE, LEASE), true).unwrap();
+    assert_eq!(Model::read(&r.state).unwrap().threads.len(), 1);
+    assert_eq!(holder(&r, "x.one", 30).as_deref(), Some("session/s"));
+    // Releasing the only claim takes the stored record with it, yet the task still names its thread, which reads on.
+    assert!(release(&mut r, &thread_key("x.one").unwrap(), "session/s"));
+    assert!(r.state.entity(&thread_key("x.one").unwrap()).is_none());
+    let model = Model::read(&r.state).unwrap();
+    assert!(model.threads.contains_key("x.one"));
+    let readiness = ReadinessEvaluator::new(&r.state, &model, 30);
+    assert_eq!(crate::needs::needs_you(&r.state, &model, &readiness, 30).unwrap().len(), 0);
+}
+
+#[test]
+fn two_replicas_claiming_one_loose_task_apart_make_one_thread_and_a_contest_in_either_join_order() {
+    use crate::needs::{Entry, needs_you};
+    let one = crate::ids::one("x");
+    let mut seen = Vec::new();
+    for a_first in [true, false] {
+        let (mut a, mut b) = loose_pair();
+        claim(&mut a, &one, "session/a", 10, (LEASE, LEASE), true).unwrap();
+        claim(&mut b, &one, "session/b", 20, (LEASE, LEASE), true).unwrap();
+        let joined = if a_first {
+            a.join(&b.state).unwrap();
+            a
+        } else {
+            b.join(&a.state).unwrap();
+            b
+        };
+        let model = Model::read(&joined.state).unwrap();
+        // One thread, named alike by both, so the task's thread field has no conflict.
+        assert_eq!(model.threads.keys().collect::<Vec<_>>(), [&one]);
+        assert_eq!(model.items["x"].thread, Value::One(one.clone()));
+        assert_eq!(model.conflicts().count(), 0);
+        let readiness = ReadinessEvaluator::new(&joined.state, &model, 30);
+        let needs = needs_you(&joined.state, &model, &readiness, 30).unwrap();
+        let keys: Vec<String> = needs.iter().map(Entry::key).collect();
+        assert_eq!(keys, [format!("contest:{one}")]);
+        // The earlier lease wins on every replica.
+        seen.push(holder(&joined, &one, 30));
+    }
+    assert_eq!(seen, [Some("session/a".to_owned()), Some("session/a".to_owned())]);
+}
+
+#[test]
+fn a_tombstone_an_older_version_wrote_on_a_tasks_thread_of_one_is_ignored_in_every_join_order() {
+    let one = crate::ids::one("x");
+    for a_first in [true, false] {
+        let (mut a, mut b) = loose_pair();
+        // An older replica deletes the thread, as it let anyone do once nothing was in it.
+        crate::model::put(
+            &mut a,
+            &thread_key(&one).unwrap(),
+            field::DELETED,
+            Some(&true),
+            by("actor/user", 5),
+        )
+        .unwrap();
+        claim(&mut b, &one, "session/b", 10, (LEASE, LEASE), true).unwrap();
+        if a_first {
+            a.join(&b.state).unwrap();
+        } else {
+            b.join(&a.state).unwrap();
+            a = b;
+        }
+        let model = Model::read(&a.state).unwrap();
+        assert!(!model.is_deleted(&thread_key(&one).unwrap()));
+        assert!(model.threads.contains_key(&one), "it reads as an ordinary thread");
+        assert_eq!(holder(&a, &one, 20).as_deref(), Some("session/b"));
+        assert_eq!(model.items["x"].thread, Value::One(one.clone()));
+    }
+    // Any other thread's tombstone still holds.
+    let mut r = replica("a");
+    thread(&mut r, "t", &[]);
+    crate::model::put(
+        &mut r,
+        &thread_key("t").unwrap(),
+        field::DELETED,
+        Some(&true),
+        by("actor/user", 5),
+    )
+    .unwrap();
+    assert!(Model::read(&r.state).unwrap().is_deleted(&thread_key("t").unwrap()));
 }

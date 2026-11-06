@@ -44,7 +44,7 @@ export function StageCounts({ counts, none = "No items" }: { counts: Counts; non
       {shown.map(({ stage, count }, at) => (
         <span key={stage} className="stage-mark" data-stage={stage}>
           <StageIcon stage={stage} />
-          <span className="count">{count}</span> {stageCountWords(stage, count)}
+          <span className="count">{count}</span> {stageCountWords(stage)}
           {/* Read aloud as a list; seen, each count's icon already sets it apart. */}
           {at < shown.length - 1 ? <span className="visually-hidden">,</span> : null}
         </span>

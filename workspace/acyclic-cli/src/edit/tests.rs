@@ -35,7 +35,7 @@ fn an_unreadable_readiness_on_item_done_is_exit_six_not_a_not_ready_refusal() {
         &Violation {
             change: None,
             at: None,
-            rule: Rule::NotReady(Some(acyclic_core::ready::Readiness::Unthreaded)),
+            rule: Rule::NotReady(Some(acyclic_core::ready::Readiness::Parent)),
         },
         None,
         &before,

@@ -730,10 +730,8 @@ fn finishing_takes_work_that_is_ready_or_the_finishers_own_unless_forced() {
     // Without readiness to judge by, only a forced finish passes.
     assert_eq!(finishing(&r, "free", None, false, false), [Rule::NotReady(None)]);
     assert_eq!(finishing(&r, "free", None, true, false), []);
-    assert_eq!(
-        finishing(&r, "lone", None, false, true),
-        [Rule::NotReady(Some(Readiness::Unthreaded))]
-    );
+    // A task in no thread is a thread of one: ready, so finishing it needs no claim.
+    assert_eq!(finishing(&r, "lone", None, false, true), []);
     // A parent reads done once its leaves are, so storing done on one is refused, forced or not.
     assert_eq!(finishing(&r, "parent", None, false, true), [Rule::ParentDone]);
     assert_eq!(finishing(&r, "parent", None, true, false), [Rule::ParentDone]);
@@ -959,4 +957,37 @@ fn the_projection_is_what_reading_the_writes_gives(tc: TestCase) {
             assert_eq!(read(replica), outcome.after, "after {changes:?}");
         }
     }
+}
+
+#[test]
+fn a_tasks_thread_of_one_takes_its_title_when_a_second_item_joins_and_frees_it_once_emptied() {
+    let mut r = replica("a");
+    commit_ok(&mut r, 1, vec![add("x", vec![])]);
+    let one = crate::ids::one("x");
+    crate::claim::claim(&mut r, &one, "session/s", 2, (60_000, 60_000), true).unwrap();
+    assert_eq!(
+        read(&r).threads[&one].title,
+        Value::None,
+        "a lone task's thread has no title of its own"
+    );
+    // Breaking the task down: the first child takes the thread, and the thread takes the task's title with it.
+    commit_ok(&mut r, 3, vec![add("kid", vec![ItemAssign::Parent(Some("x".into()))])]);
+    let model = read(&r);
+    assert_eq!(model.items["kid"].thread, Value::One(one.clone()));
+    assert_eq!(model.items["x"].thread, Value::None);
+    assert_eq!(model.threads[&one].title, Value::One("X".into()));
+    assert_eq!(model.shown_as_task(&one), None, "it is an ordinary thread now");
+    let minted = |title: &str| Change::Add {
+        record: Record::Thread("fresh".into()),
+        minted: true,
+        on_repeat: Repeat::Refuse,
+        with: vec![Assign::Thread("fresh".into(), ThreadAssign::Title(title.into()))],
+    };
+    assert_eq!(refused(&r, vec![minted("X")]), [Rule::TitleTaken(Record::Thread(one.clone()))]);
+    // Emptied, it is hidden and its title is free for a new thread, though the record keeps it.
+    commit_ok(&mut r, 4, vec![item("kid", ItemAssign::Thread(None))]);
+    let model = read(&r);
+    assert!(model.is_emptied_one(&one));
+    assert_eq!(model.threads[&one].title, Value::One("X".into()));
+    assert!(judge(&model, &ChangeSet(vec![minted("X")]), by(5), None).is_ok());
 }

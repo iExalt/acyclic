@@ -223,7 +223,7 @@ fn init_and_sync_name_the_tracker_and_distinguish_local_changes_from_pushes() {
 fn a_lone_list_is_its_table_and_notes_keep_their_column() {
     let needs = json!({"needs": [
         {"kind": "thread-cycle", "threads": [{"id": "t1", "title": "T"}, {"id": "t2", "title": "U"}]},
-        {"kind": "unthreaded", "item": {"id": "a1"}, "fix": "acyclic item edit a1 --thread <THREAD>"},
+        {"kind": "empty-thread", "thread": {"id": "t1", "title": "T"}, "fix": "acyclic thread delete t1"},
         {"kind": "conflict", "record": "item", "id": "a1", "field": "state", "keeps": [
             {"value": "done", "command": null, "run": null, "why": "Keep done in a terminal"},
             {"value": "parked", "command": {}, "run": "acyclic item edit a1 --state parked", "why": null},
@@ -254,7 +254,6 @@ fn every_readiness_reads_as_a_phrase() {
             json!(Readiness::Waiting { waiting: waiting.into_iter().collect() }),
             "waiting for a (not done), b (not done)",
         ),
-        (json!(Readiness::Unthreaded), "unthreaded"),
         (json!(Readiness::Claimed { holder: s("session/s") }), "claimed by session/s"),
         (
             json!(Readiness::Contested { holders: vec![s("session/1"), s("session/2")] }),

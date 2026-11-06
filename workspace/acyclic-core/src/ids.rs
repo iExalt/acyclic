@@ -38,5 +38,24 @@ pub fn v7(text: &str) -> Option<String> {
         .then(|| uuid.to_string())
 }
 
+/// The suffix of a loose task's thread of one: the thread is named `<task id>.one`, so it sorts with the task, among the
+/// threads made when it was.
+const ONE: &str = ".one";
+
+/// The id of the thread of one a loose task is in: its own id and `.one`, a pure function of the task, so replicas
+/// that claim the same task apart name the same thread and their claims contest. It is no minted id (those are 36
+/// characters of hex and hyphens) and holds nothing a stored id may not; explicit thread ids that end in `.one` are
+/// refused, so it is never made by hand.
+#[must_use]
+pub fn one(task: &str) -> String {
+    format!("{task}{ONE}")
+}
+
+/// The task a thread of one is derived from: the inverse of [`one`], `None` for any other id.
+#[must_use]
+pub fn task_of_one(thread: &str) -> Option<&str> {
+    thread.strip_suffix(ONE).filter(|task| !task.is_empty())
+}
+
 #[cfg(test)]
 mod tests;

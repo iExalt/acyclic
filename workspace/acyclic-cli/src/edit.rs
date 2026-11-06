@@ -110,7 +110,7 @@ impl ItemFields {
     pub fn resolve(
         self,
         model: &Model,
-        records: &Records<'_>,
+        records: &Records,
         item: Option<&str>,
     ) -> Result<Self, CliError> {
         let parent = match self.parent {

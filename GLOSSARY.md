@@ -47,9 +47,20 @@ _Avoid_: partition, breakdown
 
 **Thread**:
 A bounded piece of work that one continuing agent conversation works through from start to finish. A thread exists
-while it has a record; an item that names any other thread holds a dangling reference. Its notes say what the work
-is and how to go about it; stored data keeps their older field name `brief`.
+while it has a record; an item that names any other thread holds a dangling reference. The exception is a leaf in no
+thread, which is a thread of one. Its notes say what the work is and how to go about it; stored data keeps their
+older field name `brief`.
 _Avoid_: workstream, track, lane, operation
+
+**Thread of one**:
+What an open leaf in no thread is: its own thread, with no record until it is claimed. Its id is the task's id and
+`.one`, so replicas that claim the task apart name the same thread and their claims contest. `thread claim` makes the
+record, which holds only the claim, and names the thread on the task in the same write. Rows show it with the task's
+title and `task` set to the task's id, until the thread gets a title of its own: breaking the task down gives the
+thread the task's title, and it is an ordinary thread from then on. It is never deleted, since a tombstone would leave
+the task unclaimable alone (a tombstone an older version wrote on one is ignored); once nothing is in it and no one
+holds it, it is hidden, and its title, if it kept one, is free for others. _Avoid_: loose task (as a kind of item),
+singleton
 
 **Wave**:
 A step in the order threads can start: each thread with work left comes after every thread its work waits on, and a
@@ -84,8 +95,8 @@ _Avoid_: closed
 
 **Needs-you list**:
 Everything waiting on the user: conflicts nobody resolved, cycles of items, parents or threads, done work waiting on
-work that isn't, work waiting on canceled work, claims two holders clash over, references to what doesn't exist, and
-items in no thread. The app calls it Needs you, and shows it as a view of its own.
+work that isn't, work waiting on canceled work, claims two holders clash over, and references to what doesn't exist.
+The app calls it Needs you, and shows it as a view of its own.
 _Avoid_: inbox, notifications
 
 ## The app
@@ -134,12 +145,11 @@ versions can't read it, so every replica upgrades before anything is canceled.
 _Avoid_: backlog (for open)
 
 **Stage**: Where an item's work stands, said one way everywhere with its icon: in progress, done, ready, stalled,
-waiting, parked, canceled, or needs a thread. Waiting covers what an item waits for, a cycle it is on and a conflict in
+waiting, parked or canceled. Waiting covers what an item waits for, a cycle it is on and a conflict in
 its state or thread. A parent's comes from its leaves, those canceled left out: done once every other leaf is; before
 that, in progress once any work below has started and some of what is left isn't parked; otherwise stalled, ready,
-waiting, parked or needs a thread by its leaves. A parent with only canceled leaves, or canceled by hand, reads
-canceled. The code word for needs a thread is `unthreaded`; the app shows a stage as an item's Status. _Avoid_: phase,
-step, blocked (for waiting)
+waiting or parked by its leaves. A parent with only canceled leaves, or canceled by hand, reads canceled. The app
+shows a stage as an item's Status. _Avoid_: phase, step, blocked (for waiting)
 
 **Status**:
 What a panel says of where something stands: an item's stage.
@@ -159,7 +169,7 @@ cycle, `waits-for-cycle` in JSON.
 
 **Dangling reference**:
 A parent, thread or waits-for target that names a record that doesn't exist or was deleted. It lands on
-the needs-you list, and an item whose thread dangles counts as in no thread.
+the needs-you list, and an item whose thread dangles counts as in no thread, so as a thread of one.
 _Avoid_: broken link, orphan
 
 ## Where the data lives
@@ -193,7 +203,7 @@ _Avoid_: merge conflict (nothing blocks a sync)
 - A **Tracker** holds one **Trust domain**'s **Items**; each machine has one **Replica** of it
 - An **Item** has at most one parent **Item**, and at most one **Thread**
 - A **Thread** may hold **Items** from different branches of the outcome tree
-- A **Thread** is the unit of work: one agent holds a **Claim** on it, and an item in no thread is never ready
+- A **Thread** is the unit of work: one agent holds a **Claim** on it, and an item in no thread is a **Thread of one**
 - **Waits for** never forms a cycle
 
 ## Planned

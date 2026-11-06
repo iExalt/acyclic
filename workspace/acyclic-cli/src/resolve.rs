@@ -34,10 +34,12 @@ pub(crate) const MIN_ENDING: usize = 6;
 
 /// A record a reference may name: its id, and the names it may be called by.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Candidate<'a> {
-    id: &'a str,
+struct Candidate {
+    id: String,
     /// Its titles, one unless replicas disagree, or its `owner/name`.
     names: Vec<String>,
+    /// The id of the task a thread of one is derived from, which names it too, in full or by an ending.
+    task: Option<String>,
 }
 
 /// The kind of record an argument names.
@@ -64,38 +66,53 @@ impl Kind {
 }
 
 /// The records of a model that references may name.
-pub(crate) struct Records<'a> {
-    items: Vec<Candidate<'a>>,
-    threads: Vec<Candidate<'a>>,
-    repositories: Vec<Candidate<'a>>,
+pub(crate) struct Records {
+    items: Vec<Candidate>,
+    threads: Vec<Candidate>,
+    repositories: Vec<Candidate>,
 }
 
-impl<'a> Records<'a> {
+impl Records {
     /// Every item, thread and repository record in `model`. A thread an item names but that has no record is no
     /// thread: the item's reference dangles.
-    pub(crate) fn of(model: &'a Model) -> Self {
+    pub(crate) fn of(model: &Model) -> Self {
         let items = model
             .items
             .values()
             .map(|item| Candidate {
-                id: &item.id,
+                id: item.id.clone(),
                 names: item.title.all().into_iter().cloned().collect(),
+                task: None,
             })
             .collect();
+        // Every thread, a loose task's thread of one among them, which a claim makes. One shown as its task is named
+        // by the task's title while the task is open; an emptied one keeps no title that others may not take.
         let threads = model
-            .threads
-            .values()
-            .map(|thread| Candidate {
-                id: &thread.id,
-                names: thread.title.all().into_iter().cloned().collect(),
+            .all_threads()
+            .into_iter()
+            .map(|id| {
+                let task = model.task_of(&id);
+                let names: Vec<String> =
+                    match model.shown_as_task(&id).and_then(|t| model.items.get(t)) {
+                        Some(task) if !task.is_finished() => {
+                            task.title.all().into_iter().cloned().collect()
+                        },
+                        Some(_) => Vec::new(),
+                        None if model.is_emptied_one(&id) => Vec::new(),
+                        None => model.threads.get(&id).map_or_else(Vec::new, |thread| {
+                            thread.title.all().into_iter().cloned().collect()
+                        }),
+                    };
+                Candidate { task: task.map(str::to_owned), id, names }
             })
             .collect();
         let repositories = model
             .repositories
             .values()
             .map(|record| Candidate {
-                id: &record.id,
+                id: record.id.clone(),
                 names: repository_name(record).into_iter().collect(),
+                task: None,
             })
             .collect();
         Self { items, threads, repositories }
@@ -119,7 +136,7 @@ impl<'a> Records<'a> {
     /// The items, or with `items` false the threads, each by the shortest ending of its id that names it.
     pub(crate) fn endings(&self, items: bool) -> BTreeMap<String, String> {
         let candidates = if items { &self.items } else { &self.threads };
-        let mut found = endings(candidates.iter().map(|c| c.id));
+        let mut found = endings(candidates.iter().map(|c| c.id.as_str()));
         // An ending that is another record's title would resolve as ambiguous: it grows until it isn't, at the
         // latest to the whole id.
         let titled = |id: &str, ending: &str| {
@@ -159,11 +176,11 @@ pub(crate) fn held<'h>(
     }
 }
 
-fn resolve(kind: Kind, reference: &str, candidates: &[Candidate<'_>]) -> Result<String, CliError> {
+fn resolve(kind: Kind, reference: &str, candidates: &[Candidate]) -> Result<String, CliError> {
     if ids::is_full(reference) {
         let id = reference.to_ascii_lowercase();
-        return match candidates.iter().find(|c| c.id == id) {
-            Some(found) => Ok(found.id.to_owned()),
+        return match candidates.iter().find(|c| c.id == id || c.task.as_deref() == Some(&id)) {
+            Some(found) => Ok(found.id.clone()),
             None => Err(not_found(kind, reference, &[])),
         };
     }
@@ -171,15 +188,19 @@ fn resolve(kind: Kind, reference: &str, candidates: &[Candidate<'_>]) -> Result<
         Kind::Repository => name.eq_ignore_ascii_case(reference),
         Kind::Item | Kind::Thread => name == reference,
     };
-    let by_name: Vec<&Candidate<'_>> =
+    let by_name: Vec<&Candidate> =
         candidates.iter().filter(|c| c.names.iter().any(named)).collect();
     let lower = reference.to_ascii_lowercase();
-    let ends = |c: &&Candidate<'_>| !lower.is_empty() && c.id.ends_with(&lower);
-    let by_ending: Vec<&Candidate<'_>> = candidates.iter().filter(ends).collect();
+    let ends = |c: &&Candidate| {
+        !lower.is_empty()
+            && (c.id.ends_with(&lower)
+                || c.task.as_ref().is_some_and(|task| task.ends_with(&lower)))
+    };
+    let by_ending: Vec<&Candidate> = candidates.iter().filter(ends).collect();
     let long = reference.len() >= MIN_ENDING;
     match (&by_name[..], &by_ending[..]) {
-        ([one], []) => Ok(one.id.to_owned()),
-        ([one], [same]) if one.id == same.id => Ok(one.id.to_owned()),
+        ([one], []) => Ok(one.id.clone()),
+        ([one], [same]) if one.id == same.id => Ok(one.id.clone()),
         ([_, _, ..], _) => Err(ambiguous(
             kind,
             &format!(
@@ -204,8 +225,8 @@ fn resolve(kind: Kind, reference: &str, candidates: &[Candidate<'_>]) -> Result<
             ))
         },
         // Too short to be an ending, so it is that name.
-        ([one], _) => Ok(one.id.to_owned()),
-        ([], [one]) if long => Ok(one.id.to_owned()),
+        ([one], _) => Ok(one.id.clone()),
+        ([], [one]) if long => Ok(one.id.clone()),
         ([], [_, _, ..]) if long => Err(ambiguous(
             kind,
             &format!("{reference:?} ends the ids of {} {}s", by_ending.len(), kind.noun()),
@@ -229,7 +250,7 @@ fn resolve(kind: Kind, reference: &str, candidates: &[Candidate<'_>]) -> Result<
         )),
         ([], []) => {
             // A repository named by its name alone is meant as `owner/name`.
-            let meant: Vec<&Candidate<'_>> = if kind == Kind::Repository {
+            let meant: Vec<&Candidate> = if kind == Kind::Repository {
                 candidates
                     .iter()
                     .filter(|c| {
@@ -251,25 +272,25 @@ fn name_word(kind: Kind) -> &'static str {
     if kind == Kind::Repository { "owner/name" } else { "title" }
 }
 
-fn details(kind: Kind, candidates: &[&Candidate<'_>]) -> Json {
+fn details(kind: Kind, candidates: &[&Candidate]) -> Json {
     let listed: Vec<Json> =
         candidates.iter().map(|c| json!({"id": c.id, kind.name_key(): c.names.first()})).collect();
     json!({"candidates": listed})
 }
 
 /// Candidates as a message lists them: each id, with its name when it has one.
-fn listing(candidates: &[&Candidate<'_>]) -> String {
+fn listing(candidates: &[&Candidate]) -> String {
     let each: Vec<String> = candidates
         .iter()
         .map(|c| match c.names.first() {
             Some(name) => format!("{} ({name})", c.id),
-            None => c.id.to_owned(),
+            None => c.id.clone(),
         })
         .collect();
     each.join(", ")
 }
 
-fn ambiguous(kind: Kind, why: &str, candidates: &[&Candidate<'_>]) -> CliError {
+fn ambiguous(kind: Kind, why: &str, candidates: &[&Candidate]) -> CliError {
     CliError::new(
         "ambiguous",
         exit::USAGE,
@@ -278,7 +299,7 @@ fn ambiguous(kind: Kind, why: &str, candidates: &[&Candidate<'_>]) -> CliError {
     .with(details(kind, candidates))
 }
 
-fn not_found(kind: Kind, reference: &str, meant: &[&Candidate<'_>]) -> CliError {
+fn not_found(kind: Kind, reference: &str, meant: &[&Candidate]) -> CliError {
     let message = match kind {
         Kind::Item => format!("no item {reference}"),
         Kind::Thread => format!(

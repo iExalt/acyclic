@@ -102,12 +102,12 @@ fn two_machines() -> Shell {
     sh
 }
 
-/// The needs, leaving out the items in no thread and the threads with no item, which these tests leave about.
+/// The needs, leaving out the threads with no item, which these tests leave about.
 fn needs(sh: &mut Shell) -> Vec<serde_json::Value> {
     let (_, out) = sh.output("needs", AGENT);
     let all = out["data"]["needs"].as_array().unwrap().clone();
     all.into_iter()
-        .filter(|entry| !matches!(entry["kind"].as_str(), Some("unthreaded" | "empty-thread")))
+        .filter(|entry| !matches!(entry["kind"].as_str(), Some("empty-thread")))
         .collect()
 }
 

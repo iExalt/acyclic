@@ -85,7 +85,9 @@ fn a_journey_through_the_contract() {
     // A record is named by its title, or by the end of its id.
     assert_eq!(sh.run("item edit Second --waits-for First", AGENT), 0);
     let (_, ready) = sh.output("thread ready", AGENT);
-    assert_eq!(ready["data"]["ready"], json!([]), "nothing is ready outside a thread");
+    // An item in no thread is its own thread of one: First is ready, and Second waits on it.
+    assert_eq!(ready["data"]["ready"][0]["task"], json!(a1), "{ready}");
+    assert_eq!(ready["data"]["ready"].as_array().unwrap().len(), 1, "{ready}");
     assert_eq!(sh.run(&format!("thread add --id {t0} --title Start"), AGENT), 0);
     for ending in ["0000a1", "0000a2"] {
         assert_eq!(sh.run(&format!("item edit {ending} --thread Start"), AGENT), 0);
@@ -504,24 +506,132 @@ fn a_new_child_joins_its_siblings_thread_and_the_flags_say_otherwise() {
     assert_eq!(sh.run(&format!("item add --title Fourth --parent {epic} --no-thread"), AGENT), 0);
     assert_eq!(sh.run("item add --title Both --thread x --no-thread", AGENT), 2, "contradiction");
     assert_eq!(sh.run("item add --title Both --claim --no-thread", AGENT), 2, "contradiction");
-    // `--claim` claims the item's thread in the add's own write, and an item in none has nothing to claim.
+    // `--claim` claims the item's thread in the add's own write, and an item in none claims its thread of one.
     let (code, out) = sh.output(&format!("item add --title Mine --thread {t2} --claim"), AGENT);
     assert_eq!(
         (code, &out["data"]["claim"]["thread"], &out["data"]["claim"]["claim"]["holder"]),
         (0, &json!(t2), &json!("session/mac")),
         "{out}"
     );
-    let before = sh.output("item list", AGENT).1["data"]["items"].as_array().unwrap().len();
     let (code, out) = sh.output("item add --title Loose --claim", AGENT);
-    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("no-thread")), "{out}");
-    let after = sh.output("item list", AGENT).1["data"]["items"].as_array().unwrap().len();
-    assert_eq!(before, after, "a refused claim leaves the add unwritten");
+    let loose = out["data"]["item"].as_str().unwrap_or_default().to_owned();
+    assert_eq!(
+        (code, &out["data"]["claim"]["thread"], &out["data"]["claim"]["claim"]["holder"]),
+        (0, &json!(format!("{loose}.one")), &json!("session/mac")),
+        "{out}"
+    );
+    let (_, shown) = sh.output(&format!("item show {loose}"), AGENT);
+    assert_eq!(
+        shown["data"][0]["thread"],
+        json!(format!("{loose}.one")),
+        "named on the task: {shown}"
+    );
+    assert_eq!(shown["data"][0]["claims"][0]["holder"], json!("session/mac"), "{shown}");
     // The first child of a threaded item takes its thread, and the emptied parent shows nothing of it.
     assert_eq!(sh.run(&format!("item add --id {} --title Leaf --thread {t1}", id("a9")), AGENT), 0);
     let (_, out) = sh.output(&format!("item add --title Kid --parent {}", id("a9")), AGENT);
     assert_eq!(out["data"]["placed"][0]["thread"], json!(t1), "{out}");
     let (_, shown) = sh.output(&format!("item show {}", id("a9")), AGENT);
     assert_eq!(shown["data"][0]["thread"], json!(null), "{shown}");
+}
+
+/// The wiring of a loose task as a thread of one: how it is named, what the rows say, and the claim's one write.
+#[test]
+fn a_loose_task_is_claimed_as_its_own_thread_by_title_or_id_and_its_thread_is_never_deleted() {
+    let mut sh = Shell::new();
+    let [x, y] = [id("a1"), id("a2")];
+    let [one_x, one_y] = [format!("{x}.one"), format!("{y}.one")];
+    sh.run("init tracker --replica mac", &[]);
+    for line in [
+        format!("item add --id {x} --title Alpha"),
+        format!("item add --id {y} --title Beta"),
+        format!("item add --id {} --title Twin", id("a3")),
+        format!("item add --id {} --title Twin", id("a4")),
+    ] {
+        assert_eq!(sh.run(&line, AGENT), 0, "{line}");
+    }
+    // Each loose task is a ready row of its own, shown as the task, with its id derived from the task's.
+    let (_, listed) = sh.output("thread list", AGENT);
+    let rows = listed["data"]["threads"].as_array().unwrap();
+    assert_eq!(rows.len(), 4, "one row per loose task: {listed}");
+    assert_eq!(
+        (
+            &rows[0]["id"],
+            &rows[0]["task"],
+            &rows[0]["title"],
+            &rows[0]["progress"]["counts"]["ready"]
+        ),
+        (&json!(one_x), &json!(x), &json!("Alpha"), &json!(1))
+    );
+    let (_, ready) = sh.output("thread ready", AGENT);
+    assert_eq!(ready["data"]["ready"].as_array().unwrap().len(), 4, "{ready}");
+    // An ambiguous title is refused, naming both tasks; the full id of either names it.
+    let (code, out) = sh.output("thread claim Twin", AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (2, Some("ambiguous")), "{out}");
+    assert_eq!(out["error"]["details"]["candidates"].as_array().unwrap().len(), 2);
+
+    // By title: the thread is made and claimed, and the task names it, in one commit.
+    let commits = |sh: &Shell| {
+        let out = std::process::Command::new("git")
+            .args([
+                "-C",
+                sh.path().join("tracker").to_str().unwrap(),
+                "rev-list",
+                "--all",
+                "--count",
+            ])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().parse::<u32>().unwrap()
+    };
+    // One write, as an add is: the same count of commits the tracker keeps for it.
+    let before = commits(&sh);
+    sh.run(&format!("item add --id {} --title Gamma", id("a5")), AGENT);
+    let ordinary = commits(&sh) - before;
+    let before = commits(&sh);
+    let (code, claimed) = sh.output("thread claim Alpha", AGENT);
+    assert_eq!(
+        (code, &claimed["data"]["thread"], &claimed["data"]["claim"]["holder"]),
+        (0, &json!(one_x), &json!("session/mac")),
+        "{claimed}"
+    );
+    assert_eq!(
+        commits(&sh) - before,
+        ordinary,
+        "the thread and the task's naming it are one write, as costly as any claim"
+    );
+    let (_, shown) = sh.output("item show Alpha", AGENT);
+    assert_eq!(shown["data"][0]["thread"], json!(one_x), "{shown}");
+    assert_eq!(shown["data"][0]["stage"], json!("in-progress"), "{shown}");
+    // By the task's full id, and renewing what it holds.
+    assert_eq!(sh.run(&format!("thread claim {y}"), AGENT), 0);
+    let pi = [("ACYCLIC_ACTOR", "session/pi")];
+    assert_eq!(sh.run("thread claim Alpha", &pi), 1, "another agent's claim");
+    // Graduated or not, the thread is the task's own and is never deleted.
+    let (code, out) = sh.output(&format!("thread delete {one_x}"), AGENT);
+    assert_eq!((code, out["error"]["code"].as_str()), (1, Some("in-use")), "{out}");
+    assert!(out["error"]["message"].as_str().unwrap().contains("task's own thread"), "{out}");
+    // Once claimed, the row is the same row, and the held thread is not ready to anyone else.
+    let (_, ready) = sh.output("thread ready", &pi);
+    assert_eq!(
+        ready["data"]["ready"].as_array().unwrap().len(),
+        3,
+        "only the Twins and Gamma: {ready}"
+    );
+    // The lifecycle: release, finish, and delete.
+    assert_eq!(sh.run("thread release Alpha", AGENT), 0);
+    assert_eq!(sh.run("item done Alpha", AGENT), 0, "a loose task needs no claim to finish");
+    assert_eq!(sh.run("item delete Beta", AGENT), 0, "its own claim goes with the task");
+    let (_, listed) = sh.output("thread list", AGENT);
+    let ids: Vec<&str> = listed["data"]["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert!(!ids.contains(&one_y.as_str()), "emptied and unheld: hidden: {ids:?}");
+    let (_, needs) = sh.output("needs", AGENT);
+    assert_eq!(needs["data"]["needs"], json!([]), "nothing asks for a thread: {needs}");
 }
 
 #[test]

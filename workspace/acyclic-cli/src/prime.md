@@ -110,7 +110,9 @@ waits-for and thread it belongs with.
 
 1. `acyclic thread ready` lists the threads you may work: yours first, then those nobody holds, each group by id in
    natural order (`t2` before `t10`). Each row is the thread's summary with its ready `items`, by id too. An item in no
-   thread is never ready, and `acyclic needs` lists it as `unthreaded`. `acyclic item list` lists every item.
+   thread is a thread of one: it is ready and claimed as its own thread, which `acyclic thread claim <item>` makes,
+   by the item's id or title, and a row shows it with `task` set to the item's id and the item's title. Its thread's
+   id is the item's id and `.one`. `acyclic item list` lists every item.
    `acyclic item show <item>...` explains items, as an array in the order given: their readiness, children and their
    thread's claims.
 2. `acyclic thread claim <thread>` before starting. A claim holds a time lease (60 minutes by default,
@@ -137,15 +139,17 @@ waits-for and thread it belongs with.
    item needs another, make it wait for that one. `thread list` also puts the threads with work left in `waves`, first
    to last, each after the threads its work waits on (a row's `waits_for`), with those that wait on none and that none
    waits on under `anytime`.
-5. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with `acyclic item edit
-   --thread`, and give each a title and notes. A new child joins the thread its siblings share, finished ones included,
-   and none above it; an add or an import reports it as `placed`. When its siblings differ or some are in none, `item
-   add` is refused (`thread-unclear`) unless it gets `--thread` or `--no-thread`, and an import unless the new item
-   names its thread; an explicit `--thread` always wins, and `item add --claim` claims the item's thread in the same
-   write. A move never changes a thread. An item's first child takes its thread, or, when the child is moved in or given
-   its own thread, the parent's is dropped; a thread on an item with children is ignored, and `acyclic needs` lists it
-   as `thread-on-parent`, and a thread with no item as `empty-thread`. Threads whose work waits on each other can't all
-   finish: `acyclic needs` lists them as a `thread-cycle`, and a waits-for or a member should move.
+5. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with
+   `acyclic item edit --thread`, and give each a title and notes. A new child joins the thread its siblings share,
+   finished ones included, and none above it; an add or an import reports it as `placed`. When its siblings differ or
+   some are in none, `item add` is refused (`thread-unclear`) unless it gets `--thread` or `--no-thread`, and an import
+   unless the new item names its thread; an explicit `--thread` always wins, and `item add --claim` claims the item's
+   thread in the same write; for an item in no thread, that is its own thread of one. A move never changes a thread. An
+   item's first child takes its thread, or, when the child is moved in or given its own thread, the parent's is dropped;
+   a thread on an item with children is ignored, and `acyclic needs` lists it as `thread-on-parent`, and a thread with
+   no item as `empty-thread`. A task's own thread of one is never deleted: it goes from the list once nothing is in it
+   and no one holds it. Threads whose work waits on each other can't all finish: `acyclic needs` lists them as a
+   `thread-cycle`, and a waits-for or a member should move.
 6. `acyclic sync` exchanges work with the tracker's shared repository (`origin`): it fetches every replica's state,
    joins it, and pushes yours; `changed` says whether joining changed this clone and `pushed` counts the refs sent. Run
    it before reading what another machine wrote and after writing what one should see. With

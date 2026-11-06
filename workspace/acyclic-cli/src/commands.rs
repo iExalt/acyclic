@@ -624,13 +624,13 @@ impl<'a> CommandContext<'a> {
     fn threads(&self) -> Result<Json, CliError> {
         self.with_view(|view| {
             let waves = view.readiness.waves()?;
-            let mut rows = view::thread_rows(view.model);
             let members = thread_members(view.model);
+            let mut rows = view.thread_rows(&members)?;
             for row in &mut rows {
                 let id = row["id"].as_str().unwrap_or_default().to_owned();
                 row["waits_for"] = json!(waves.waits_for.get(&id).cloned().unwrap_or_default());
                 row["progress"] =
-                    view.thread_progress(members.get(id.as_str()).map_or(&[][..], Vec::as_slice))?;
+                    view.thread_progress(members.get(&id).map_or(&[][..], Vec::as_slice))?;
             }
             Ok(json!({"threads": rows, "waves": waves.waves, "anytime": waves.anytime}))
         })
@@ -643,7 +643,7 @@ impl<'a> CommandContext<'a> {
             let mut shown = Vec::with_capacity(ids.len());
             for reference in ids {
                 let id = records.thread(reference)?;
-                shown.push(view.thread(&id, &known[id.as_str()])?);
+                shown.push(view.thread(&id, &known[&id])?);
             }
             Ok(Json::Array(shown))
         })
@@ -766,25 +766,22 @@ impl<'a> CommandContext<'a> {
 }
 
 /// Claims the thread an item just added is in, as `item add --claim` does in the add's own write. An item in no
-/// thread has none to claim.
+/// thread is its own thread of one, which the claim makes.
 fn claim_thread_of(
     replica: &mut Replica,
     by: By<'_>,
     item: &str,
     after: &Model,
 ) -> Result<Json, CliError> {
-    let Some(thread) = after.thread_of(item) else {
+    let Some(thread) = after.held_thread(item) else {
         return Err(CliError::refused(
             "no-thread",
-            format!(
-                "item {item} is in no thread, so there is none to claim: give it one with --thread, or leave out \
-                 --claim"
-            ),
+            format!("item {item} is finished, so it has no thread to claim: leave out --claim"),
         )
         .with(json!({"item": item})));
     };
-    claim_thread(replica, by, thread, LEASE, true)?;
-    let held = claim::winner(replica.state(), &claim::thread_key(thread)?, by.at)?;
+    claim_thread(replica, by, &thread, LEASE, true)?;
+    let held = claim::winner(replica.state(), &claim::thread_key(&thread)?, by.at)?;
     Ok(json!({"thread": thread, "claim": held.as_ref().map(view::claim_json)}))
 }
 
@@ -1060,10 +1057,10 @@ pub(crate) struct Member<'a> {
 
 /// Every thread by id with its members in the order its blocks links run them: ties by id, and members on a cycle
 /// last. An item raced into two threads is in both; a thread with no record has no row, as the item's reference
-/// dangles.
-pub(crate) fn thread_members(model: &Model) -> BTreeMap<&str, Vec<Member<'_>>> {
-    let mut threads: BTreeMap<&str, Vec<Member<'_>>> =
-        model.threads.keys().map(|id| (id.as_str(), Vec::new())).collect();
+/// dangles. A loose task is the one member of its thread of one.
+pub(crate) fn thread_members(model: &Model) -> BTreeMap<String, Vec<Member<'_>>> {
+    let mut threads: BTreeMap<String, Vec<Member<'_>>> =
+        model.all_threads().into_iter().map(|id| (id, Vec::new())).collect();
     for item in model.items.values() {
         let named = model.thread_value(item).all();
         for thread in &named {
@@ -1073,6 +1070,13 @@ pub(crate) fn thread_members(model: &Model) -> BTreeMap<&str, Vec<Member<'_>>> {
                     conflict: model.thread_value(item).is_conflict(),
                 });
             }
+        }
+        // In none, or in a thread with no record: its own thread of one.
+        if model.is_loose(&item.id)
+            && let Some(members) = threads.get_mut(&acyclic_core::ids::one(&item.id))
+            && members.iter().all(|member| member.item != item.id)
+        {
+            members.push(Member { item: &item.id, conflict: false });
         }
     }
     // Each thread's blocks links among its own members, gathered in one pass rather than once per thread.
@@ -1087,7 +1091,7 @@ pub(crate) fn thread_members(model: &Model) -> BTreeMap<&str, Vec<Member<'_>>> {
         }
     }
     for (thread, members) in &mut threads {
-        let among = links.get(thread).map_or(&[][..], Vec::as_slice);
+        let among = links.get(thread.as_str()).map_or(&[][..], Vec::as_slice);
         let order = run_order(members.iter().map(|m| m.item).collect(), among);
         members.sort_by_key(|m| order[m.item]);
     }
@@ -1139,8 +1143,8 @@ pub(crate) fn shell_word(word: &str) -> String {
     }
 }
 
-/// The thread a reference names, and its key, when the thread has a record; naming an item in a thread says which
-/// thread was meant.
+/// The thread a reference names, and its key, when the thread exists, which a loose task's thread of one does before it
+/// has a record; naming an item in a thread says which thread was meant.
 pub(crate) fn existing_thread(
     replica: &Replica,
     reference: &str,
@@ -1148,7 +1152,7 @@ pub(crate) fn existing_thread(
     let model = Model::read(replica.state())?;
     let records = Records::of(&model);
     match records.thread(reference) {
-        Ok(id) if model.threads.contains_key(&id) => {
+        Ok(id) if model.thread_exists(&id) => {
             let key = claim::thread_key(&id)?;
             Ok((id, key))
         },

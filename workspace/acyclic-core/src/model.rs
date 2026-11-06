@@ -308,7 +308,28 @@ impl Model {
             model.note_conflicts(key, entity);
         }
         model.links.sort();
+        model.name_threads_of_one();
         Ok(model)
+    }
+
+    /// Gives a loose task's thread of one a record while its task names it, though it holds no field: releasing the
+    /// only claim on one takes its stored record with it, and the task still belongs to its thread.
+    fn name_threads_of_one(&mut self) {
+        let named: Vec<String> = self
+            .items
+            .values()
+            .flat_map(|item| item.thread.all())
+            .filter(|thread| {
+                !self.threads.contains_key(thread.as_str())
+                    && crate::ids::task_of_one(thread)
+                        .is_some_and(|task| self.items.contains_key(task))
+            })
+            .cloned()
+            .collect();
+        for id in named {
+            let thread = Thread { id: id.clone(), title: Value::None, notes: Value::None };
+            self.threads.insert(id, thread);
+        }
     }
 
     /// Reads the model, leaving out every entity that can't be read and listing it with why, so a diagnosis can
@@ -329,6 +350,7 @@ impl Model {
         }
         model.links.sort();
         model.links.dedup();
+        model.name_threads_of_one();
         (model, unreadable)
     }
 
@@ -593,6 +615,69 @@ impl Model {
             .filter(|item| self.thread_value(item).one().is_some_and(|t| t == thread))
             .map(|item| item.id.as_str())
             .collect()
+    }
+
+    /// Whether an item is a loose task: an open leaf in no thread, or in one with no record, whose thread of one is
+    /// therefore its own. A leaf whose thread is in conflict is left to the conflict.
+    #[must_use]
+    pub fn is_loose(&self, id: &str) -> bool {
+        let Some(item) = self.items.get(id) else { return false };
+        self.children(id).is_empty()
+            && !item.is_finished()
+            && !item.thread.is_conflict()
+            && item.thread.one().is_none_or(|thread| !self.threads.contains_key(thread))
+    }
+
+    /// The thread an item works in: the one it names when that has a record, else the thread of one derived from it
+    /// when it is a loose task. A finished item with no thread record is in none.
+    #[must_use]
+    pub fn held_thread(&self, id: &str) -> Option<std::borrow::Cow<'_, str>> {
+        use std::borrow::Cow;
+        match self.thread_of(id).filter(|thread| self.threads.contains_key(*thread)) {
+            Some(thread) => Some(Cow::Borrowed(thread)),
+            None => self.is_loose(id).then(|| Cow::Owned(crate::ids::one(id))),
+        }
+    }
+
+    /// The task whose thread of one `thread` is, when it is one and the task exists.
+    #[must_use]
+    pub fn task_of(&self, thread: &str) -> Option<&str> {
+        let task = crate::ids::task_of_one(thread)?;
+        self.items.get_key_value(task).map(|(id, _)| id.as_str())
+    }
+
+    /// Whether a thread exists: it has a record, or it is a loose task's thread of one, which needs none until it is
+    /// claimed.
+    #[must_use]
+    pub fn thread_exists(&self, thread: &str) -> bool {
+        self.threads.contains_key(thread)
+            || crate::ids::task_of_one(thread).is_some_and(|task| self.is_loose(task))
+    }
+
+    /// Every thread: those with a record, and the thread of one of each loose task, by id.
+    #[must_use]
+    pub fn all_threads(&self) -> BTreeSet<String> {
+        let loose = self.items.keys().filter(|id| self.is_loose(id)).map(|id| crate::ids::one(id));
+        self.threads.keys().cloned().chain(loose).collect()
+    }
+
+    /// Whether `thread` is a thread of one that no item names, such as one whose members moved out: it is hidden, and
+    /// whatever title it kept when it graduated stays free for others to take.
+    #[must_use]
+    pub fn is_emptied_one(&self, thread: &str) -> bool {
+        crate::ids::task_of_one(thread).is_some()
+            && !self.items.values().any(|item| {
+                self.thread_value(item).all().iter().any(|named| named.as_str() == thread)
+            })
+    }
+
+    /// The task a thread's row shows in place of a title: `thread` is a thread of one with no stored title, or an
+    /// emptied one whose title is free, and its task exists.
+    #[must_use]
+    pub fn shown_as_task(&self, thread: &str) -> Option<&str> {
+        let task = self.task_of(thread)?;
+        let titled = self.threads.get(thread).is_some_and(|record| record.title != Value::None);
+        (!titled || self.is_emptied_one(thread)).then_some(task)
     }
 
     /// The thread an item belongs to, when it is in exactly one.
@@ -880,9 +965,14 @@ fixture! {
     }
 }
 
-/// Whether an item has been deleted: its tombstone is set, and nothing clears it.
+/// Whether an item or thread has been deleted: its tombstone is set, and nothing clears it. The one exception is a
+/// loose task's thread of one: an older version, which let it be deleted, may have written a tombstone, and honouring
+/// it would leave the task unclaimable for good, so it is ignored.
 #[must_use]
 pub fn is_deleted(state: &State, key: &Key) -> bool {
+    if key.kind == kind::THREAD && crate::ids::task_of_one(&key.id).is_some() {
+        return false;
+    }
     state
         .field(key, field::DELETED)
         .is_some_and(|register| register.values().any(|v| v.value == Json::Bool(true)))

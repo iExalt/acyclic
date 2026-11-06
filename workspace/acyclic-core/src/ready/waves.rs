@@ -25,7 +25,7 @@ pub struct Waves {
 }
 
 /// The threads with work left, and each wait between two of them, as (waited on, waiting).
-type ThreadWaits<'m> = (BTreeSet<&'m str>, Vec<(&'m str, &'m str)>);
+type ThreadWaits = (BTreeSet<String>, Vec<(String, String)>);
 
 impl ReadinessEvaluator<'_> {
     /// The threads with work left, in waves.
@@ -35,23 +35,18 @@ impl ReadinessEvaluator<'_> {
     /// Fails when a claim can't be read.
     pub fn waves(&self) -> Result<Waves, Error> {
         let (left, edges) = self.thread_waits()?;
-        let mut nodes: Vec<&str> = left.iter().copied().collect();
+        let mut nodes: Vec<String> = left.into_iter().collect();
         nodes.sort_by(|a, b| natural::cmp(a, b));
         let mut waits_for: BTreeMap<String, Vec<String>> =
-            nodes.iter().map(|&thread| (thread.to_owned(), Vec::new())).collect();
-        for &(from, to) in &edges {
-            waits_for.entry(to.to_owned()).or_default().push(from.to_owned());
+            nodes.iter().map(|thread| (thread.clone(), Vec::new())).collect();
+        for (from, to) in &edges {
+            waits_for.entry(to.clone()).or_default().push(from.clone());
         }
         for list in waits_for.values_mut() {
             list.sort_by(|a, b| natural::cmp(a, b));
         }
         let (waves, anytime) = graph::waves(&nodes, &edges);
-        let owned = |ids: Vec<&str>| ids.into_iter().map(str::to_owned).collect::<Vec<_>>();
-        Ok(Waves {
-            waves: waves.into_iter().map(owned).collect(),
-            anytime: owned(anytime),
-            waits_for,
-        })
+        Ok(Waves { waves, anytime, waits_for })
     }
 
     /// The threads that wait on each other, one set per cycle, as the waves read waits: work in them can't all finish
@@ -62,25 +57,22 @@ impl ReadinessEvaluator<'_> {
     /// Fails when a claim can't be read.
     pub fn thread_cycles(&self) -> Result<Vec<BTreeSet<String>>, Error> {
         let (_, edges) = self.thread_waits()?;
-        Ok(graph::cycles(&edges)
-            .into_iter()
-            .map(|cycle| cycle.into_iter().map(str::to_owned).collect())
-            .collect())
+        Ok(graph::cycles(&edges).into_iter().map(|cycle| cycle.into_iter().collect()).collect())
     }
 
     /// The threads with work left, and each wait between two of them.
-    fn thread_waits(&self) -> Result<ThreadWaits<'_>, Error> {
+    fn thread_waits(&self) -> Result<ThreadWaits, Error> {
         let model = self.model;
-        let mut left: BTreeSet<&str> = BTreeSet::new();
-        let mut edges: BTreeSet<(&str, &str)> = BTreeSet::new();
+        let mut left: BTreeSet<String> = BTreeSet::new();
+        let mut edges: BTreeSet<(String, String)> = BTreeSet::new();
         // Many leaves wait on one dependency, such as all those under a parent with a link: each is walked once.
-        let mut under: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
+        let mut under: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for (id, item) in &model.items {
             let Some(thread) = self.recorded_thread(id) else { continue };
             if !self.has_work_left(id)? {
                 continue;
             }
-            left.insert(thread);
+            left.insert(thread.clone());
             // Finished work waits on nothing, and parked work waits for the user, not for other threads.
             if item.is_finished() || self.stage(id)? == Some(Stage::Parked) {
                 continue;
@@ -90,9 +82,9 @@ impl ReadinessEvaluator<'_> {
                     let found = self.unfinished_under(&dependency)?;
                     under.insert(dependency.clone(), found);
                 }
-                for &blocker in &under[&dependency] {
-                    if blocker != thread {
-                        edges.insert((blocker, thread));
+                for blocker in &under[&dependency] {
+                    if *blocker != thread {
+                        edges.insert((blocker.clone(), thread.clone()));
                     }
                 }
             }
@@ -105,9 +97,9 @@ impl ReadinessEvaluator<'_> {
         Ok((left, edges))
     }
 
-    /// An item's thread, when the plan has a record of it.
-    fn recorded_thread(&self, id: &str) -> Option<&str> {
-        self.model.thread_of(id).filter(|thread| self.model.threads.contains_key(*thread))
+    /// An item's thread, when the plan has a record of it; a loose task is the one member of its thread of one.
+    fn recorded_thread(&self, id: &str) -> Option<String> {
+        self.model.held_thread(id).map(std::borrow::Cow::into_owned)
     }
 
     /// Whether `id` is a leaf with work left: any stage but done or canceled.
@@ -116,7 +108,7 @@ impl ReadinessEvaluator<'_> {
     }
 
     /// The threads of the unfinished leaves at or under `id`.
-    fn unfinished_under(&self, id: &str) -> Result<BTreeSet<&str>, Error> {
+    fn unfinished_under(&self, id: &str) -> Result<BTreeSet<String>, Error> {
         let mut found = BTreeSet::new();
         let mut seen = BTreeSet::new();
         let mut stack = vec![id];

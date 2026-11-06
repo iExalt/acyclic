@@ -16,6 +16,8 @@
 //! way, not done and with no evidence, and no live claim on its thread but the deleter's own.
 //!
 //! A thread is deleted the same way, by the same field, once no item is in it and no one holds a live claim on it.
+//! The exception is a loose task's thread of one, never deleted by hand: it is derived from its task, so a tombstone
+//! on it would leave the task unclaimable alone. Readers ignore a tombstone an older version wrote on one.
 
 use std::fmt;
 
@@ -51,6 +53,9 @@ pub enum Reason {
         /// The holder.
         holder: String,
     },
+    /// It is a loose task's thread of one, which stays: a tombstone on it would leave the task unclaimable alone.
+    /// Its task leaves it by being deleted, or by being moved into another thread.
+    TaskThread,
     /// Items are in the thread.
     HasMembers {
         /// The members.
@@ -69,6 +74,9 @@ impl fmt::Display for Reason {
                 write!(f, "it is done, or holds evidence of it, and finished work stays")
             },
             Self::Claimed { holder } => write!(f, "{holder} holds a claim on its thread"),
+            Self::TaskThread => {
+                write!(f, "it is a task's own thread, which goes when the task does")
+            },
             Self::HasMembers { members } => {
                 write!(f, "items are in it ({})", crate::say::list(members, ", "))
             },
@@ -180,6 +188,15 @@ pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, 
         return Err(DeleteError::InUse { item: id.to_owned(), reasons });
     }
     model::put(replica, &key, field::DELETED, Some(&true), by)?;
+    // The actor's own claim on the task's thread of one goes with it, unless others share that thread: the thread
+    // would stay held with nothing in it.
+    let one = crate::ids::one(id);
+    let alone = !model.items.values().any(|other| {
+        other.id != id && model.thread_value(other).all().iter().any(|named| **named == one)
+    });
+    if alone {
+        claim::release(replica, &claim::thread_key(&one)?, by.actor);
+    }
     Ok(true)
 }
 
@@ -192,6 +209,12 @@ pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, 
 /// layer refuses.
 pub fn delete_thread(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, DeleteError> {
     let key = claim::thread_key(id)?;
+    if crate::ids::task_of_one(id).is_some() {
+        return Err(DeleteError::ThreadInUse {
+            thread: id.to_owned(),
+            reasons: vec![Reason::TaskThread],
+        });
+    }
     if model::is_deleted(&replica.state, &key) {
         return Ok(false);
     }

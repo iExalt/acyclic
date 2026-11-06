@@ -36,13 +36,13 @@ interface RawItem {
 }
 
 /**
- * Where a leaf stands: core's eight stages, which tell every leaf apart. A parent takes one from its leaves, those
+ * Where a leaf stands: core's seven stages, which tell every leaf apart. A parent takes one from its leaves, those
  * canceled left out: done once all are; else in progress once work under it has started and some of what is left isn't
- * parked; else the first of stalled, ready, waiting, parked and needs a thread that its leaves have. One with nothing but
+ * parked; else the first of stalled, ready, waiting and parked that its leaves have. One with nothing but
  * canceled leaves, or canceled by hand, reads canceled.
  */
 
-export type Stage = "done" | "in-progress" | "ready" | "waiting" | "parked" | "unthreaded" | "canceled" | "stalled";
+export type Stage = "done" | "in-progress" | "ready" | "waiting" | "parked" | "canceled" | "stalled";
 
 /**
  * A parent's leaves: each under its stage, so the stages but `canceled` add up to `leaves`. A canceled leaf isn't one
@@ -56,7 +56,6 @@ export interface Counts {
   stalled: number;
   waiting: number;
   parked: number;
-  unthreaded: number;
   canceled: number;
 }
 
@@ -69,7 +68,6 @@ export const NO_COUNTS: Counts = {
   stalled: 0,
   waiting: 0,
   parked: 0,
-  unthreaded: 0,
   canceled: 0,
 };
 
@@ -80,7 +78,7 @@ export interface Progress {
 /** A parent's leaves by stage in words, in the order work moves through them, leaving out stages with none. */
 export function countsText(counts: Counts): string {
   return stageCounts(counts)
-    .map(({ stage, count }) => `${count} ${stageCountWords(stage, count)}`)
+    .map(({ stage, count }) => `${count} ${stageCountWords(stage)}`)
     .join(", ");
 }
 
@@ -239,7 +237,13 @@ export interface Threads {
 }
 
 interface RawThreads {
-  threads: { id: string; title: Raw<string>; waits_for: string[]; progress?: { counts: Counts } }[];
+  threads: {
+    id: string;
+    title: Raw<string>;
+    task?: string | null;
+    waits_for: string[];
+    progress?: { counts: Counts };
+  }[];
   waves: string[][];
   anytime: string[];
 }

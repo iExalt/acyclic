@@ -1067,6 +1067,45 @@ impl Judging<'_, '_> {
             .collect();
         self.start_open(&asked);
         self.place(&asked);
+        self.graduate();
+    }
+
+    /// A loose task's thread of one that a second item joins takes the task's title, which it has none of until then:
+    /// from then on it is a thread like any other. Written beside the join, so replicas that graduate it apart write
+    /// the same title and agree.
+    fn graduate(&mut self) {
+        let joined: Vec<(usize, String)> = self
+            .steps
+            .iter()
+            .filter_map(|step| match &step.write {
+                Written::Place(placed) => Some((step.change, placed.thread.clone())),
+                Written::Assign(Assign::Item(_, ItemAssign::Thread(Some(thread)))) => {
+                    Some((step.change, thread.clone()))
+                },
+                _ => None,
+            })
+            .collect();
+        let mut done = BTreeSet::new();
+        for (n, thread) in joined {
+            let Some(task) = crate::ids::task_of_one(&thread) else { continue };
+            let after = &self.after;
+            let untitled = after.threads.get(&thread).is_some_and(|t| t.title == Value::None);
+            let joined = after.items.values().any(|item| {
+                item.id != task && after.thread_value(item).one().is_some_and(|t| *t == thread)
+            });
+            let title = after.items.get(task).and_then(|item| item.title.one()).cloned();
+            if untitled
+                && joined
+                && let Some(title) = title
+                && done.insert(thread.clone())
+            {
+                self.apply(
+                    n,
+                    false,
+                    Written::Assign(Assign::Thread(thread, ThreadAssign::Title(title))),
+                );
+            }
+        }
     }
 
     fn start_open(&mut self, asked: &[(usize, Assign)]) {
@@ -1478,7 +1517,11 @@ fn taken_titles(after: &Model, changes: &ChangeSet, steps: &[Step]) -> Vec<Viola
                 after
                     .threads
                     .values()
-                    .find(|other| other.id != *id && other.title.all().contains(&title))
+                    .find(|other| {
+                        other.id != *id
+                            && other.title.all().contains(&title)
+                            && !after.is_emptied_one(&other.id)
+                    })
                     .map(|other| Record::Thread(other.id.clone()))
             },
             Record::Repository(_) => None,
