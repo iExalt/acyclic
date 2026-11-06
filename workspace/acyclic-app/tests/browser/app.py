@@ -4014,7 +4014,7 @@ def labels_journey(browser, link, ids, titles):
             assert ink["x1"] >= body["x1"] - 1 and ink["x2"] <= body["x2"] + 1, node
             assert ink["y1"] >= body["y1"] - 1 and ink["y2"] <= body["y2"] + 1, node
         root, long, ready = found["nodes"]
-        assert "Ready" in long["label"] and "Ready" in ready["label"], found
+        assert "Ready" not in long["label"] and "Ready" not in ready["label"], found
         assert "…" in long["label"], long
         assert abs(long["body"]["w"] - ready["body"]["w"]) < 0.5, found
         assert abs(long["body"]["h"] - ready["body"]["h"]) < 0.5, found

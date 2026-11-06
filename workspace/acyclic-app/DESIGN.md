@@ -168,7 +168,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
 
 - **Buttons, by tier:** `.primary` filled with the accent; secondary outlined; `.quiet` text-only; `.danger-quiet`
   red text, last in its group.
-- **Stage marks:** each stage's icon beside its word (`Stage.tsx`); counts always as text beside their icons, each count
+- **Stage marks:** each stage's icon beside its word (`Stage.tsx`), except on the Map, where the icon alone shows it;
+  counts always as text beside their icons, each count
   set apart by its icon rather than a comma, which only a screen reader reads; a Map box's line of counts, drawn as text
   on the canvas, which sets no icon inside a line, takes the commas. An item in no thread is a thread of one, so its
   stage reads like any other's (ready, or in progress once claimed); on the Map it carries a thread's stripe, the same
@@ -381,12 +382,11 @@ before what went wrong.
 ## The Map
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
-- **Map item marks:** the thread colour is the stripe on the left, with no dot beside it. The full title and stage word
-  sit between that stripe and the stage icon on the right, including on collapsed done and parked boxes. Stage words use
-  the canonical vocabulary: Done, In progress, Ready, Stalled, Waiting, Parked and Canceled. Canceled is a circle struck
-  through, in the quiet ink.
+- **Map item marks:** the thread colour is the stripe on the left, with no dot beside it. The title sits between
+  that stripe and the stage icon on the right, including on collapsed done and parked boxes. The icon shows the stage
+  without a repeated word below the title. Canceled is a circle struck through, in the quiet ink.
 - **A project tells where it stands.** An open box's chevron stays at the left and its stage icon at the right of the
-  first 52 px strip; its full title, stage word, counts, hidden count and done-box note wrap below or beside them as
+  first 52 px strip; its full title, counts, hidden count and done-box note wrap below or beside them as
   needed. Its header grows to fit, and the child content starts below it. The stage is the work's whole stage, as core
   tells it (done once all of it is; else in progress once work under it has started and some of what is left isn't
   parked; else stalled, else ready, else waiting, else parked; canceled leaves are left out, and a box with only those
@@ -468,8 +468,8 @@ before what went wrong.
 - **A pinch stops at the floor and keeps panning.** The furthest zoom out is the floor whichever way it is reached. Past
   it, a pinch holds the zoom there about the fingers' midpoint and still follows the fingers, where Cytoscape on its
   own drops each step that would pass it, pan and all, so the plan stuck short of the floor and then jumped.
-- **Map labels fit their words.** Tiles are 200 px wide and at least 64 px high; their full titles wrap without a line
-  cap or ellipsis, followed by the stage word when one applies. Box labels wrap the full title and any stage word,
+- **Map labels fit their words.** Tiles are 200 px wide and 86 px high; titles wrap to four lines, or two when a
+  wait outside the initiative takes room at the foot, with an ellipsis for overflow. Box labels wrap the full title,
   counts, hidden count or done-box note. An open box's header grows to fit those lines while its chevron and stage
   glyph stay in the first strip, keeping the fold target stable. Backticks, which set code in the panels, are dropped
   on the canvas. Tiles are drawn over every box, and a link across boxes between the two, so it never runs through a

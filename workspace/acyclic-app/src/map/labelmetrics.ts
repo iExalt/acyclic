@@ -2,7 +2,6 @@
 // rendered at another. Item titles are clamped to a common tile size; box headers grow with their content.
 
 import { countsText } from "../api";
-import { STAGE_WORDS } from "../stages";
 import { cut, type Measure } from "./fit";
 import { BOX_TEXT_LEFT, MARKS_LEFT, MARKS_RIGHT } from "./marks";
 import type { Kind, VisibleNode } from "./model";
@@ -61,13 +60,10 @@ export function metricsOf(
   const title = node.title.replace(/`([^`]+)`/g, "$1");
   const stub = node.kind === "box" ? null : stubOf(node.outside ?? [], width, fonts.regular);
   const reserve = stub === null ? 0 : STUB_ROOM;
-  const titleLines = Math.floor((ITEM_HEIGHT - reserve - 20) / LINE_HEIGHT) - (node.stage === null ? 0 : 1);
+  const titleLines = Math.floor((ITEM_HEIGHT - reserve - 20) / LINE_HEIGHT);
   const lines =
     node.kind === "leaf"
-      ? [
-          ...clampTitle(title, available, titleLines, fonts.regular),
-          ...(node.stage === null ? [] : [STAGE_WORDS[node.stage]]),
-        ]
+      ? clampTitle(title, available, titleLines, fonts.regular)
       : boxLines(node, title, available, fonts.bold);
   const header = node.kind === "leaf" ? 0 : Math.max(BASE_HEADER, Math.ceil(lines.length * LINE_HEIGHT + 16));
   return {
@@ -124,11 +120,8 @@ function boxLines(
     node.kind === "collapsed" && node.doneBox?.kind === "thread"
       ? wrap(title, width, measure)
       : wrap(title + hidden, width, measure);
-  const status = node.stage === null ? [] : [STAGE_WORDS[node.stage]];
-  if (node.note !== undefined) return [...named, ...status, ...wrap(node.note, width, measure)];
-  return node.progress === null
-    ? [...named, ...status]
-    : [...named, ...status, ...wrap(countsText(node.progress), width, measure)];
+  if (node.note !== undefined) return [...named, ...wrap(node.note, width, measure)];
+  return node.progress === null ? named : [...named, ...wrap(countsText(node.progress), width, measure)];
 }
 
 function wrap(text: string, width: number, measure: Measure): string[] {
