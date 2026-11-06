@@ -76,9 +76,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
-      - uses: ./.github/actions/build-archive
-        with:
-          target: aarch64-apple-darwin
+      - run: exit 1
 
   image:
     name: image ${{ matrix.arch }}
