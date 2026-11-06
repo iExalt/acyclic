@@ -427,22 +427,23 @@ def drag_pans(page, view, id):
     ) < 2 and not page.get_by_test_id("inspector").count(), moved
 
 
-def settled_corner(page, id):
-    """Where a box's top-left corner is drawn once it has stopped moving: the same for 300 ms of frames.
+def settled_map(page):
+    """The Map once it has settled: laid out, drawn, no camera intent pending or tile animating, the view held for two frames.
 
-    Read from the renderer itself, so it doesn't trust the app's own account of when it has finished drawing."""
+    The app says so itself, in data-settled, so the wait doesn't depend on how long a loaded machine takes."""
+    map = page.locator("[data-testid=map][data-settled=true]")
+    map.wait_for(timeout=10_000)
+    return map
+
+
+def settled_corner(page, id):
+    """Where a box's top-left corner is drawn once the Map has settled, read from the renderer itself."""
+    settled_map(page)
     return page.get_by_test_id("map").evaluate(
-        """(m, id) => new Promise((done) => {
-            let last = null, since = performance.now();
-            const read = () => {
-                const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });
-                const now = `${Math.round(b.x1)},${Math.round(b.y1)}`;
-                if (now !== last) { last = now; since = performance.now(); }
-                if (performance.now() - since >= 300) done({ x: b.x1, y: b.y1 });
-                else requestAnimationFrame(read);
-            };
-            read();
-        })""",
+        """(m, id) => {
+            const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });
+            return { x: b.x1, y: b.y1 };
+        }""",
         id,
     )
 
@@ -1593,6 +1594,7 @@ def cross_origin_journey(context, origin, env, name, failures):
 
 def first_view_readable(page, name, failures):
     """The Map opens at 1:1 or closer, with an item, not a box, wholly in view, title and all."""
+    settled_map(page)
     view = page.get_by_test_id("map").evaluate(
         "m => { const w = m.clientWidth, h = m.clientHeight; return { zoom: m.cy.zoom(),"
         " shown: m.cy.nodes().not('.box, .junction').some(n => { const b = n.renderedBoundingBox();"
