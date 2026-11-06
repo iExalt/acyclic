@@ -242,7 +242,7 @@ fn parents_named(doc: &Import, before: &Model) -> Result<(), ApplyError> {
 fn judged(doc: &Import, before: &Model, by: By<'_>) -> Result<Outcome, ApplyError> {
     parents_named(doc, before)?;
     write::judge(before, &changes(doc, before), by, None)
-        .map_err(|violations| refused(doc, &violations))
+        .map_err(|violations| refused(doc, before, &violations))
 }
 
 /// The document as one change set: each record's fields, then the lists it gives, removals before additions, then
@@ -352,10 +352,40 @@ fn list_changes(held: &BTreeSet<&String>, wanted: &[String], adding: bool) -> Ve
     }
 }
 
+/// An item's title as the import leaves it: the document's, else the tracker's.
+fn item_title(doc: &Import, before: &Model, id: &str) -> Option<String> {
+    doc.items
+        .iter()
+        .find(|item| item.id == id)
+        .map(|item| item.title.clone())
+        .or_else(|| before.items.get(id)?.title.one().cloned())
+}
+
+/// The title of the initiative an item is under once the document is applied, following parents the document sets
+/// before the tracker's; none for an item in no initiative.
+fn initiative_title(doc: &Import, before: &Model, id: &str) -> Option<String> {
+    let mut at = id.to_owned();
+    // A parent cycle is judged elsewhere; the walk is bounded by what is there.
+    for _ in 0..=doc.items.len() + before.items.len() {
+        if let Some(found) = doc.initiatives.iter().find(|initiative| initiative.id == at) {
+            return Some(found.title.clone());
+        }
+        if let Some(found) = before.initiatives.get(&at) {
+            return found.title.one().cloned();
+        }
+        let parent = match doc.items.iter().find(|item| item.id == at) {
+            Some(item) if item.parent.is_some() => item.parent.clone(),
+            _ => before.items.get(&at).and_then(|item| item.parent.one().cloned()),
+        };
+        at = parent?;
+    }
+    None
+}
+
 /// The judge's refusal in the import's own terms, one kind at a time as the import has always told them: a deleted
 /// record, then references to nothing and names taken, then evidence on open work, then cycles.
 #[expect(clippy::too_many_lines, reason = "one arm for each rule the import can break")]
-fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
+fn refused(doc: &Import, before: &Model, violations: &[Violation]) -> ApplyError {
     let mut deleted = None;
     let mut internal = false;
     let mut unknown = Vec::new();
@@ -386,6 +416,22 @@ fn refused(doc: &Import, violations: &[Violation]) -> ApplyError {
                     repository: id.to_owned(),
                     name,
                     other: other.clone(),
+                });
+            },
+            (Rule::TitleTaken(Record::Item(other)), Some(at)) => {
+                let item = at.record.id();
+                let title = item_title(doc, before, item).unwrap_or_default();
+                // Each side of a clash is reported by the other: one error names the pair.
+                let (first, second) = if item <= other.as_str() {
+                    (item, other.as_str())
+                } else {
+                    (other.as_str(), item)
+                };
+                taken.push(ValidationError::TitleTaken {
+                    item: first.to_owned(),
+                    other: second.to_owned(),
+                    title,
+                    initiative: initiative_title(doc, before, item),
                 });
             },
             (Rule::EvidenceNotDone, Some(at)) => {

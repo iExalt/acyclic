@@ -618,7 +618,7 @@
       "summary": "Lost 01900000-0000-7000-8000-0000000000aa: its parent gone doesn't exist"
     },
     {
-      "identity": "{\"entry\":\"duplicate-title\",\"items\":[\"01900000-0000-7000-8000-0000000000ab\",\"01900000-0000-7000-8000-0000000000ac\"]}",
+      "identity": "{\"entry\":\"duplicate-title\",\"items\":[\"01900000-0000-7000-8000-0000000000ab\",\"01900000-0000-7000-8000-0000000000ac\"],\"initiative\":\"01900000-0000-7000-8000-0000000000ff\"}",
       "items": [
         {
           "id": "01900000-0000-7000-8000-0000000000ab",
@@ -648,7 +648,7 @@
       "key": "duplicate-title:01900000-0000-7000-8000-0000000000ab:01900000-0000-7000-8000-0000000000ac",
       "kind": "duplicate-title",
       "notify": false,
-      "summary": "2 items in one initiative share the title Twin"
+      "summary": "2 items share the title Twin in Default"
     },
     {
       "fix": "acyclic item edit 01900000-0000-7000-8000-0000000000b1 --no-thread",

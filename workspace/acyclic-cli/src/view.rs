@@ -201,7 +201,7 @@ impl View<'_> {
                 Entry::Unpushed { remote } => json!({"kind": entry.kind(), "remote": remote}),
                 Entry::WaitsForCycle { items: ids }
                 | Entry::ParentCycle { items: ids }
-                | Entry::DuplicateTitle { items: ids } => {
+                | Entry::DuplicateTitle { items: ids, .. } => {
                     json!({"kind": entry.kind(), "items": items(ids)?})
                 },
                 Entry::ThreadCycle { threads } => json!({

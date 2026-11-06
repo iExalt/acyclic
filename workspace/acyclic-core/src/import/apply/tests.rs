@@ -375,7 +375,7 @@ fn an_unmapped_refusal_is_internal_even_with_mapped_violations() {
             rule: Rule::EmptyRecord(Record::Repository("r".into())),
         },
     ];
-    let error = refused(&Import::new(), &violations);
+    let error = refused(&Import::new(), &Model::default(), &violations);
     assert_eq!(error, ApplyError::Internal(violations.clone()));
     for violation in violations {
         assert!(error.to_string().contains(&violation.to_string()));
@@ -489,4 +489,60 @@ fn an_import_that_gives_an_item_and_an_initiative_one_id_is_refused_against_the_
         panic!("an initiative taking an item's id accepted")
     };
     assert_eq!(errors, [ValidationError::SharedId(id(10))]);
+}
+
+#[test]
+fn a_title_clash_is_an_invalid_import_naming_the_plan_titles_and_the_initiative() {
+    let titled = |n: u8, title: &str, parent: u8| {
+        let mut one = item(n, None, Some(parent));
+        one.title = title.into();
+        one
+    };
+    let clash = |a: u8, b: u8, title: &str, initiative: Option<&str>| ValidationError::TitleTaken {
+        item: id(a),
+        other: id(b),
+        title: title.into(),
+        initiative: initiative.map(Into::into),
+    };
+    // A plan that clashes with itself, named once, in either order of its items.
+    let mut r = replica();
+    let mut doc = Import::new();
+    doc.initiatives =
+        vec![crate::import::Initiative { id: id(9), title: "Garden".into(), notes: None }];
+    doc.items = vec![titled(21, "Sow", 9), titled(20, "Sow", 9)];
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 1)) else {
+        panic!("a plan that clashes with itself accepted")
+    };
+    assert_eq!(errors, [clash(20, 21, "Sow", Some("Garden"))]);
+    assert!(model(&r).items.is_empty(), "nothing is written");
+    // A dry run says the same.
+    let Err(ApplyError::Invalid(previewed)) = preview(&doc, &r, by(USER, 1)) else {
+        panic!("a dry run accepted it")
+    };
+    assert_eq!(previewed, errors);
+
+    // A plan that clashes with an item the tracker holds, whether it adds or renames one.
+    let mut r = replica();
+    doc.items = vec![titled(20, "Sow", 9)];
+    apply(&doc, &mut r, by(USER, 2)).unwrap();
+    doc.items = vec![titled(22, "Sow", 9)];
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 3)) else {
+        panic!("a plan that clashes with the tracker accepted")
+    };
+    assert_eq!(errors, [clash(20, 22, "Sow", Some("Garden"))]);
+    doc.items = vec![titled(23, "Reap", 9)];
+    apply(&doc, &mut r, by(USER, 4)).unwrap();
+    doc.items = vec![titled(23, "Sow", 9)];
+    let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 4)) else {
+        panic!("a rename onto the tracker's title accepted")
+    };
+    assert_eq!(errors, [clash(20, 23, "Sow", Some("Garden"))]);
+    // The same title in another initiative is no clash.
+    doc.initiatives.push(crate::import::Initiative {
+        id: id(8),
+        title: "Orchard".into(),
+        notes: None,
+    });
+    doc.items = vec![titled(24, "Sow", 8)];
+    apply(&doc, &mut r, by(USER, 5)).unwrap();
 }

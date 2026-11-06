@@ -1689,6 +1689,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add --title Plum --parent Orchard
       "candidates": [
         {
           "id": "01900000-0000-7000-8000-0000000000b3",
+          "initiative": {
+            "id": "01900000-0000-7000-8000-0000000000b0",
+            "title": "Garden"
+          },
           "title": "Orchard"
         },
         {
@@ -1697,7 +1701,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add --title Plum --parent Orchard
         }
       ]
     },
-    "message": "\"Orchard\" is the title of 2 items or initiatives: 01900000-0000-7000-8000-0000000000b3 (Orchard), 01900000-0000-7000-8000-0000000000b1 (Orchard); name one by its full id or a longer ending"
+    "message": "\"Orchard\" is the title of 2 items or initiatives: 01900000-0000-7000-8000-0000000000b3 (Orchard, in Garden), 01900000-0000-7000-8000-0000000000b1 (Orchard); name one by its full id or a longer ending"
   },
   "ok": false
 }

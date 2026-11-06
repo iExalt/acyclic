@@ -558,7 +558,8 @@ impl Model {
     }
 
     /// Items holding the same title within one initiative, in groups of two or more, sorted. Items in no initiative are
-    /// one scope. An item whose conflicted parent leads to several initiatives is its own scope, apart from any in one.
+    /// one scope. An item whose conflicted parent leads to several initiatives is its own scope, apart from any in one: its conflict
+    /// is already on the needs-you list, so a title it shares is left to that.
     #[must_use]
     pub fn duplicate_titles(&self) -> Vec<Vec<&str>> {
         let mut scopes: BTreeMap<(Vec<&str>, &str), Vec<&str>> = BTreeMap::new();

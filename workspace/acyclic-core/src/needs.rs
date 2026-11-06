@@ -115,6 +115,9 @@ pub enum Entry {
     DuplicateTitle {
         /// The items, sorted.
         items: Vec<String>,
+        /// The initiative they are in, or none when they are in no initiative.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        initiative: Option<String>,
     },
     /// A thread stored on an item that has children, as a sync or `item edit --thread` on a parent can leave one:
     /// reads ignore it, so the user decides whether to clear it.
@@ -147,7 +150,7 @@ impl Entry {
             Self::Unpushed { remote } => vec![kind, remote],
             Self::WaitsForCycle { items }
             | Self::ParentCycle { items }
-            | Self::DuplicateTitle { items } => {
+            | Self::DuplicateTitle { items, initiative: _ } => {
                 std::iter::once(kind).chain(items.iter().map(String::as_str)).collect()
             },
             Self::ThreadCycle { threads } => {
@@ -245,10 +248,11 @@ impl Entry {
             Self::ParentMissing { item, parent: Some(parent) } => {
                 format!("{}: its parent {parent} doesn't exist", name(item))
             },
-            Self::DuplicateTitle { items } => format!(
-                "{} items in one initiative share the title {}",
+            Self::DuplicateTitle { items, initiative } => format!(
+                "{} items share the title {} in {}",
                 items.len(),
-                items.first().map_or_else(String::new, |first| name(first))
+                items.first().map_or_else(String::new, |first| name(first)),
+                initiative.as_ref().map_or_else(|| "no initiative".to_owned(), |id| name(id))
             ),
             Self::ThreadOnParent { item, thread, fix: _ } => {
                 format!("{} has children, so its thread {} is ignored", name(item), name(thread))
@@ -326,8 +330,12 @@ pub fn needs_you(
     dangling(model, &mut entries);
     parent_missing(model, &mut entries);
     for items in model.duplicate_titles() {
+        let initiative = items
+            .first()
+            .and_then(|first| model.initiatives_of(first).first().map(|id| (*id).to_owned()));
         entries.insert(Entry::DuplicateTitle {
             items: items.into_iter().map(str::to_owned).collect(),
+            initiative,
         });
     }
     thread_membership(state, model, now, &mut entries)?;

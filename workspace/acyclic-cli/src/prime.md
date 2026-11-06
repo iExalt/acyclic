@@ -74,8 +74,10 @@ prints N of them and needs no tracker, and pass each as `--id`; any other id is 
 title, most likely from an earlier try; the error's details give its id. Titles are how people find work, so two
 unfinished items in one initiative never share one: adding, renaming, moving, reopening and un-canceling all refuse a
 duplicate. Finishing a leaf frees its title, but a parent keeps its name even when all its leaves are done. The same
-title in two initiatives is allowed, and a reference to it is `ambiguous`, listing each; one shared by unfinished and
-finished work names the unfinished. Replicas that made one title apart leave a `duplicate-title` on `acyclic needs`.
+title in two initiatives is allowed, and a reference to it is `ambiguous`, listing each candidate with its initiative
+(`Dup, in One`; in the details, `initiative` is `{id, title}`, or null in no initiative); one shared by unfinished and
+finished work names the unfinished. An import that would clash is refused as `invalid-import`, naming both items, the
+title and the initiative. Replicas that made one title apart leave a `duplicate-title` on `acyclic needs`.
 Never put counters in titles.
 
 `acyclic item` also has `reopen` and `delete`; `delete` refuses an item with children, anything it waits

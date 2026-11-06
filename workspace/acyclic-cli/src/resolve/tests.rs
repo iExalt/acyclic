@@ -4,6 +4,8 @@ use acyclic_core::schema::{kind, repository};
 use acyclic_core::scope::USER;
 use acyclic_core::state::{Key, Replica, ReplicaId, State};
 
+use serde_json::json;
+
 use super::*;
 
 const BY: By<'static> = By { actor: USER, at: 1 };
@@ -88,6 +90,14 @@ fn what_names_several_records_or_too_little_is_refused_with_the_candidates() {
         assert_eq!(
             (shared.code, candidates(&shared)),
             ("ambiguous", vec![id("a3").as_str(), id("a4").as_str()])
+        );
+        // Each says which initiative it is in, in the details and the message; none for the no-initiative bucket.
+        let place = |n: usize| shared.details["candidates"][n]["initiative"].clone();
+        assert_eq!(place(0), json!({"id": id("d1"), "title": "North or south"}));
+        assert!(
+            shared.message.contains(&format!("{} (Sow, in North or south)", id("a3"))),
+            "{}",
+            shared.message
         );
         // Unfinished work and a finished leaf with one title: the unfinished work is meant.
         assert_eq!(records.item("Plant").unwrap(), id("a1"));
@@ -187,4 +197,16 @@ fn a_removal_finds_an_element_among_those_held_first() {
 
 fn held_one(list: &[String], reference: &str) -> Option<String> {
     held(list, reference)
+}
+
+#[test]
+fn two_items_in_no_initiative_read_as_such_and_their_candidates_carry_a_null_initiative() {
+    let mut r = Replica::open(ReplicaId::new("mac").unwrap(), State::new());
+    for tail in ["a1", "a2"] {
+        add_item(&mut r, &id(tail), "Dup", BY).unwrap();
+    }
+    let model = Model::read(r.state()).unwrap();
+    let error = Records::of(&model).item("Dup").unwrap_err();
+    assert_eq!(error.details["candidates"][0]["initiative"], json!(null));
+    assert!(error.message.contains("(Dup, in no initiative)"), "{}", error.message);
 }

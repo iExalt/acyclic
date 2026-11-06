@@ -653,6 +653,16 @@ fn a_loose_task_is_claimed_as_its_own_thread_by_title_or_id_and_its_thread_is_ne
     let (code, out) = sh.output("thread claim Twin", AGENT);
     assert_eq!((code, out["error"]["code"].as_str()), (2, Some("ambiguous")), "{out}");
     assert_eq!(out["error"]["details"]["candidates"].as_array().unwrap().len(), 2);
+    // An item's own refusal tells the two apart by initiative, in the details and the message.
+    let (code, out) = sh.output("item show Twin", AGENT);
+    let initiatives: Vec<&serde_json::Value> = out["error"]["details"]["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| &c["initiative"]["title"])
+        .collect();
+    assert_eq!((code, initiatives), (2, vec![&json!("Default"), &json!("Elsewhere")]), "{out}");
+    assert!(out["error"]["message"].as_str().unwrap().contains("(Twin, in Elsewhere)"), "{out}");
 
     // By title: the thread is made and claimed, and the task names it, in one commit.
     let commits = |sh: &Shell| {

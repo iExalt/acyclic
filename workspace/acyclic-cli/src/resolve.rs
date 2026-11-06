@@ -48,6 +48,19 @@ struct Candidate {
     /// Whether its names are held against others': false for a finished leaf, whose title is free to take again, so a
     /// title that it and unfinished work share names the unfinished work.
     holds: bool,
+    /// Which initiative an item is in, which tells candidates of one title apart.
+    place: Place,
+}
+
+/// Where a candidate sits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Place {
+    /// Not an item: an initiative, a thread or a repository.
+    Elsewhere,
+    /// An item in no initiative.
+    NoInitiative,
+    /// An item in this initiative, by id and title.
+    In(String, String),
 }
 
 /// The kind of record an argument names.
@@ -112,6 +125,11 @@ impl<'a> Records<'a> {
                 names: item.title.all().into_iter().cloned().collect(),
                 task: None,
                 holds: model.holds_title(&item.id),
+                place: model.initiative_of(&item.id).map_or(Place::NoInitiative, |id| {
+                    let title =
+                        model.initiatives.get(id).and_then(|i| i.title.all().first().copied());
+                    Place::In(id.to_owned(), title.map_or_else(|| id.to_owned(), Clone::clone))
+                }),
             })
             .collect();
         let initiatives = model
@@ -122,6 +140,7 @@ impl<'a> Records<'a> {
                 names: initiative.title.all().into_iter().cloned().collect(),
                 task: None,
                 holds: true,
+                place: Place::Elsewhere,
             })
             .collect();
         let repositories = model
@@ -132,6 +151,7 @@ impl<'a> Records<'a> {
                 names: repository_name(record).into_iter().collect(),
                 task: None,
                 holds: true,
+                place: Place::Elsewhere,
             })
             .collect();
         Self {
@@ -165,7 +185,13 @@ impl<'a> Records<'a> {
                                 thread.title.all().into_iter().cloned().collect()
                             }),
                         };
-                    Candidate { task: task.map(str::to_owned), id, names, holds: true }
+                    Candidate {
+                        task: task.map(str::to_owned),
+                        id,
+                        names,
+                        holds: true,
+                        place: Place::Elsewhere,
+                    }
                 })
                 .collect()
         })
@@ -351,18 +377,38 @@ fn name_word(kind: Kind) -> &'static str {
 }
 
 fn details(kind: Kind, candidates: &[&Candidate]) -> Json {
-    let listed: Vec<Json> =
-        candidates.iter().map(|c| json!({"id": c.id, kind.name_key(): c.names.first()})).collect();
+    let listed: Vec<Json> = candidates
+        .iter()
+        .map(|c| {
+            let mut shown = json!({"id": c.id, kind.name_key(): c.names.first()});
+            match &c.place {
+                Place::Elsewhere => {},
+                Place::NoInitiative => shown["initiative"] = Json::Null,
+                Place::In(id, title) => shown["initiative"] = json!({"id": id, "title": title}),
+            }
+            shown
+        })
+        .collect();
     json!({"candidates": listed})
 }
 
-/// Candidates as a message lists them: each id, with its name when it has one.
+/// Candidates as a message lists them: each id, with its name when it has one, and for an item the initiative it is
+/// in, so one title in two initiatives reads as `Dup, in One`.
 fn listing(candidates: &[&Candidate]) -> String {
     let each: Vec<String> = candidates
         .iter()
-        .map(|c| match c.names.first() {
-            Some(name) => format!("{} ({name})", c.id),
-            None => c.id.clone(),
+        .map(|c| {
+            let place = match &c.place {
+                Place::Elsewhere => None,
+                Place::NoInitiative => Some("in no initiative".to_owned()),
+                Place::In(_, title) => Some(format!("in {title}")),
+            };
+            match (c.names.first(), place) {
+                (Some(name), Some(place)) => format!("{} ({name}, {place})", c.id),
+                (Some(name), None) => format!("{} ({name})", c.id),
+                (None, Some(place)) => format!("{} ({place})", c.id),
+                (None, None) => c.id.clone(),
+            }
         })
         .collect();
     each.join(", ")
