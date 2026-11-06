@@ -51,9 +51,12 @@ opt-level = 1
 [profile.journeys.package."*"]
 opt-level = 1
 
-# The shipped binary carries gix, with its network and TLS stack. Thin LTO with one codegen unit made it 9% smaller (stripped, 29.2 to
-# 26.5 MB) at the cost of nothing on a cold build and 2.3 times the time of a release build after an edit; fat LTO made it 17% smaller
-# but a cold build took 1.7 times and an edited one 5 times as long. Panics stay unwinding, as the server catches those of a task.
+# The shipped binary carries gix, with its network and TLS stack. One codegen unit made it about 9% smaller than the default's sixteen
+# (stripped, 29.2 to 26.5 MB, measured earlier with thin LTO on); the rest of the size is the same without LTO. Measured later at the pinned
+# Rust on the three release targets, against thin LTO with one codegen unit: LTO off made the stripped binary 1.8 to 2.3% smaller (x86_64
+# musl 26.96 to 26.35 MB), a CLI command on a 3,500-item tracker 1 to 3% slower (2 to 8 ms), and a release build after an edit 0.50 to 0.66
+# times as long (macOS 117 to 58 s, x86_64 musl 86 to 49 s), which is what a pull request's build waits on. Sixteen codegen units built
+# faster still but made it 11 to 15% larger and 10 to 25% slower. Panics stay unwinding, as the server catches those of a task.
 [profile.release]
-lto = "thin"
+lto = "off"
 codegen-units = 1
