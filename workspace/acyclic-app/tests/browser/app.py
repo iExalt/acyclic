@@ -303,11 +303,14 @@ def tracker(directory, env, items, remote=None, cycles=False):
 
 
 def wait_drawn(page, nodes, timeout=20_000):
-    """Waits until the Map has drawn exactly `nodes` nodes, and returns its element's data. Its edge count includes
-    the links of an item under the pointer, so a check of it moves the pointer off the Map first."""
+    """Waits until the Map has drawn exactly `nodes` nodes and its tiles have stopped gliding, and returns its element's
+    data. Its edge count includes the links of an item under the pointer, so a check of it moves the pointer off the
+    Map first."""
     page.wait_for_function(
         "n => { const m = document.querySelector('[data-testid=map]');"
-        " return m && m.dataset.state === 'drawn' && Number(m.dataset.nodes) === n; }",
+        " return m && m.dataset.state === 'drawn' && Number(m.dataset.nodes) === n"
+        # A write's moves glide for about 200 ms: positions are read once the renderer has nothing left animating.
+        " && !m.cy?.elements().some((e) => e.animated()); }",
         arg=nodes,
         timeout=timeout,
     )
@@ -2479,6 +2482,14 @@ def edit_journey(page, view, env, plan, box, name, failures):
     page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
     wait_drawn(page, base + 1)
     held(page, first, before, "adding inside it", name, failures)
+    # Once the tiles have stopped gliding, the new item is drawn at its final place, inside the box it was added to.
+    if not page.get_by_test_id("map").evaluate(
+        "(m, [child, parent]) => { const c = m.cy.getElementById(child).boundingBox();"
+        " const p = m.cy.getElementById(parent).boundingBox();"
+        " return c.x1 >= p.x1 && c.x2 <= p.x2 && c.y1 >= p.y1 && c.y2 <= p.y2; }",
+        [added, first],
+    ):
+        failures.append(f"{name}: {added} isn't drawn inside {first} once the Map came to rest")
     check_tracker(
         env,
         added,
