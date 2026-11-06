@@ -616,6 +616,102 @@ fn pretty_output_names_a_record_the_command_just_added_among_the_rest() {
     assert!(listed.contains("00abc12") && listed.contains("10abc12"), "{listed}");
 }
 
+/// An item not started reads as `open` and is written as `backlog`, which replicas of older versions read: from an
+/// add, `--state open` or the older `--state backlog`, and an app edit whose expected state is the `open` it read.
+#[test]
+fn open_is_how_a_stored_backlog_reads_and_backlog_is_what_is_written() {
+    let mut sh = Shell::new();
+    sh.run("init tracker --replica mac", &[]);
+    let ids = ["a1", "a2", "a3", "a4", "a5"].map(id);
+    let [added, open, alias, edited, app] = ids.each_ref().map(String::as_str);
+    for line in [
+        format!("item add --id {added} --title Added"),
+        format!("item add --id {open} --title Open --state open"),
+        format!("item add --id {alias} --title Alias --state backlog"),
+        format!("item add --id {edited} --title Edited --state parked"),
+        format!("item edit {edited} --state open"),
+        format!("item add --id {app} --title App"),
+    ] {
+        assert_eq!(sh.run(&line, AGENT), 0, "{line}");
+    }
+    // The app's edit, and its undo, each expecting the state as the app read it.
+    let tracker = sh.path().join("tracker");
+    let app_edit = |state: &str, expected: &str| {
+        let command =
+            serde_json::from_value(json!({"item": {"edit": {"item": app, "state": state}}}));
+        let expect = serde_json::from_value(
+            json!([{"kind": "item-field", "item": app, "field": "state", "value": expected}]),
+        );
+        crate::call_expected(command.unwrap(), tracker.clone(), &sh.env(&[]), expect.unwrap())
+    };
+    let (code, out) = app_edit("parked", "parked");
+    assert_eq!((code, &out["error"]["code"]), (1, &json!("changed-since")), "{out}");
+    assert_eq!(app_edit("parked", "open").0, 0);
+    assert_eq!(app_edit("open", "parked").0, 0);
+
+    let (_, listed) = sh.output("item list", AGENT);
+    let states: Vec<&serde_json::Value> =
+        listed["data"]["items"].as_array().unwrap().iter().map(|row| &row["state"]).collect();
+    assert_eq!(states, [&json!("open"); 5], "{listed}");
+    let (tracker, _) = acyclic_core::store::Tracker::open(&tracker).unwrap();
+    let (_, state) = tracker.load().unwrap();
+    for id in &ids {
+        let key = acyclic_core::state::Key::new("item", id).unwrap();
+        let stored: Vec<&serde_json::Value> =
+            state.field(&key, "state").unwrap().values().map(|stamped| &stamped.value).collect();
+        assert_eq!(stored, [&json!("backlog")], "{id}");
+    }
+}
+
+/// The retired words never come out: no key or value in the contract's transcripts, the pretty tables or the
+/// examples the app's tests share says `backlog` or `blocked`. Text may still name `backlog` as what is stored.
+#[test]
+fn no_output_says_backlog_or_blocked() {
+    const RETIRED: [&str; 2] = ["backlog", "blocked"];
+    fn walk(value: &serde_json::Value, at: &str) {
+        let check = |text: &str| assert!(!RETIRED.contains(&text), "{at} says {text}");
+        match value {
+            serde_json::Value::String(text) => {
+                check(text);
+                // A need's identity is JSON in a string.
+                if let Ok(inner @ serde_json::Value::Object(_)) = serde_json::from_str(text) {
+                    walk(&inner, at);
+                }
+            },
+            serde_json::Value::Array(values) => values.iter().for_each(|v| walk(v, at)),
+            serde_json::Value::Object(fields) => fields.iter().for_each(|(key, v)| {
+                check(key);
+                walk(v, at);
+            }),
+            _ => {},
+        }
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for name in ["commands.examples.json", "needs.examples.json"] {
+        let path = root.join("../acyclic-app/src").join(name);
+        walk(&serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap(), name);
+    }
+    let mut read = 0;
+    for dir in ["src/tests/snapshots", "src/pretty/snapshots"] {
+        for entry in std::fs::read_dir(root.join(dir)).unwrap() {
+            let path = entry.unwrap().path();
+            let text = std::fs::read_to_string(&path).unwrap();
+            for word in RETIRED {
+                // A JSON key or value is the word in quotes; a table cell is the word alone.
+                let cell = dir.ends_with("pretty/snapshots")
+                    && text.split(|c: char| !c.is_ascii_alphanumeric()).any(|w| w == word);
+                assert!(
+                    !text.contains(&format!("\"{word}\"")) && !cell,
+                    "{} says {word}",
+                    path.display()
+                );
+            }
+            read += 1;
+        }
+    }
+    assert!(read > 2, "the snapshots moved");
+}
+
 /// The needs list the app's tests read, made here so they read what this build sends, with a conflict for each way a
 /// value is kept. `UPDATE_EXAMPLES=1` writes it; otherwise it must match.
 #[test]
@@ -640,6 +736,8 @@ fn the_needs_examples_are_this_builds_and_each_command_they_offer_settles_its_co
     let apart = [
         (key("item", &a1), "title", json!("One"), json!("Two")),
         (key("item", &a1), "state", json!("done"), json!("parked")),
+        // Stored as `backlog`, shown and kept as `open`.
+        (key("item", &p1), "state", json!("backlog"), json!("parked")),
         (key("item", &a1), "parent", json!(p1), json!(null)),
         (key("thread", &t1), "brief", json!("Why"), json!(null)),
         (key("repository", &r2), "owner", json!("me"), json!("you")),
@@ -765,7 +863,7 @@ fn a_commit_is_checked_when_it_is_written_and_never_when_read() {
     assert_eq!(details["reason"], "not-merged");
     let details = refused(&mut sh, "item done Ship --force --commit me/code@abcdef1");
     assert_eq!(details["reason"], "unknown-commit");
-    assert_eq!(sh.output("item show Ship", mapped).1["data"][0]["state"], "backlog");
+    assert_eq!(sh.output("item show Ship", mapped).1["data"][0]["state"], "open");
     // A squash commit merged since the clone last fetched is fetched and passes, abbreviated, with the checkout
     // untouched.
     let origin = sh.path().join("origin");
@@ -787,7 +885,7 @@ fn a_commit_is_checked_when_it_is_written_and_never_when_read() {
     let details = refused(&mut sh, &format!("item done Later --force --commit me/code@{later}"));
     assert_eq!(details["reason"], "fetch-failed");
     assert!(details["fetch_error"].as_str().is_some_and(|e| !e.is_empty()), "{details}");
-    assert_eq!(sh.output("item show Later", mapped).1["data"][0]["state"], "backlog");
+    assert_eq!(sh.output("item show Later", mapped).1["data"][0]["state"], "open");
     // Doctor checks what is stored as last fetched, fetching nothing: the unmapped commit isn't counted as checked.
     let doctor = sh.output("doctor", mapped).1;
     assert_eq!(doctor["data"]["commits"], json!({"checked": 1, "unchecked": 1, "unmerged": []}));

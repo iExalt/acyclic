@@ -73,6 +73,15 @@ fn only_version_3_is_read() {
 }
 
 #[test]
+fn a_state_reads_open_or_the_stored_backlog() {
+    for word in ["open", "backlog"] {
+        let doc =
+            document(3, &format!("{{\"id\":\"{}\",\"title\":\"A\",\"state\":\"{word}\"}}", id(1)));
+        assert_eq!(Import::from_json(&doc).unwrap().items[0].state, Some(State::Backlog), "{word}");
+    }
+}
+
+#[test]
 fn removed_and_unknown_fields_are_refused() {
     let one =
         |fields: &str| document(3, &format!("{{\"id\":\"{}\",\"title\":\"A\"{fields}}}", id(1)));

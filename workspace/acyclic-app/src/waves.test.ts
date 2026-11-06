@@ -15,12 +15,12 @@ const items = [
   item("c1", "q", [], { thread: "c" }),
   item("d1", "q", [], { thread: "d" }),
 ];
-const none = { done: 0, leaves: 0, in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
+const none = { done: 0, leaves: 0, in_progress: 0, ready: 0, waiting: 0, parked: 0, unthreaded: 0 };
 const listed = {
   threads: [
     { id: "a", title: "A", waitsFor: [], counts: { ...none, leaves: 2, done: 2 } },
     { id: "b", title: "B", waitsFor: ["d"], counts: { ...none, leaves: 3, ready: 1, in_progress: 1, parked: 1 } },
-    { id: "c", title: "C", waitsFor: ["b", "d"], counts: { ...none, leaves: 1, blocked: 1 } },
+    { id: "c", title: "C", waitsFor: ["b", "d"], counts: { ...none, leaves: 1, waiting: 1 } },
     { id: "d", title: "D", waitsFor: ["b"], counts: { ...none, leaves: 1, parked: 1 } },
     { id: "e", title: "E", waitsFor: [], counts: none },
   ],

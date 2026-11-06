@@ -3,7 +3,7 @@ import { stageCounts, stageCountWords, stateWords } from "./stages";
 
 describe("a state in words", () => {
   it("reads as a sentence starts it", () => {
-    expect(["in-progress", "backlog", "done"].map(stateWords)).toEqual(["In progress", "Backlog", "Done"]);
+    expect(["in-progress", "open", "done"].map(stateWords)).toEqual(["In progress", "Open", "Done"]);
   });
 });
 
@@ -14,7 +14,7 @@ describe("stageCounts", () => {
       leaves: 12,
       in_progress: 1,
       ready: 3,
-      blocked: 0,
+      waiting: 0,
       parked: 0,
       unthreaded: 1,
     };

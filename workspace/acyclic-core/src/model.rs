@@ -87,11 +87,13 @@ impl<T: PartialEq> Value<T> {
     }
 }
 
-/// An item's state.
+/// An item's state, as stored. Reads and commands say [`ItemState::word`]: an item not started is `open`, stored as
+/// `backlog` so replicas of older versions keep reading what newer ones write. `open` is read too, but never written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ItemState {
-    /// Not started.
+    /// Not started: open, stored as `backlog`.
+    #[serde(alias = "open")]
     Backlog,
     /// Set aside on purpose.
     Parked,
@@ -99,11 +101,38 @@ pub enum ItemState {
     Done,
 }
 
+impl ItemState {
+    /// The state as reads show it and commands take it: `open`, `parked` or `done`.
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Backlog => "open",
+            Self::Parked => "parked",
+            Self::Done => "done",
+        }
+    }
+}
+
+/// A stored state as reads show it: the stored `backlog` is `open`, in one value or each of a conflict's
+/// (`{"conflict": [...]}` or a bare list); anything else is as given.
+#[must_use]
+pub fn shown_state(value: &Json) -> Json {
+    match value {
+        Json::String(stored) if stored == "backlog" => Json::from(ItemState::Backlog.word()),
+        Json::Array(values) => Json::Array(values.iter().map(shown_state).collect()),
+        Json::Object(fields) => {
+            Json::Object(fields.iter().map(|(key, v)| (key.clone(), shown_state(v))).collect())
+        },
+        other => other.clone(),
+    }
+}
+
 /// What a parent reads as, from the leaves under it: an item's states, and in progress once work under it has started.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProgressState {
-    /// Nothing under it has started.
+    /// Nothing under it has started: open, as an item's state reads.
+    #[serde(rename = "open")]
     Backlog,
     /// Set aside on purpose.
     Parked,
@@ -160,7 +189,7 @@ pub struct Item {
     pub title: Value<String>,
     /// Design notes.
     pub notes: Value<String>,
-    /// The item's state; unset reads as backlog.
+    /// The item's state; unset reads as open.
     pub state: Value<ItemState>,
     /// When the item was marked done: the earliest of its current done values.
     pub done_at: Option<Millis>,
@@ -185,7 +214,7 @@ impl Item {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Progress {
     /// The state it reads as: its own when parked by hand, else done when every leaf under it is finished, in
-    /// progress once any leaf is done, and backlog until then; [`crate::ready`] also counts claimed work as started.
+    /// progress once any leaf is done, and open until then; [`crate::ready`] also counts claimed work as started.
     pub state: ProgressState,
     /// Its leaves that are done.
     pub done: usize,
@@ -696,7 +725,7 @@ pub(crate) fn put<T: Serialize>(
 }
 
 fixture! {
-    /// Creates an item with a title, in the backlog.
+    /// Creates an item with a title, open.
     ///
     /// # Errors
     ///

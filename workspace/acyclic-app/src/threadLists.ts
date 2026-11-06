@@ -9,7 +9,7 @@ export interface ThreadLists {
   working: string[];
   /**
    * Threads to start: not at work, with an item ready, the Any time ones first (what can start now reads first, as on
-   * the Map), then by wave. One with every item blocked can't be started.
+   * the Map), then by wave. One with every item waiting can't be started.
    */
   next: string[];
 }

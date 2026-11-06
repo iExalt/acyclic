@@ -15,10 +15,10 @@ fn ids_print_as_the_names_people_use() {
             .map(|(id, name)| (id.to_owned(), name.to_owned())),
     );
     let shown = json!([{"id": plant, "title": "Plant",
-        "readiness": {"status": "blocked", "waiting": {beds: {"why": "open"}}},
+        "readiness": {"status": "waiting", "waiting": {beds: {"why": "open"}}},
         "evidence": {"commit": "me/garden@abc1234", "text": null}}]);
     let text = render(&command("item show Plant"), &shown, None, &names);
-    for name in ["0000a1", "me/garden", "blocked by 0000b1 (not done)", "me/garden@abc1234"] {
+    for name in ["0000a1", "me/garden", "waiting for 0000b1 (not done)", "me/garden@abc1234"] {
         assert!(text.contains(name), "{name} in {text}");
     }
     assert!(!text.contains("01900000"), "{text}");
@@ -30,7 +30,7 @@ fn command(line: &str) -> Command {
 }
 
 fn item(id: &str, title: &str, status: &str) -> Json {
-    json!({"id": id, "title": title, "state": "backlog", "parent": null, "thread": "t1",
+    json!({"id": id, "title": title, "state": "open", "parent": null, "thread": "t1",
            "readiness": {"status": status}})
 }
 
@@ -38,8 +38,8 @@ fn item(id: &str, title: &str, status: &str) -> Json {
 fn lists_are_tables_fitted_to_a_terminal_and_bare_in_a_pipe() {
     let list = json!({"items": [
         item("beds", "Build the raised beds along the south fence", "ready"),
-        json!({"id": "plant", "title": "Plant tomatoes", "state": "backlog", "parent": "beds", "thread": "t1",
-               "readiness": {"status": "blocked", "waiting": {"beds": {"why": "open"}}}}),
+        json!({"id": "plant", "title": "Plant tomatoes", "state": "open", "parent": "beds", "thread": "t1",
+               "readiness": {"status": "waiting", "waiting": {"beds": {"why": "open"}}}}),
     ]});
     let piped = render(&command("item list"), &list, None, &BTreeMap::new());
     let narrow = render(&command("item list"), &list, Some(60), &BTreeMap::new());
@@ -253,8 +253,8 @@ fn every_readiness_reads_as_a_phrase() {
     let items: Vec<(Json, &str)> = vec![
         (json!(Readiness::Ready), "ready"),
         (
-            json!(Readiness::Blocked { waiting: waiting.into_iter().collect() }),
-            "blocked by a (not done), b (not done)",
+            json!(Readiness::Waiting { waiting: waiting.into_iter().collect() }),
+            "waiting for a (not done), b (not done)",
         ),
         (json!(Readiness::Unthreaded), "unthreaded"),
         (json!(Readiness::Claimed { holder: s("session/s") }), "claimed by session/s"),

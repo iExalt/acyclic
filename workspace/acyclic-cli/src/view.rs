@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use acyclic_core::claim::{self, Claim};
-use acyclic_core::model::{Heads, Item, ItemState, Link, Model, Value};
+use acyclic_core::model::{Heads, Item, ItemState, Link, Model, Value, shown_state};
 use acyclic_core::needs::Entry;
 use acyclic_core::ready::{ReadinessEvaluator, ReadyThread, Stages};
 use acyclic_core::state::{Millis, State};
@@ -26,11 +26,11 @@ fn with(mut row: Json, extra: Json) -> Json {
     row
 }
 
-/// An item's state, which reads as backlog until one is set.
+/// An item's state as reads show it, `open` until one is set.
 fn state(item: &Item) -> Json {
     match &item.state {
-        Value::None => json!(ItemState::Backlog),
-        other => json!(other),
+        Value::None => json!(ItemState::Backlog.word()),
+        other => shown_state(&json!(other)),
     }
 }
 
@@ -302,7 +302,7 @@ fn links(all: &[Link], id: &str) -> Json {
 fn stage_counts(stages: &Stages) -> Json {
     json!({
         "done": stages.done, "leaves": stages.total(),
-        "in_progress": stages.in_progress, "ready": stages.ready, "blocked": stages.blocked,
+        "in_progress": stages.in_progress, "ready": stages.ready, "waiting": stages.waiting,
         "parked": stages.parked, "unthreaded": stages.unthreaded,
     })
 }
@@ -461,15 +461,15 @@ mod tests {
             let row = view.item_row("c").unwrap();
             assert_eq!(
                 row,
-                json!({"id": "c", "title": "C", "state": "backlog", "parent": null, "thread": null,
-                       "readiness": {"status": "blocked", "waiting": {"a": {"why": "open"}}}, "stage": "blocked"})
+                json!({"id": "c", "title": "C", "state": "open", "parent": null, "thread": null,
+                       "readiness": {"status": "waiting", "waiting": {"a": {"why": "open"}}}, "stage": "waiting"})
             );
             // A parent's summary adds its progress from its leaves, in progress while their thread is claimed though
             // none is started; a leaf's has none.
             assert_eq!(
                 view.item_row("goal").unwrap()["progress"],
                 json!({"state": "in-progress", "counts": {"done": 0, "leaves": 2, "in_progress": 2,
-                       "ready": 0, "blocked": 0, "parked": 0, "unthreaded": 0}})
+                       "ready": 0, "waiting": 0, "parked": 0, "unthreaded": 0}})
             );
             // And its stage, rolled up from them under the key a leaf's has.
             assert_eq!(view.item_row("goal").unwrap()["stage"], "in-progress");

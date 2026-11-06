@@ -13,7 +13,7 @@ function raw(id: string) {
     title: id.toUpperCase(),
     parent: null,
     thread: null,
-    state: "backlog",
+    state: "open",
     notes: null,
     links: { waits_for: [], waited_on_by: [] },
   };
@@ -158,7 +158,7 @@ describe("settle", () => {
       thread: { conflict: [null] },
       state: { conflict: [null, null] },
     });
-    expect(item).toMatchObject({ title: "Sow", parent: "beds", thread: null, state: "backlog" });
+    expect(item).toMatchObject({ title: "Sow", parent: "beds", thread: null, state: "open" });
     expect(item.conflicts).toEqual({
       title: [null, "Sow", "Plant"],
       parent: ["beds", null],
@@ -211,11 +211,11 @@ describe("failure", () => {
 });
 
 describe("countsText", () => {
-  const none = { done: 0, leaves: 0, in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
+  const none = { done: 0, leaves: 0, in_progress: 0, ready: 0, waiting: 0, parked: 0, unthreaded: 0 };
 
   it("names every stage and leaves out stages with none", () => {
-    const all = { done: 3, leaves: 8, in_progress: 1, ready: 1, blocked: 1, parked: 1, unthreaded: 1 };
-    expect(countsText(all)).toBe("3 done, 1 in progress, 1 ready, 1 blocked, 1 parked, 1 needs a thread");
-    expect(countsText({ ...none, leaves: 2, blocked: 2 })).toBe("2 blocked");
+    const all = { done: 3, leaves: 8, in_progress: 1, ready: 1, waiting: 1, parked: 1, unthreaded: 1 };
+    expect(countsText(all)).toBe("3 done, 1 in progress, 1 ready, 1 waiting, 1 parked, 1 needs a thread");
+    expect(countsText({ ...none, leaves: 2, waiting: 2 })).toBe("2 waiting");
   });
 });

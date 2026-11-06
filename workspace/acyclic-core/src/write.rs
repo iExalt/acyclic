@@ -227,7 +227,10 @@ pub fn check_expected(
                 match field {
                     ExpectedItemField::Title => serde_json::to_value(&item.title),
                     ExpectedItemField::Parent => serde_json::to_value(&item.parent),
-                    ExpectedItemField::State => serde_json::to_value(&item.state),
+                    // As reads show it, so the app's `open` matches the stored `backlog`.
+                    ExpectedItemField::State => {
+                        serde_json::to_value(&item.state).map(|stored| model::shown_state(&stored))
+                    },
                     ExpectedItemField::Notes => serde_json::to_value(&item.notes),
                 }
                 .expect("model values serialize")
@@ -264,6 +267,14 @@ pub fn check_expected(
             Expectation::WaitersStartedAtMost { .. } => unreachable!("handled above"),
         };
         let matches = match expectation {
+            // A state is compared as reads show it: `actual` already is, and an older app may still expect
+            // `backlog`.
+            Expectation::ItemField { field: ExpectedItemField::State, value, .. } => {
+                actual
+                    == model::shown_state(
+                        &serde_json::to_value(value).expect("expected values serialize"),
+                    )
+            },
             Expectation::ItemField { value, .. } | Expectation::ThreadField { value, .. } => {
                 actual == serde_json::to_value(value).expect("expected values serialize")
             },
@@ -994,12 +1005,12 @@ impl Judging<'_, '_> {
                 _ => None,
             })
             .collect();
-        self.start_in_backlog(&asked);
+        self.start_open(&asked);
         self.place(&asked);
     }
 
-    fn start_in_backlog(&mut self, asked: &[(usize, Assign)]) {
-        // A new item with no state given starts in the backlog.
+    fn start_open(&mut self, asked: &[(usize, Assign)]) {
+        // A new item with no state given starts open.
         let stated: BTreeSet<&str> = asked
             .iter()
             .filter_map(|(_, assign)| match assign {

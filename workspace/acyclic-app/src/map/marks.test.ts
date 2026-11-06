@@ -8,7 +8,7 @@ import { buildModel, fallbackStage, visible } from "./model";
 
 const thread = { colour: "#4ec695", ink: "#141a1f" };
 const DARK = PALETTES.dark;
-const STAGES: Stage[] = ["done", "in-progress", "ready", "blocked", "parked", "unthreaded"];
+const STAGES: Stage[] = ["done", "in-progress", "ready", "waiting", "parked", "unthreaded"];
 
 describe("markSvg", () => {
   it("draws a different icon for every stage, with the thread's stripe and dot", () => {
@@ -22,7 +22,7 @@ describe("markSvg", () => {
   });
 
   it("draws a box's chevron at its title strip's left and where its work stands at its right", () => {
-    const open = boxMarkSvg("box", "blocked", 300, 400, DARK);
+    const open = boxMarkSvg("box", "waiting", 300, 400, DARK);
     // Over the strip alone, however tall the box.
     expect(open).toContain('height="52"');
     expect(open).toContain('d="M2 4l4 4 4-4"');
@@ -33,7 +33,7 @@ describe("markSvg", () => {
   });
 
   it("keeps the chevron inside its hit area when a full box header grows", () => {
-    const svg = boxMarkSvg("box", "blocked", 300, 400, DARK, null, 100);
+    const svg = boxMarkSvg("box", "waiting", 300, 400, DARK, null, 100);
     expect(svg).toContain('height="100"');
     expect(svg).toContain("translate(12 20)");
     expect(onChevron("box", { x1: 0, y1: 0, x2: 300, y2: 400, header: 100 }, { x: 18, y: 24 }, 1)).toBe(true);
@@ -61,19 +61,19 @@ describe("markSvg", () => {
 
 describe("a tile's stage", () => {
   it("is core's, or for a parent drawn as a tile, what its own state says", () => {
-    expect(["done", "parked", "in-progress", "backlog"].map(fallbackStage)).toEqual([
+    expect(["done", "parked", "in-progress", "open"].map(fallbackStage)).toEqual([
       "done",
       "parked",
       "in-progress",
       null,
     ]);
     const model = buildModel([
-      item("live", null, [], { stage: "blocked" }),
+      item("live", null, [], { stage: "waiting" }),
       item("box", null, [], { state: "parked" }),
     ]);
     const stages = Object.fromEntries(
       visible(model, { collapsed: new Set() }).nodes.map((node) => [node.id, node.stage]),
     );
-    expect(stages).toEqual({ live: "blocked", box: "parked" });
+    expect(stages).toEqual({ live: "waiting", box: "parked" });
   });
 });

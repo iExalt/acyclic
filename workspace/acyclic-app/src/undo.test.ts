@@ -101,7 +101,7 @@ describe("undo", () => {
 
   it("sets a state back only while nothing waiting on the item, or on a box above it, has started since", () => {
     const done = undoOf({ item: { edit: { item: "dig", state: "done" } } }, before);
-    expect(done?.command).toEqual({ item: { edit: { item: "dig", state: "backlog" } } });
+    expect(done?.command).toEqual({ item: { edit: { item: "dig", state: "open" } } });
     expect(done?.expect).toEqual([
       { kind: "item-field", item: "dig", field: "state", value: "done" },
       { kind: "waiters-started-at-most", item: "dig", baselines: [{ item: "sow", count: 0 }] },

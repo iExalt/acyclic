@@ -370,7 +370,7 @@ fn a_created_record_needs_a_field_write_and_the_model_matches_rereading() {
             item,
         ],
     );
-    assert_eq!(outcome.after, read(&r), "null fields and the item's implicit backlog persist");
+    assert_eq!(outcome.after, read(&r), "null fields and the item's implicit open state persist");
     assert!(read(&r).threads.contains_key("t"));
     assert!(read(&r).repositories.contains_key("r"));
     assert!(read(&r).items.contains_key("i"));

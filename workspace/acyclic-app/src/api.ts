@@ -38,10 +38,10 @@ interface RawItem {
 /**
  * Where a leaf stands: core's six stages, which tell every leaf apart. A parent takes one from its leaves: done once
  * all are; else in progress once work under it has started and some of what is left isn't parked; else the first of
- * ready, blocked, parked and needs a thread that its leaves have.
+ * ready, waiting, parked and needs a thread that its leaves have.
  */
 
-export type Stage = "done" | "in-progress" | "ready" | "blocked" | "parked" | "unthreaded";
+export type Stage = "done" | "in-progress" | "ready" | "waiting" | "parked" | "unthreaded";
 
 /** A parent's leaves: all of them, and each under its stage, so the stages add up to `leaves`. */
 export interface Counts {
@@ -49,7 +49,7 @@ export interface Counts {
   leaves: number;
   in_progress: number;
   ready: number;
-  blocked: number;
+  waiting: number;
   parked: number;
   unthreaded: number;
 }
@@ -60,7 +60,7 @@ export const NO_COUNTS: Counts = {
   leaves: 0,
   in_progress: 0,
   ready: 0,
-  blocked: 0,
+  waiting: 0,
   parked: 0,
   unthreaded: 0,
 };
@@ -114,8 +114,8 @@ export function settle(raw: RawItem): Item {
     return value.conflict.find((one) => one !== null) ?? null;
   };
   const title = pick("title") ?? raw.id;
-  // An unset state reads as backlog, as the CLI reads it.
-  const state = pick("state") ?? "backlog";
+  // An unset state reads as open, as the CLI reads it.
+  const state = pick("state") ?? "open";
   return {
     ...raw,
     title,

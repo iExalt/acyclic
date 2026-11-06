@@ -8,7 +8,7 @@ const NONE: Counts = {
   leaves: 0,
   in_progress: 0,
   ready: 0,
-  blocked: 0,
+  waiting: 0,
   parked: 0,
   unthreaded: 0,
 };
@@ -23,12 +23,12 @@ describe("the Overview's threads", () => {
       ["thread-2", { ...NONE, leaves: 2, in_progress: 1, ready: 1 }],
       ["thread-8", { ...NONE, leaves: 3, in_progress: 1, done: 1, ready: 1 }],
       ["thread-3", { ...NONE, leaves: 2, ready: 2 }],
-      ["thread-4", { ...NONE, leaves: 1, blocked: 1 }],
+      ["thread-4", { ...NONE, leaves: 1, waiting: 1 }],
       ["thread-5", { ...NONE, leaves: 1, ready: 1 }],
       ["thread-6", { ...NONE, leaves: 1, ready: 1 }],
       ["thread-7", { ...NONE, leaves: 1, ready: 1 }],
     ]);
-    // Wave 1 is at work (in progress, with or without an item ready) or blocked, so nothing in it is to start;
+    // Wave 1 is at work (in progress, with or without an item ready) or waiting, so nothing in it is to start;
     // thread-7, any time, comes first.
     const view = { ...lists(["thread-2", "thread-8", "thread-4"], ["thread-10", "thread-6", "thread-3", "thread-5"]) };
     view.anytime = [tile("thread-7")];
@@ -38,10 +38,10 @@ describe("the Overview's threads", () => {
     });
   });
 
-  it("has nothing to start when every thread is at work or blocked, or there are no waves", () => {
+  it("has nothing to start when every thread is at work or waiting, or there are no waves", () => {
     const counts = new Map([
       ["thread-1", { ...NONE, leaves: 1, in_progress: 1 }],
-      ["thread-2", { ...NONE, leaves: 1, blocked: 1 }],
+      ["thread-2", { ...NONE, leaves: 1, waiting: 1 }],
     ]);
     expect(threadLists(counts, lists(["thread-1"], ["thread-2"]))).toEqual({
       working: ["thread-1"],

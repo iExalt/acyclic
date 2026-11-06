@@ -37,7 +37,7 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every r
     {"id": "01900000-0000-7000-8000-000000000001", "name": "me/garden", "default_branch": "main"}
   ],
   "items": [
-    // Required: id and title. "state" is backlog, parked or done, backlog for a new item.
+    // Required: id and title. "state" is open, parked or done, open for a new item.
     // Optional: parent, thread, notes, waits_for (the items it can't start before they are done),
     // and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"}, either part or both. A list
     // given replaces the record's: [] clears it.
@@ -116,7 +116,8 @@ pub struct Item {
     /// Design notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    /// The item's state; left out, an existing item keeps its own and a new one is in the backlog.
+    /// The item's state; left out, an existing item keeps its own and a new one is open. `backlog`, as older
+    /// documents say, reads as open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<State>,
     /// The parent item.

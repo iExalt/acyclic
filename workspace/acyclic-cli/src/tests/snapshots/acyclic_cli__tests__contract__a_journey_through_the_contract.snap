@@ -141,7 +141,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
               "status": "ready"
             },
             "stage": "ready",
-            "state": "backlog",
+            "state": "open",
             "thread": "01900000-0000-7000-8000-0000000000f0",
             "title": "First"
           }
@@ -189,7 +189,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item done Second
     "code": "not-ready",
     "details": {
       "readiness": {
-        "status": "blocked",
+        "status": "waiting",
         "waiting": {
           "01900000-0000-7000-8000-0000000000a1": {
             "why": "open"
@@ -207,7 +207,9 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit Second --state done
 
 # stderr
 error: invalid value 'done' for '--state <STATE>'
-  [possible values: backlog, parked]
+  [possible values: open, parked]
+
+  tip: a similar value exists: 'open'
 
 For more information, try '--help'.
 
@@ -321,20 +323,20 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
             "status": "claimed"
           },
           "stage": "in-progress",
-          "state": "backlog",
+          "state": "open",
           "thread": "01900000-0000-7000-8000-0000000000f0",
           "title": "Second"
         }
       ],
       "progress": {
         "counts": {
-          "blocked": 0,
           "done": 1,
           "in_progress": 1,
           "leaves": 2,
           "parked": 0,
           "ready": 0,
-          "unthreaded": 0
+          "unthreaded": 0,
+          "waiting": 0
         }
       },
       "readiness": {
@@ -395,7 +397,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
               "status": "ready"
             },
             "stage": "ready",
-            "state": "backlog",
+            "state": "open",
             "thread": "01900000-0000-7000-8000-0000000000f0",
             "title": "Second"
           }
@@ -502,7 +504,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       },
       "role": "item",
       "stage": "ready",
-      "state": "backlog",
+      "state": "open",
       "thread": "01900000-0000-7000-8000-0000000000f0",
       "title": "Second"
     }
@@ -544,7 +546,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
               "status": "ready"
             },
             "stage": "ready",
-            "state": "backlog",
+            "state": "open",
             "thread": "01900000-0000-7000-8000-0000000000f1",
             "title": "Second"
           }
@@ -599,7 +601,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item list
           "status": "ready"
         },
         "stage": "ready",
-        "state": "backlog",
+        "state": "open",
         "thread": "01900000-0000-7000-8000-0000000000f1",
         "title": "Second"
       }
@@ -626,13 +628,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
         "id": "01900000-0000-7000-8000-0000000000f0",
         "progress": {
           "counts": {
-            "blocked": 0,
             "done": 0,
             "in_progress": 0,
             "leaves": 0,
             "parked": 0,
             "ready": 0,
-            "unthreaded": 0
+            "unthreaded": 0,
+            "waiting": 0
           }
         },
         "title": "Start",
@@ -650,13 +652,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
         "id": "01900000-0000-7000-8000-0000000000f1",
         "progress": {
           "counts": {
-            "blocked": 0,
             "done": 1,
             "in_progress": 0,
             "leaves": 2,
             "parked": 0,
             "ready": 1,
-            "unthreaded": 0
+            "unthreaded": 0,
+            "waiting": 0
           }
         },
         "title": "Work",
@@ -670,9 +672,9 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread list
 
 $ ACYCLIC_ACTOR=session/mac acyclic item list -o pretty
 # exit 0
-ID      TITLE   STATE    THREAD  READINESS
-0000a1  First   done     0000f1  done
-0000a2  Second  backlog  0000f1  ready
+ID      TITLE   STATE  THREAD  READINESS
+0000a1  First   done   0000f1  done
+0000a2  Second  open   0000f1  ready
 
 $ ACYCLIC_ACTOR=session/mac acyclic thread ready -o pretty
 # exit 0
@@ -745,20 +747,20 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
             "status": "ready"
           },
           "stage": "ready",
-          "state": "backlog",
+          "state": "open",
           "thread": "01900000-0000-7000-8000-0000000000f1",
           "title": "Second"
         }
       ],
       "progress": {
         "counts": {
-          "blocked": 0,
           "done": 1,
           "in_progress": 0,
           "leaves": 2,
           "parked": 0,
           "ready": 1,
-          "unthreaded": 0
+          "unthreaded": 0,
+          "waiting": 0
         }
       },
       "readiness": {
@@ -833,7 +835,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
       },
       "role": "item",
       "stage": "ready",
-      "state": "backlog",
+      "state": "open",
       "thread": "01900000-0000-7000-8000-0000000000f1",
       "title": "Second"
     }
@@ -1136,7 +1138,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       },
       "role": "item",
       "stage": "unthreaded",
-      "state": "backlog",
+      "state": "open",
       "thread": null,
       "title": "Second"
     }
@@ -1328,13 +1330,13 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Goal
       "parent": null,
       "progress": {
         "counts": {
-          "blocked": 0,
           "done": 1,
           "in_progress": 0,
           "leaves": 1,
           "parked": 0,
           "ready": 0,
-          "unthreaded": 0
+          "unthreaded": 0,
+          "waiting": 0
         },
         "state": "done"
       },
@@ -1343,7 +1345,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Goal
       },
       "role": "project",
       "stage": "done",
-      "state": "backlog",
+      "state": "open",
       "thread": null,
       "title": "Goal"
     }

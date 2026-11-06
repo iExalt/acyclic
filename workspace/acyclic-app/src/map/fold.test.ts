@@ -8,7 +8,7 @@ import { buildModel, collapsedWith, sourceKey, visible } from "./model";
 const done = (id: string, parent: string, thread: string | null, waitsFor: string[] = [], extra: Partial<Item> = {}) =>
   item(id, parent, waitsFor, { state: "done", stage: "done", thread, ...extra });
 const ready = (id: string, parent: string, thread: string | null, waitsFor: string[] = []) =>
-  item(id, parent, waitsFor, { state: "backlog", stage: "ready", thread });
+  item(id, parent, waitsFor, { state: "open", stage: "ready", thread });
 const fold = (plan: Item[]) => foldDone(buildModel(plan), (thread) => `Thread ${thread}`);
 const kidsOf = (folded: ReturnType<typeof fold>, id: string) => folded.model.children.get(id) ?? [];
 

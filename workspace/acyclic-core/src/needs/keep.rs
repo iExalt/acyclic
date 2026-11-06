@@ -3,7 +3,7 @@
 
 use serde_json::Value as Json;
 
-use crate::model::{By, Evidence, Item, ItemState, Model, Value};
+use crate::model::{By, Evidence, Item, ItemState, Model, Value, shown_state};
 use crate::schema::{item as field, kind, link, repository, thread};
 use crate::state::{Error, Key, State};
 use crate::write::{
@@ -13,7 +13,7 @@ use crate::write::{
 /// One value a field was written apart, and how to keep it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Kept {
-    /// The value, as written; a clear is `null`.
+    /// The value, as written and as reads show it (a stored `backlog` state is `open`); a clear is `null`.
     pub value: Json,
     /// How to keep it.
     pub keep: Keep,
@@ -75,7 +75,12 @@ pub fn keeps(
                 Keep::Write(changes) => verify(model, (entity, id, name), changes, by),
                 Keep::Not(why) => Keep::Not(why),
             };
-            Ok(Kept { value: value.clone(), keep })
+            let value = if (entity, name) == (kind::ITEM, field::STATE) {
+                shown_state(value)
+            } else {
+                value.clone()
+            };
+            Ok(Kept { value, keep })
         })
         .collect()
 }

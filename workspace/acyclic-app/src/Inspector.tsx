@@ -360,7 +360,7 @@ function ItemStatus({ item }: { item: Item }) {
       </>
     );
   // A leaf core hasn't placed is one drawn before the server has it: its stage comes with the server's read, and its
-  // state, backlog, would say something else first.
+  // state, open, would say something else first.
   if (item.stage === undefined) return <span className="muted">Saving…</span>;
   return <span>{item.stage === undefined ? stateWords(item.state) : <StageLabel stage={item.stage} />}</span>;
 }

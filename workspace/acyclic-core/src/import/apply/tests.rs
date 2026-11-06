@@ -59,7 +59,7 @@ fn a_document_reads_back_and_importing_it_again_writes_nothing() {
     let m = model(&r);
     let a = &m.items[&id(11)];
     assert_eq!(a.parent, Value::One(id(10)));
-    // A new item left without a state is in the backlog.
+    // A new item left without a state is open.
     assert_eq!(m.items[&id(10)].state, Value::One(ItemState::Backlog));
     // The evidence keeps the repository and the SHA apart.
     let evidence = m.items[&id(12)].evidence.one().unwrap();
@@ -281,12 +281,17 @@ fn done_on_a_parent_is_refused_and_done_work_set_back_is_reopened() {
         panic!("done on a parent accepted")
     };
     assert_eq!(errors, [ValidationError::DoneParent(id(10))]);
-    // Done work set back is reopened, as `item reopen` does: back in the backlog, and nothing else.
+    // Done work set back is reopened, as `item reopen` does: open again, and nothing else.
     doc.items = vec![item(11, Some(Planned::Backlog), Some(10))];
     let report = apply(&doc, &mut r, by(USER, 5)).unwrap();
     assert_eq!(model(&r).items[&id(11)].state, Value::One(ItemState::Backlog));
     let row = report.changes.iter().find(|c| c.name == Name::Id { id: id(11) }).unwrap();
     assert_eq!(row.fields.keys().map(String::as_str).collect::<Vec<_>>(), ["state"]);
+    // Reported as reads show it, though stored as `backlog`.
+    assert_eq!(
+        (&row.fields["state"].from, &row.fields["state"].to),
+        (&json!("done"), &json!("open"))
+    );
 }
 
 #[test]
