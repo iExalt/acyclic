@@ -122,11 +122,9 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
 - **Needs you's view** is a page over the Map, as the Overview is: wide, its entries stand in columns of at least 360
   px, as many as fit; on a phone, one column. (As a narrow pane on the right it left most of a
   desktop empty, and only the Overview made room for it.)
-- **Up next** lists the threads that can start now: not at work, with an item ready; Any time first, then by wave. The
-  Open Threads link opens Threads. Any time means no threads to wait for or hold up, covering incoming and outgoing
-  waits.
-  A wave all waiting has nothing to start. (The next wave,
-  listed whole, showed only waiting threads while work elsewhere was ready; the user chose this.)
+- **Up next** lists the threads that can start now: not at work, with an item ready, by id in natural order as
+  `acyclic thread ready` lists them. The Open Threads link opens Threads, where waves and Any time show what waits for
+  what.
 
 ## Shapes
 

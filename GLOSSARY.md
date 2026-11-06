@@ -90,7 +90,7 @@ The projects and their threads as a tree, in the sidebar or a phone's sheet.
 _Avoid_: tree view, navigator
 
 **Up next**:
-The threads with work ready to start, by wave.
+The threads with work ready to start, by id.
 _Avoid_: queue, backlog
 
 **Tile**:

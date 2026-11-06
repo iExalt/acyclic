@@ -265,29 +265,30 @@ fn two_threads_whose_items_once_named_one_resource_are_both_ready() {
 }
 
 #[test]
-fn ready_lists_the_actors_thread_first_then_the_rest_by_natural_title_and_leaves_out_others_held() {
+fn ready_lists_the_actors_thread_first_then_the_rest_by_natural_id_and_leaves_out_others_held() {
     let mut r = replica("a");
-    // Thread ids run against their titles, so only the titles can order them.
+    // Titles run against ids, so only the ids can order what is listed. Digits compare as numbers (t2 before t10),
+    // and a bare prefix sorts before the same prefix and a dash (t10 before t-1), unlike plain byte order.
     for (item, held, title) in [
-        ("i1", "a", "Step 10"),
-        ("i2", "b", "Step 2"),
-        ("i3", "c", "Step 1"),
-        ("i4", "d", "Mine"),
-        ("i5", "e", "Theirs"),
-        ("i6", "f", "Step 2"),
+        ("i1", "t10", "A"),
+        ("i2", "t2", "B"),
+        ("i3", "t-1", "C"),
+        ("i4", "mine", "D"),
+        ("i5", "theirs", "E"),
+        ("i6", "t3", "F"),
     ] {
         add_item(&mut r, item, item, by(1)).unwrap();
         thread(&mut r, item, held);
         set(&mut r, &claim::thread_key(held).unwrap(), thread_field::TITLE, Some(&title), by(1))
             .unwrap();
     }
-    // Items within a thread sort by title in natural order too, then by id.
-    for (item, title) in [("m10", "Part 10"), ("m2", "Part 2"), ("m1", "Part 2")] {
+    // Items within a thread sort by id in natural order too, whatever their titles say.
+    for (item, title) in [("m10", "Part 1"), ("m2", "Part 2"), ("m-1", "Part 3")] {
         add_item(&mut r, item, title, by(1)).unwrap();
-        thread(&mut r, item, "d");
+        thread(&mut r, item, "mine");
     }
-    claim::claim(&mut r, "d", "session/me", 900, (500, 1_000), false).unwrap();
-    claim::claim(&mut r, "e", "session/other", 900, (500, 1_000), false).unwrap();
+    claim::claim(&mut r, "mine", "session/me", 900, (500, 1_000), false).unwrap();
+    claim::claim(&mut r, "theirs", "session/other", 900, (500, 1_000), false).unwrap();
     let model = Model::read(&r.state).unwrap();
     let ready = ReadinessEvaluator::new(&r.state, &model, NOW).ready("session/me").unwrap();
     let order: Vec<(&str, Vec<&str>)> = ready
@@ -297,11 +298,11 @@ fn ready_lists_the_actors_thread_first_then_the_rest_by_natural_title_and_leaves
     assert_eq!(
         order,
         [
-            ("d", vec!["i4", "m1", "m2", "m10"]),
-            ("c", vec!["i3"]),
-            ("b", vec!["i2"]),
-            ("f", vec!["i6"]),
-            ("a", vec!["i1"]),
+            ("mine", vec!["i4", "m2", "m10", "m-1"]),
+            ("t2", vec!["i2"]),
+            ("t3", vec!["i6"]),
+            ("t10", vec!["i1"]),
+            ("t-1", vec!["i3"]),
         ]
     );
 }

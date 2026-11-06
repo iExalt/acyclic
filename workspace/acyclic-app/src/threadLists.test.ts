@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Counts } from "./api";
 import { threadLists } from "./threadLists";
-import type { ThreadTile } from "./waves";
 
 const NONE: Counts = {
   done: 0,
@@ -12,42 +11,30 @@ const NONE: Counts = {
   parked: 0,
   unthreaded: 0,
 };
-const tile = (id: string): ThreadTile => ({ id, projects: [], counts: NONE, after: [], looped: [] });
-
-const lists = (...ids: string[][]) => ({ waves: ids.map((one) => one.map(tile)), anytime: [] as ThreadTile[] });
-
 describe("the Overview's threads", () => {
-  it("lists threads at work, and to start those with an item ready, Any time first, then by wave", () => {
+  it("lists threads at work, and to start those with an item ready, each by id in natural order", () => {
     const counts = new Map([
       ["thread-10", { ...NONE, leaves: 3, in_progress: 1, done: 1 }],
       ["thread-2", { ...NONE, leaves: 2, in_progress: 1, ready: 1 }],
-      ["thread-8", { ...NONE, leaves: 3, in_progress: 1, done: 1, ready: 1 }],
+      ["Thread-8", { ...NONE, leaves: 3, in_progress: 1, done: 1, ready: 1 }],
       ["thread-3", { ...NONE, leaves: 2, ready: 2 }],
       ["thread-4", { ...NONE, leaves: 1, waiting: 1 }],
+      ["thread-20", { ...NONE, leaves: 1, ready: 1 }],
+      ["Thread-6", { ...NONE, leaves: 1, ready: 1 }],
       ["thread-5", { ...NONE, leaves: 1, ready: 1 }],
-      ["thread-6", { ...NONE, leaves: 1, ready: 1 }],
-      ["thread-7", { ...NONE, leaves: 1, ready: 1 }],
     ]);
-    // Wave 1 is at work (in progress, with or without an item ready) or waiting, so nothing in it is to start;
-    // thread-7, any time, comes first.
-    const view = { ...lists(["thread-2", "thread-8", "thread-4"], ["thread-10", "thread-6", "thread-3", "thread-5"]) };
-    view.anytime = [tile("thread-7")];
-    expect(threadLists(counts, view)).toEqual({
-      working: ["thread-2", "thread-8", "thread-10"],
-      next: ["thread-7", "thread-6", "thread-3", "thread-5"],
+    expect(threadLists(counts)).toEqual({
+      working: ["thread-2", "Thread-8", "thread-10"],
+      next: ["thread-3", "thread-5", "Thread-6", "thread-20"],
     });
   });
 
-  it("has nothing to start when every thread is at work or waiting, or there are no waves", () => {
+  it("has nothing to start when every thread is at work or waiting, or there are none", () => {
     const counts = new Map([
       ["thread-1", { ...NONE, leaves: 1, in_progress: 1 }],
       ["thread-2", { ...NONE, leaves: 1, waiting: 1 }],
     ]);
-    expect(threadLists(counts, lists(["thread-1"], ["thread-2"]))).toEqual({
-      working: ["thread-1"],
-      next: [],
-    });
-    expect(threadLists(new Map(), lists())).toEqual({ working: [], next: [] });
-    expect(threadLists(new Map(), null)).toEqual({ working: [], next: [] });
+    expect(threadLists(counts)).toEqual({ working: ["thread-1"], next: [] });
+    expect(threadLists(new Map())).toEqual({ working: [], next: [] });
   });
 });
