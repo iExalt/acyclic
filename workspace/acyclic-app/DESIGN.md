@@ -27,7 +27,8 @@ Touch targets are 44 px on a coarse pointer, each a row's or a button's own box,
 neighbours; Needs you's item rows alone are 32 px, which clears the 24 px of WCAG 2.5.8, as the user asked for them
 closer. With a fine pointer, `--hit` gives default buttons and fields 34 px, and compact rows and controls inside lists
 go down to 28 px (a Needs you item row to 24 px), as Linear's do. Everything is reachable by keyboard; focus is always
-visible. Reduced motion turns the sheets' rise off.
+visible. Reduced motion turns the sheets' rise off, and the Map's tiles move to their new places at once rather than
+gliding (about 200 ms), as they also do for moves out of view.
 
 ## Overview
 

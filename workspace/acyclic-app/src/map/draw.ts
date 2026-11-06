@@ -4,10 +4,11 @@
 // node drawn under what it holds), so moving one never drags others, and an edge's id names its ends, which never
 // change in place.
 
-import type { Core, ElementDefinition } from "cytoscape";
+import type { BoundingBox12, BoundingBoxWH, Core, ElementDefinition } from "cytoscape";
 import type { Line } from "../lines";
 import type { Palette } from "../palette";
 import { boxMarkOf, markOf, QUIET } from "./marks";
+import { track } from "./motion";
 import type { Scene } from "./scene";
 import { TILES } from "./style";
 
@@ -154,20 +155,240 @@ export function diff(drawn: ReadonlyMap<string, Drawn>, next: Drawn[]): Changes 
   return { add, remove, update };
 }
 
-/** Takes the renderer from the elements `drawn` to `next`, and returns what it now holds. */
-export function apply(core: Core, drawn: ReadonlyMap<string, Drawn>, next: Drawn[]): Map<string, Drawn> {
+/** How long a tile takes to glide to its new place. */
+export const GLIDE_MS = 200;
+/** A link's fade back in: it waits this long, then takes `FADE_MS`, so it is whole as the tiles settle. */
+const FADE_DELAY_MS = 50;
+const FADE_MS = 150;
+/** The most tiles that glide in one write; a write that would move more puts them all in place at once. */
+export const MAX_GLIDES = 300;
+
+interface Rect {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/** How a write's moves are shown: `extent` is what the viewport covers, in the Map's own coordinates. */
+export interface Glide {
+  reduced: boolean;
+  extent: Rect | null;
+}
+
+/** Whether the user asks for less motion. `match` is where the browser's `matchMedia` goes. */
+export function prefersReducedMotion(
+  match: ((query: string) => { matches: boolean }) | undefined = globalThis.matchMedia?.bind(globalThis),
+): boolean {
+  return match?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
+interface Moving {
+  target: { x: number; y: number };
+  release: () => void;
+}
+
+/** What is in motion on a renderer: tiles gliding, by id, to their targets, and links fading back in. */
+interface Motion {
+  moving: Map<string, Moving>;
+  fading: Map<string, () => void>;
+}
+
+const motions = new WeakMap<Core, Motion>();
+const motionOf = (core: Core): Motion => {
+  let motion = motions.get(core);
+  if (motion === undefined) {
+    motion = { moving: new Map(), fading: new Map() };
+    motions.set(core, motion);
+  }
+  return motion;
+};
+
+/** Whether a tile of this size, moving from `from` to `to`, is in view at either end. No extent: everything is. */
+export function touchesView(
+  extent: Rect | null,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  width: number,
+  height: number,
+): boolean {
+  if (extent === null) return true;
+  return [from, to].some(
+    (at) =>
+      at.x + width / 2 >= extent.x1 &&
+      at.x - width / 2 <= extent.x2 &&
+      at.y + height / 2 >= extent.y1 &&
+      at.y - height / 2 <= extent.y2,
+  );
+}
+
+function stopMoving(core: Core, id: string) {
+  const motion = motionOf(core);
+  const running = motion.moving.get(id);
+  if (running === undefined) return;
+  motion.moving.delete(id);
+  core.getElementById(id).stop(true, false);
+  running.release();
+}
+
+function stopFading(core: Core, id: string) {
+  const motion = motionOf(core);
+  const release = motion.fading.get(id);
+  if (release === undefined) return;
+  motion.fading.delete(id);
+  const element = core.getElementById(id);
+  element.stop(true, false);
+  element.removeStyle("opacity");
+  release();
+}
+
+/** Glides a node to `target` from where it is drawn now. */
+function glideTo(core: Core, id: string, target: { x: number; y: number }) {
+  const motion = motionOf(core);
+  const release = track();
+  const running: Moving = { target, release };
+  motion.moving.set(id, running);
+  core.getElementById(id).animate(
+    { position: { ...target } },
+    {
+      duration: GLIDE_MS,
+      easing: "ease-out",
+      complete: () => {
+        if (motion.moving.get(id) === running) motion.moving.delete(id);
+        release();
+      },
+    },
+  );
+}
+
+/** Hides a link, divider or junction that has just taken its new data, and brings it back as the tiles settle. */
+function fadeIn(core: Core, id: string) {
+  stopFading(core, id);
+  const element = core.getElementById(id);
+  const shown = Number(element.style("opacity"));
+  element.style("opacity", 0);
+  const release = track();
+  const motion = motionOf(core);
+  motion.fading.set(id, release);
+  element.delay(FADE_DELAY_MS).animate(
+    { style: { opacity: Number.isFinite(shown) ? shown : 1 } },
+    {
+      duration: FADE_MS,
+      complete: () => {
+        if (motion.fading.get(id) !== release) return;
+        motion.fading.delete(id);
+        element.removeStyle("opacity");
+        release();
+      },
+    },
+  );
+}
+
+/** Stops everything in motion on a renderer that is about to be destroyed. */
+export function settle(core: Core) {
+  const motion = motionOf(core);
+  for (const id of [...motion.moving.keys()]) stopMoving(core, id);
+  for (const id of [...motion.fading.keys()]) stopFading(core, id);
+}
+
+/** Puts every gliding tile at its target at once, for what must measure the plan as it will rest. */
+export function land(core: Core) {
+  const motion = motionOf(core);
+  for (const [id, running] of [...motion.moving]) {
+    stopMoving(core, id);
+    core.getElementById(id).position(running.target);
+  }
+}
+
+/** Where a node is on screen once it has glided to its target: what the camera is held or shown against. */
+export function settledBox(core: Core, id: string): BoundingBox12 & BoundingBoxWH {
+  const node = core.getElementById(id);
+  const box = node.renderedBoundingBox({ includeLabels: false });
+  const target = motionOf(core).moving.get(id)?.target;
+  if (target === undefined) return box;
+  const now = node.position();
+  const dx = (target.x - now.x) * core.zoom();
+  const dy = (target.y - now.y) * core.zoom();
+  return { ...box, x1: box.x1 + dx, x2: box.x2 + dx, y1: box.y1 + dy, y2: box.y2 + dy };
+}
+
+const isPlain = (classes: string) => /\b(junction|divider)\b/.test(classes);
+
+/**
+ * Takes the renderer from the elements `drawn` to `next`, and returns what it now holds, with every position its
+ * target. With a `glide`, tiles whose move touches the view glide there, from where they are drawn now if they were
+ * already on their way; sizes change at once. A link, junction or divider whose tile glides is hidden as it takes its
+ * new shape, and fades back in. Without one, everything moves at once.
+ */
+export function apply(core: Core, drawn: ReadonlyMap<string, Drawn>, next: Drawn[], glide?: Glide): Map<string, Drawn> {
   const changes = diff(drawn, next);
+  const to = new Map(next.map((element) => [element.data.id, element]));
+  const glides = new Map<string, { x: number; y: number }>();
+  const candidates = new Map<string, { x: number; y: number }>();
+  const hidden = new Set<string>();
+  const edges: Update[] = [];
   core.batch(() => {
-    for (const id of changes.remove) core.getElementById(id).remove();
-    core.add(changes.add);
-    for (const change of changes.update) {
-      const element = core.getElementById(change.id);
-      if (change.data !== null) element.data(change.data);
-      if (change.unset.length > 0) element.removeData(change.unset.join(" "));
-      if (change.position !== null) element.position(change.position);
-      if (change.classes !== null) element.classes(change.classes);
+    for (const id of changes.remove) {
+      stopMoving(core, id);
+      stopFading(core, id);
+      core.getElementById(id).remove();
+    }
+    // Cytoscape keeps the position object it is given, and a glide would move it under the scene `held` records.
+    core.add(changes.add.map((one) => (one.position === undefined ? one : { ...one, position: { ...one.position } })));
+    const change = (update: Update) => {
+      const element = core.getElementById(update.id);
+      if (update.data !== null) element.data(update.data);
+      if (update.unset.length > 0) element.removeData(update.unset.join(" "));
+      if (update.classes !== null) element.classes(update.classes);
+      return element;
+    };
+    for (const update of changes.update) {
+      if (to.get(update.id)?.group === "edges") {
+        edges.push(update);
+        continue;
+      }
+      const element = change(update);
+      if (update.position === null) continue;
+      const data = to.get(update.id)?.data;
+      stopMoving(core, update.id);
+      if (isPlain(to.get(update.id)?.classes ?? "")) {
+        element.position(update.position);
+        hidden.add(update.id);
+        continue;
+      }
+      // Sizes are in the scene's data, which this write has just set.
+      const width = typeof data?.width === "number" ? data.width : element.width();
+      const height = typeof data?.height === "number" ? data.height : element.height();
+      if (
+        glide !== undefined &&
+        !glide.reduced &&
+        touchesView(glide.extent, element.position(), update.position, width, height)
+      )
+        candidates.set(update.id, update.position);
+      else element.position(update.position);
+    }
+    // A mass move costs more than it shows, as every tile is an image: past the cap, all of it snaps.
+    if (candidates.size > MAX_GLIDES) for (const [id, at] of candidates) core.getElementById(id).position(at);
+    else for (const [id, at] of candidates) glides.set(id, at);
+    const gliding = (id: unknown) => glides.has(String(id));
+    for (const update of edges) {
+      const element = change(update);
+      const ends = to.get(update.id)?.data;
+      if (gliding(ends?.source) || gliding(ends?.target)) hidden.add(update.id);
+      else if (element.isEdge()) stopFading(core, update.id);
+    }
+    // What this write adds is drawn only once its tiles have settled, rather than at its final route between tiles
+    // still on their way.
+    for (const added of changes.add) {
+      const ends = added.data;
+      if (added.group === "edges" ? gliding(ends.source) || gliding(ends.target) : isPlain(added.classes))
+        hidden.add(added.data.id);
     }
   });
+  // Started once the batch has settled, so a tile starts from where it is drawn.
+  for (const [id, target] of glides) glideTo(core, id, target);
+  if (glides.size > 0) for (const id of hidden) fadeIn(core, id);
+  else for (const id of hidden) stopFading(core, id);
   // Cytoscape measures a new label only as it next draws, but keeps a label's bounds, and the texture it draws the
   // label from, as first worked out: asked where a node is before then, it kept the old height, and a title that gained
   // a line was drawn squeezed or cut into it until a reload. Measured now, it is drawn whole.
@@ -178,5 +399,5 @@ export function apply(core: Core, drawn: ReadonlyMap<string, Drawn>, next: Drawn
     // measures even what Cytoscape thinks it has measured.
     (measured as unknown as { recalculateRenderedStyle?(useCache: boolean): void }).recalculateRenderedStyle?.(false);
   }
-  return new Map(next.map((element) => [element.data.id, element]));
+  return to;
 }

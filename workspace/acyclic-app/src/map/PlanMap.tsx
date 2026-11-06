@@ -12,13 +12,15 @@ import type { Palette } from "../palette";
 import { useWide } from "../wide";
 import { onChevron, STRIP } from "./chevron";
 import { browserLayouts } from "./client";
-import { apply, type Drawn, elementsOf } from "./draw";
+import { apply, type Drawn, elementsOf, land, prefersReducedMotion, settle, settledBox } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
 import { foldDone, isDoneBox } from "./fold";
 import { FRESH_WATCH, intentsPending, stepFrame } from "./framed";
+import { createGesture } from "./gesture";
 import { metricsOf, TILE_WIDTH } from "./labelmetrics";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, sourceKey, topOf, type View, visible } from "./model";
+import { busy, subscribe, track } from "./motion";
 import {
   firstView,
   fitPlan,
@@ -164,6 +166,22 @@ export default function PlanMap({
     };
   }, []);
   /** The last layout, with the view and the top level's shape it was computed for. */
+  /**
+   * Whether a pan, pinch or wheel zoom is going on: a repack of the top level waits for it to end, so tiles never move
+   * under the user's fingers. Selection and hover never wait.
+   */
+  const gesture = useMemo(() => {
+    let hold: (() => void) | null = null;
+    return createGesture({
+      onPending: (pending) => {
+        if (pending) hold = track();
+        else {
+          hold?.();
+          hold = null;
+        }
+      },
+    });
+  }, []);
   const [laid, setLaid] = useState<{ view: View; aspect: number; source: string; placed: Placed } | null>(null);
   const aspect = useAspect(host);
   /**
@@ -183,10 +201,12 @@ export default function PlanMap({
   const tapReveals = useRef(0);
   const watching = useRef<number | null>(null);
   /**
-   * The tile animations in flight, which keep the Map from settling. The one place an animation source plugs in: its
-   * running count replaces the 0, and its subscription calls `kickFramed` when an animation starts.
+   * The motion in flight, which keeps the Map from settling: tiles gliding, links fading in, and a redraw held back by a
+   * gesture (see `motion.ts`). A change in it, which `subscribe` reports, begins the watch again.
    */
-  const animating = (): number => 0;
+  const animating = (): number => busy();
+  const kick = useRef(() => {});
+  useEffect(() => subscribe(() => kick.current()), []);
   const activeNow = useRef(active);
   activeNow.current = active;
   const threadNow = useRef(thread);
@@ -231,6 +251,7 @@ export default function PlanMap({
     };
     watching.current = requestAnimationFrame(frame);
   }
+  kick.current = kickFramed;
   useEffect(
     () => () => {
       if (watching.current !== null) cancelAnimationFrame(watching.current);
@@ -295,6 +316,7 @@ export default function PlanMap({
     const core = cy.current;
     const element = host.current;
     if (core === null || element === null) return;
+    land(core);
     cancelViewIntent();
     clearSuppressedTitles();
     const plan = core.elements().boundingBox({ includeLabels: true });
@@ -340,7 +362,7 @@ export default function PlanMap({
         ? undefined
         : chain(model, focus.pin).find((id) => core.getElementById(id).nonempty());
     if (drawn !== undefined) {
-      const corner = core.getElementById(drawn).renderedBoundingBox({ includeLabels: false });
+      const corner = settledBox(core, drawn);
       anchor.current = { id: drawn, x: corner.x1, y: corner.y1 };
     }
     const next = expandTo(model, focus.id, toggles);
@@ -435,6 +457,39 @@ export default function PlanMap({
     };
     for (const kind of ["touchmove", "touchend", "touchcancel"] as const)
       element.addEventListener(kind, touch, { capture: true, passive: true });
+    // What counts as a gesture: a pointer or touch down on the Map until it ends, and wheel steps until a pause. Hover
+    // doesn't. A cancel, the window losing focus or the page hiding forgets them all, and the scheduler's watchdog
+    // clears one whose end was never seen.
+    const inside = (event: Event) => event.target instanceof Node && element.contains(event.target);
+    const down = (event: PointerEvent) => {
+      if (inside(event)) gesture.down(event.pointerId);
+    };
+    const up = (event: PointerEvent) => gesture.up(event.pointerId);
+    // A pointer moving with no button down is hover, or a release outside the page that was never seen: not a gesture.
+    const alive = (event: PointerEvent) => {
+      if (event.pointerType !== "touch" && event.buttons === 0) gesture.up(event.pointerId);
+      else gesture.move();
+    };
+    // Only the fingers on the Map count, wherever the touch that ended began.
+    const touched = (event: TouchEvent) =>
+      gesture.touches(
+        [...event.touches].filter((touch) => touch.target instanceof Node && element.contains(touch.target)).length,
+      );
+    const forget = () => gesture.reset();
+    const hiding = () => {
+      if (document.hidden) gesture.reset();
+    };
+    const stepped = (event: WheelEvent) => {
+      if (inside(event)) gesture.wheel();
+    };
+    element.addEventListener("pointerdown", down, { capture: true, passive: true });
+    for (const kind of ["pointerup", "pointercancel"] as const) window.addEventListener(kind, up, { capture: true });
+    window.addEventListener("pointermove", alive, { capture: true, passive: true });
+    for (const kind of ["touchstart", "touchmove", "touchend", "touchcancel"] as const)
+      window.addEventListener(kind, touched, { capture: true, passive: true });
+    window.addEventListener("wheel", stepped, { capture: true, passive: true });
+    window.addEventListener("blur", forget);
+    document.addEventListener("visibilitychange", hiding);
     core.on("viewport", () => {
       clearSuppressedTitles();
       if (fingers !== null && core.zoom() < floorOf(core))
@@ -445,6 +500,18 @@ export default function PlanMap({
       above.removeEventListener("wheel", wheel as EventListener, { capture: true });
       for (const kind of ["touchmove", "touchend", "touchcancel"] as const)
         element.removeEventListener(kind, touch, { capture: true });
+      element.removeEventListener("pointerdown", down, { capture: true });
+      for (const kind of ["pointerup", "pointercancel"] as const)
+        window.removeEventListener(kind, up, { capture: true });
+      window.removeEventListener("pointermove", alive, { capture: true });
+      for (const kind of ["touchstart", "touchmove", "touchend", "touchcancel"] as const)
+        window.removeEventListener(kind, touched, { capture: true });
+      window.removeEventListener("wheel", stepped, { capture: true });
+      window.removeEventListener("blur", forget);
+      document.removeEventListener("visibilitychange", hiding);
+      gesture.cancel();
+      gesture.reset();
+      settle(core);
       core.destroy();
       cy.current = null;
       held.current = new Map();
@@ -508,7 +575,7 @@ export default function PlanMap({
       const node = id === null ? null : core.getElementById(id);
       if (shown.current !== null) retryPending();
       else if (was !== null && id !== null && node !== null && !node.empty() && !typing()) {
-        if (newlyCovered(node.renderedBoundingBox({ includeLabels: false }), was, size, coverOf(element))) {
+        if (newlyCovered(settledBox(core, id), was, size, coverOf(element))) {
           const request = { id, centered: false, picked: false };
           shown.current = request;
           kickFramed();
@@ -626,56 +693,72 @@ export default function PlanMap({
     const element = host.current;
     if (core === null || element === null || drawn === null || placed === null) return;
     const first = core.elements().length === 0;
-    // Only what changed: on a large plan, a write changes a few elements of thousands.
-    clearSuppressedTitles();
-    held.current = apply(core, held.current, elementsOf(drawn, colour, lines, palette));
-    zoomOutTo(core, element, placed);
-    if (first) {
-      // At a zoom its titles can be read at, which on a phone shows only the start of a large plan: the first box's
-      // corner, and its first item.
-      const least = Math.min(...drawn.nodes.map((node) => node.layer));
-      const open = openPart(element);
-      const screen = { width: open.x2 - open.x1, height: open.y2 - open.y1 };
-      const start = startOf(
-        drawn.nodes.flatMap((node) => {
-          const at = placed.nodes.get(node.id);
-          return at === undefined ? [] : [{ ...at, box: node.kind === "box", top: node.layer === least }];
-        }),
-        screen.width,
-        16,
-        FIRST_ZOOM,
-      );
-      const view = firstView(placed, screen, 16, MAX_ZOOM, start, FIRST_ZOOM);
-      core.viewport({ zoom: view.zoom, pan: { x: view.pan.x + open.x1, y: view.pan.y + open.y1 } });
-    } else if (anchor.current !== null) {
-      // Pan so the toggled box's top-level box has its corner where it was before the layout changed.
-      const box = core.getElementById(anchor.current.id);
-      if (box.nonempty()) {
-        const now = box.renderedBoundingBox({ includeLabels: false });
-        core.panBy({ x: anchor.current.x - now.x1, y: anchor.current.y - now.y1 });
+    const job = () => {
+      // Only what changed: on a large plan, a write changes a few elements of thousands.
+      clearSuppressedTitles();
+      held.current = apply(core, held.current, elementsOf(drawn, colour, lines, palette), {
+        reduced: prefersReducedMotion(),
+        extent: core.extent(),
+      });
+      zoomOutTo(core, element, placed);
+      if (first) {
+        // At a zoom its titles can be read at, which on a phone shows only the start of a large plan: the first box's
+        // corner, and its first item.
+        const least = Math.min(...drawn.nodes.map((node) => node.layer));
+        const open = openPart(element);
+        const screen = { width: open.x2 - open.x1, height: open.y2 - open.y1 };
+        const start = startOf(
+          drawn.nodes.flatMap((node) => {
+            const at = placed.nodes.get(node.id);
+            return at === undefined ? [] : [{ ...at, box: node.kind === "box", top: node.layer === least }];
+          }),
+          screen.width,
+          16,
+          FIRST_ZOOM,
+        );
+        const view = firstView(placed, screen, 16, MAX_ZOOM, start, FIRST_ZOOM);
+        core.viewport({ zoom: view.zoom, pan: { x: view.pan.x + open.x1, y: view.pan.y + open.y1 } });
+      } else if (anchor.current !== null) {
+        // Pan so the toggled box's top-level box has its corner where it was before the layout changed.
+        const box = core.getElementById(anchor.current.id);
+        if (box.nonempty()) {
+          const now = settledBox(core, anchor.current.id);
+          core.panBy({ x: anchor.current.x - now.x1, y: anchor.current.y - now.y1 });
+        }
+        anchor.current = null;
       }
-      anchor.current = null;
+      drawnModel.current = model;
+      applied.current = { model, view, aspect, source, placed, drawn };
+      // Keep the request until the open Map can show it; a fully covered Map cannot satisfy a reveal.
+      tryShow();
+      // What the renderer holds, for the journeys to compare with the plan.
+      element.dataset.nodes = String(core.nodes().not(".junction, .divider").length);
+      element.dataset.edges = String(core.edges().length);
+      element.dataset.lit = String(drawn.nodes.filter((node) => node.lit).length);
+      element.dataset.litEdges = String(drawn.edges.filter((edge) => edge.lit).length);
+      element.dataset.font = String(document.fonts?.check(`${WEIGHT.regular} 13px Overpass`) ?? false);
+      // Drawn once the browser has painted the frame after this one's changes.
+      const drawing = performance.now();
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          element.dataset.drawMs = String(Math.round(performance.now() - drawing));
+          element.dataset.state = "drawn";
+          setDrawnOnce(true);
+        }),
+      );
+      kickFramed();
+    };
+    // A repack of the top level waits for a gesture, and the latest one wins; the first draw, and a redraw that moves
+    // nothing, as a selection or a hover does, never wait.
+    if (first) {
+      gesture.cancel();
+      job();
+    } else if (applied.current?.placed === placed) {
+      gesture.cancel();
+      job();
+    } else {
+      gesture.defer(job);
     }
-    drawnModel.current = model;
-    applied.current = { model, view, aspect, source, placed, drawn };
-    // Keep the request until the open Map can show it; a fully covered Map cannot satisfy a reveal.
-    tryShow();
-    // What the renderer holds, for the journeys to compare with the plan.
-    element.dataset.nodes = String(core.nodes().not(".junction, .divider").length);
-    element.dataset.edges = String(core.edges().length);
-    element.dataset.lit = String(drawn.nodes.filter((node) => node.lit).length);
-    element.dataset.litEdges = String(drawn.edges.filter((edge) => edge.lit).length);
-    element.dataset.font = String(document.fonts?.check(`${WEIGHT.regular} 13px Overpass`) ?? false);
-    // Drawn once the browser has painted the frame after this one's changes.
-    const drawing = performance.now();
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        element.dataset.drawMs = String(Math.round(performance.now() - drawing));
-        element.dataset.state = "drawn";
-        setDrawnOnce(true);
-      }),
-    );
-    kickFramed();
   }, [drawn, placed, colour, lines, palette, model, view, aspect, source]);
 
   // A change that will lay out or move the camera, noted before its layout is back, so the signal never reads a stale
@@ -699,6 +782,7 @@ export default function PlanMap({
     if (asked === undefined || asked.thread !== thread) return;
     if (core === null || element === null || drawn === null) return;
     toFrame.current = undefined;
+    land(core);
     clearSuppressedTitles();
     sought.current = thread;
     const boxOf = (kind: (node: SceneNode) => boolean) =>
@@ -757,7 +841,7 @@ export default function PlanMap({
     if (focus?.id === selected) return;
     const lit = drawn.nodes.flatMap((node) => {
       const drawnNode = core.getElementById(node.id);
-      return node.lit && drawnNode.nonempty() ? [drawnNode.renderedBoundingBox({ includeLabels: false })] : [];
+      return node.lit && drawnNode.nonempty() ? [settledBox(core, node.id)] : [];
     });
     const open = openPart(element);
     const target = nearest(lit, open);
@@ -822,7 +906,7 @@ export default function PlanMap({
       }
       if (action === "toggle") {
         const top = topOf(viewNow.current, id);
-        const corner = core.getElementById(top).renderedBoundingBox({ includeLabels: false });
+        const corner = settledBox(core, top);
         anchor.current = { id: top, x: corner.x1, y: corner.y1 };
         if (host.current !== null) host.current.dataset.state = "laying-out";
         kickFramed();
@@ -975,11 +1059,12 @@ function revealIn(
   const node = core.getElementById(id);
   if (node.empty()) return undefined;
   const open = openPart(element);
-  const box = () => node.renderedBoundingBox({ includeLabels: false });
+  const box = () => settledBox(core, id);
   const pan = reveal(box(), open, 8, centred);
   if (pan === null) return null;
   if ((picked || pan.x !== 0 || pan.y !== 0) && centred && core.zoom() < READABLE) {
-    core.zoom({ level: READABLE, renderedPosition: node.renderedPosition() });
+    const at = box();
+    core.zoom({ level: READABLE, renderedPosition: { x: (at.x1 + at.x2) / 2, y: (at.y1 + at.y2) / 2 } });
     const zoomed = reveal(box(), open, 8, true);
     if (zoomed === null) return null;
     core.panBy(zoomed);
