@@ -11,7 +11,6 @@ import type { Outline } from "./outline";
 import { Prose } from "./Prose";
 import { StageCounts } from "./Stage";
 import { threadLists } from "./threadLists";
-import type { WavesView } from "./waves";
 import { COLUMNS, useWide } from "./wide";
 
 /**
@@ -29,7 +28,6 @@ export interface OverviewProps {
   titleOf: (id: string) => string;
   /** Each thread's items by stage. */
   counts: ReadonlyMap<string, Counts>;
-  waves: WavesView | null;
   outline: Outline | null;
   /** The plan's items by id, for each project's own progress. */
   items: ReadonlyMap<string, Pick<Item, "progress">>;
@@ -46,7 +44,6 @@ export function Overview({
   lines,
   titleOf,
   counts,
-  waves,
   outline,
   items,
   onNeeds,
@@ -54,7 +51,7 @@ export function Overview({
   onSelectProject,
   onView,
 }: OverviewProps) {
-  const { working, next } = threadLists(counts, waves);
+  const { working, next } = threadLists(counts);
   const needsShown = useWide(COLUMNS) ? THREADS_SHOWN : NEEDS_SHOWN_STACKED;
   // In three columns, an Up next half as long as the longest list beside it stacks under In progress, and the projects
   // take its column, rather than leave most of it empty and start below the first view.

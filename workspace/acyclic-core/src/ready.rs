@@ -140,7 +140,7 @@ impl ThreadReadiness {
 pub struct ReadyThread {
     /// The thread.
     pub thread: String,
-    /// Its ready members, by title in natural order, then id.
+    /// Its ready members, by id in natural order.
     pub items: Vec<String>,
 }
 
@@ -382,36 +382,24 @@ impl<'a> ReadinessEvaluator<'a> {
     }
 
     /// The threads with work `actor` may take, each with its ready members: its own claimed thread first, then the
-    /// unclaimed ones by title in natural order and id. Threads others hold are left out.
+    /// unclaimed ones by id in natural order. Threads others hold are left out.
     ///
     /// # Errors
     ///
     /// Fails when a claim can't be read.
     pub fn ready(&self, actor: &str) -> Result<Vec<ReadyThread>, Error> {
-        let title =
-            |id: &str, title: &Value<String>| title.one().cloned().unwrap_or_else(|| id.to_owned());
         let mut ready = Vec::new();
-        for (id, thread) in &self.model.threads {
+        for id in self.model.threads.keys() {
             let status = self.thread(id)?;
             if !status.claimable_by(actor) || status.items().is_empty() {
                 continue;
             }
             let own = !matches!(status, ThreadReadiness::Ready { .. });
-            let mut items: Vec<(String, &String)> = status
-                .items()
-                .iter()
-                .map(|item| (title(item, &self.model.items[item].title), item))
-                .collect();
-            items.sort_by(|a, b| natural::cmp(&a.0, &b.0).then_with(|| a.1.cmp(b.1)));
-            let items = items.into_iter().map(|(_, item)| item.clone()).collect();
-            let key = (!own, title(id, &thread.title));
-            ready.push((key, ReadyThread { thread: id.clone(), items }));
+            let mut items = status.items().to_vec();
+            items.sort_by(|a, b| natural::cmp(a, b));
+            ready.push((!own, ReadyThread { thread: id.clone(), items }));
         }
-        ready.sort_by(|(a, x), (b, y)| {
-            a.0.cmp(&b.0)
-                .then_with(|| natural::cmp(&a.1, &b.1))
-                .then_with(|| x.thread.cmp(&y.thread))
-        });
+        ready.sort_by(|(a, x), (b, y)| a.cmp(b).then_with(|| natural::cmp(&x.thread, &y.thread)));
         Ok(ready.into_iter().map(|(_, thread)| thread).collect())
     }
 

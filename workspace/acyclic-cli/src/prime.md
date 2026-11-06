@@ -106,10 +106,11 @@ waits-for and thread it belongs with.
 
 ## Finding and doing work
 
-1. `acyclic thread ready` lists the threads you may work: yours first, then those nobody holds, by title. Each row is
-   the thread's summary with its ready `items`. An item in no thread is never ready, and `acyclic needs` lists it as
-   `unthreaded`. `acyclic item list` lists every item. `acyclic item show <item>...` explains items, as an array in the
-   order given: their readiness, children and their thread's claims.
+1. `acyclic thread ready` lists the threads you may work: yours first, then those nobody holds, each group by id in
+   natural order (`t2` before `t10`). Each row is the thread's summary with its ready `items`, by id too. An item in no
+   thread is never ready, and `acyclic needs` lists it as `unthreaded`. `acyclic item list` lists every item.
+   `acyclic item show <item>...` explains items, as an array in the order given: their readiness, children and their
+   thread's claims.
 2. `acyclic thread claim <thread>` before starting. A claim holds a time lease (60 minutes by default,
    `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any
    write through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder

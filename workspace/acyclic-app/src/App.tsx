@@ -890,7 +890,6 @@ export function App() {
             lines={lines}
             titleOf={titleOf}
             counts={counts}
-            waves={waves}
             outline={outline}
             items={itemsById}
             onNeeds={(key) => goTo("needs", key ?? null)}
