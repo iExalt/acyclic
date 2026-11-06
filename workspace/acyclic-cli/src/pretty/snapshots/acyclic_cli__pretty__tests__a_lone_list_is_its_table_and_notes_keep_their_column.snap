@@ -2,10 +2,10 @@
 source: workspace/acyclic-cli/src/pretty/tests.rs
 expression: "format!(\"{}{}{}\", render(&command(\"needs\"), &needs, None, &BTreeMap::new()),\nrender(&command(\"repository list\"), &empty, None, &BTreeMap::new()),\nrender(&command(\"item show a1\"), &noted, None, &BTreeMap::new()))"
 ---
-KIND          ID  THREADS         FIX                                     ITEM  ENTITY  FIELD  KEEPS
-thread-cycle      t1 (T), t2 (U)
-unthreaded                        acyclic item edit a1 --thread <THREAD>  a1
-conflict      a1                                                                item    state  done: Keep done in a terminal; keep parked: acyclic item edit a1 --state parked
+KIND          RECORD  ID  THREADS         FIX                                     ITEM  FIELD  KEEPS
+thread-cycle              t1 (T), t2 (U)
+unthreaded                                acyclic item edit a1 --thread <THREAD>  a1
+conflict      item    a1                                                                state  done: Keep done in a terminal; keep parked: acyclic item edit a1 --state parked
 none
 id     a1
 notes  first line

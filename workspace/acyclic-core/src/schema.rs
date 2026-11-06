@@ -74,7 +74,7 @@ pub mod repository {
 pub mod thread {
     /// A short title.
     pub const TITLE: &str = "title";
-    /// The brief.
+    /// Its notes, stored under their older name so replicas of older versions keep reading them.
     pub const BRIEF: &str = "brief";
     /// Set when the thread is deleted; the same field as an item's, read by `model::is_deleted`.
     pub const DELETED: &str = super::item::DELETED;

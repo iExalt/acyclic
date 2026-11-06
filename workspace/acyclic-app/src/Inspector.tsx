@@ -352,10 +352,11 @@ function Conflicts({
 
 /** Where an item stands, with a parent's leaves counted by stage. */
 function ItemStatus({ item }: { item: Item }) {
+  // A parent with no leaf to count, as on a cycle of parents, has no stage: it says its own state, as a leaf would.
   if (item.progress !== undefined)
     return (
       <>
-        <span>{item.stage === undefined ? stateWords(item.progress.state) : <StageLabel stage={item.stage} />}</span>
+        <span>{item.stage === undefined ? stateWords(item.state) : <StageLabel stage={item.stage} />}</span>
         {item.progress.counts.leaves === 0 ? null : <StageCounts counts={item.progress.counts} />}
       </>
     );

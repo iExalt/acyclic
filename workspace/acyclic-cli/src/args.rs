@@ -557,9 +557,10 @@ pub enum ThreadCommand {
         /// Its title.
         #[arg(short = 't', long)]
         title: String,
-        /// Its brief.
-        #[arg(short = 'b', long)]
-        brief: Option<String>,
+        /// Its notes: what the work is and how to go about it.
+        #[arg(long, alias = "brief", short_alias = 'b')]
+        #[serde(alias = "brief")]
+        notes: Option<String>,
     },
     /// Edits a thread: `--field` sets a field, `--no-field` clears it.
     Edit(ThreadEdit),
@@ -608,18 +609,19 @@ pub struct ThreadEdit {
     /// A new title.
     #[arg(short = 't', long)]
     pub title: Option<String>,
-    /// A new brief.
-    #[arg(short = 'b', long)]
-    pub brief: Option<String>,
-    /// Clear its brief.
-    #[arg(long)]
-    #[serde(default)]
-    pub no_brief: bool,
+    /// New notes.
+    #[arg(long, alias = "brief", short_alias = 'b')]
+    #[serde(alias = "brief")]
+    pub notes: Option<String>,
+    /// Clear its notes.
+    #[arg(long, alias = "no-brief")]
+    #[serde(default, alias = "no-brief")]
+    pub no_notes: bool,
 }
 
 impl ThreadEdit {
     fn validate(&self) -> Result<(), CliError> {
-        clears("brief", self.brief.is_some(), self.no_brief)
+        clears("notes", self.notes.is_some(), self.no_notes)
     }
 }
 

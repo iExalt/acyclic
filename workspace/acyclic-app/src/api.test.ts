@@ -86,7 +86,7 @@ describe("items", () => {
 
   it("keeps the stage core gives a parent from its leaves, beside its progress", async () => {
     const counts = { ...NO_COUNTS, leaves: 2, done: 1, ready: 1 };
-    const parent = { ...raw(ID.a), stage: "in-progress", progress: { state: "in-progress", counts } };
+    const parent = { ...raw(ID.a), stage: "in-progress", progress: { counts } };
     const { fetcher } = server({
       "item list": { ok: true, data: { items: [{ id: ID.a }] } },
       "item show": { ok: true, data: [parent] },
@@ -137,14 +137,14 @@ describe("thread", () => {
           {
             id: ID.t,
             title: "T",
-            brief: { conflict: ["x", "y"] },
+            notes: { conflict: ["x", "y"] },
             heads: [ID.a],
             members: [{ id: ID.a, title: "A" }],
           },
         ],
       },
     });
-    await expect(thread(ID.t, fetcher)).resolves.toMatchObject({ title: "T", brief: null });
+    await expect(thread(ID.t, fetcher)).resolves.toMatchObject({ title: "T", notes: null });
     expect(sent).toEqual([example("a thread")]);
   });
 });

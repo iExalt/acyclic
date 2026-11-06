@@ -154,7 +154,7 @@ fn keep(
             required(parsed(value), &|t| set(Assign::Thread(id.to_owned(), ThreadAssign::Title(t))))
         },
         (kind::THREAD, thread::BRIEF) => parsed(value).map_or(Keep::Not(Unkept::Unreadable), |v| {
-            set(Assign::Thread(id.to_owned(), ThreadAssign::Brief(v)))
+            set(Assign::Thread(id.to_owned(), ThreadAssign::Notes(v)))
         }),
         (kind::REPOSITORY, repository::DEFAULT_BRANCH) => required(parsed(value), &|b| {
             set(Assign::Repository(id.to_owned(), RepositoryAssign::DefaultBranch(b)))

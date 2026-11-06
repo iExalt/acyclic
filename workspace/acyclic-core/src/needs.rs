@@ -20,9 +20,9 @@ pub use keep::{Keep, Kept, Unkept, keeps};
 pub enum Entry {
     /// A field holds conflicting values.
     Conflict {
-        /// The entity's kind.
+        /// The record's kind.
         kind: String,
-        /// The entity's id.
+        /// The record's id.
         id: String,
         /// The field.
         field: String,
@@ -32,8 +32,8 @@ pub enum Entry {
         /// The remote.
         remote: String,
     },
-    /// Blocks links form a cycle.
-    LinkCycle {
+    /// Waits-for links form a cycle.
+    WaitsForCycle {
         /// The items on it.
         items: Vec<String>,
     },
@@ -78,7 +78,7 @@ pub enum Entry {
     },
     /// A reference to something that doesn't exist.
     Dangling {
-        /// The referring entity's kind.
+        /// The referring record's kind.
         kind: String,
         /// Its id.
         id: String,
@@ -100,8 +100,8 @@ impl Entry {
         let parts: Vec<&str> = match self {
             Self::Conflict { kind, id, field } => vec!["conflict", kind, id, field],
             Self::Unpushed { remote } => vec!["unpushed", remote],
-            Self::LinkCycle { items } => {
-                std::iter::once("link-cycle").chain(items.iter().map(String::as_str)).collect()
+            Self::WaitsForCycle { items } => {
+                std::iter::once("waits-for-cycle").chain(items.iter().map(String::as_str)).collect()
             },
             Self::ParentCycle { items } => {
                 std::iter::once("parent-cycle").chain(items.iter().map(String::as_str)).collect()
@@ -138,7 +138,7 @@ impl Entry {
     pub const fn notifies(&self) -> bool {
         match self {
             Self::Conflict { .. }
-            | Self::LinkCycle { .. }
+            | Self::WaitsForCycle { .. }
             | Self::ParentCycle { .. }
             | Self::ThreadCycle { .. }
             | Self::Contest { .. }
@@ -170,8 +170,8 @@ pub fn needs_you(
             field: field.to_owned(),
         });
     }
-    for items in model.link_cycles() {
-        entries.insert(Entry::LinkCycle { items });
+    for items in model.waits_for_cycles() {
+        entries.insert(Entry::WaitsForCycle { items });
     }
     for items in model.parent_cycles() {
         entries.insert(Entry::ParentCycle { items });

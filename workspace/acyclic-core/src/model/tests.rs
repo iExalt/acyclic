@@ -127,7 +127,7 @@ fn ordering_links_never_close_a_cycle_locally() {
     link(&mut r, "a", "b", by(2)).unwrap();
     link(&mut r, "b", "c", by(2)).unwrap();
     let err = link(&mut r, "c", "a", by(3)).unwrap_err();
-    assert_eq!(err, WriteError::LinkCycle(vec!["a".into(), "b".into(), "c".into()]));
+    assert_eq!(err, WriteError::WaitsForCycle(vec!["a".into(), "b".into(), "c".into()]));
     assert_eq!(link(&mut r, "a", "a", by(3)), Err(WriteError::SelfLink("a".into())));
 }
 
@@ -172,12 +172,12 @@ fn a_link_is_removed_once() {
 }
 
 #[test]
-fn a_link_cycle_made_by_a_join_is_derived() {
+fn a_waits_for_cycle_made_by_a_join_is_derived() {
     let (mut a, mut b) = pair(&["x", "y"]);
     link(&mut a, "x", "y", by(2)).unwrap();
     link(&mut b, "y", "x", by(2)).unwrap();
     a.join(&b.state).unwrap();
-    assert_eq!(model(&a).link_cycles(), vec![vec!["x".to_owned(), "y".to_owned()]]);
+    assert_eq!(model(&a).waits_for_cycles(), vec![vec!["x".to_owned(), "y".to_owned()]]);
 }
 
 #[test]
@@ -366,15 +366,6 @@ fn every_variant_of_a_value_enum_round_trips() {
     // Stored as older versions read it, and shown as `open`.
     assert_eq!(names(&states), ["backlog", "parked", "done"]);
     assert_eq!(states.map(ItemState::word), ["open", "parked", "done"]);
-    let progress = [
-        ProgressState::Backlog,
-        ProgressState::Parked,
-        ProgressState::InProgress,
-        ProgressState::Done,
-    ];
-    let progress: Vec<Json> =
-        progress.iter().map(|state| serde_json::to_value(state).unwrap()).collect();
-    assert_eq!(progress, [json!("open"), json!("parked"), json!("in-progress"), json!("done")]);
 }
 
 #[test]
@@ -385,30 +376,32 @@ fn a_parent_reads_as_its_leaves_make_it_unless_parked_by_hand() {
         set_parent(&mut r, child, Some(parent), by(2)).unwrap();
     }
     let progress = |r: &Replica, id: &str| model(r).progress(id).unwrap();
-    let reads = |state, done, total| Progress { state, done, total };
+    let reads = |done, total| Progress { done, total };
     // Leaves count at every depth, and a leaf has no progress.
-    assert_eq!(progress(&r, "top"), reads(ProgressState::Backlog, 0, 3));
+    assert_eq!(progress(&r, "top"), reads(0, 3));
     assert_eq!(model(&r).progress("a"), None);
     set_state(&mut r, "a", ItemState::Done, by(3)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ProgressState::InProgress, 1, 3));
+    assert_eq!(progress(&r, "top"), reads(1, 3));
     for leaf in ["b", "c"] {
         set_state(&mut r, leaf, ItemState::Done, by(4)).unwrap();
     }
-    assert_eq!(progress(&r, "top"), reads(ProgressState::Done, 3, 3));
-    assert_eq!(progress(&r, "mid"), reads(ProgressState::Done, 2, 2));
+    assert_eq!(progress(&r, "top"), reads(3, 3));
+    assert_eq!(progress(&r, "mid"), reads(2, 2));
     assert!(model(&r).reads_done("top") && !model(&r).items["top"].is_done());
+    // Parked by hand, a parent's own state holds: it doesn't read done.
+    set_state(&mut r, "top", ItemState::Parked, by(5)).unwrap();
+    assert!(!model(&r).reads_done("top") && model(&r).reads_done("mid"));
     // Reopening a leaf brings its parents back; a state reopening left on a parent counts for nothing.
-    set_state(&mut r, "b", ItemState::Backlog, by(5)).unwrap();
-    set_state(&mut r, "mid", ItemState::Backlog, by(5)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ProgressState::InProgress, 2, 3));
-    // Parked by hand, a parent's own state holds.
-    set_state(&mut r, "top", ItemState::Parked, by(6)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ProgressState::Parked, 2, 3));
+    set_state(&mut r, "top", ItemState::Backlog, by(6)).unwrap();
+    set_state(&mut r, "b", ItemState::Backlog, by(6)).unwrap();
+    set_state(&mut r, "mid", ItemState::Backlog, by(6)).unwrap();
+    assert_eq!(progress(&r, "top"), reads(2, 3));
+    assert!(!model(&r).reads_done("top"));
     // A done stored on a parent, as older versions wrote, counts for nothing at any depth.
     set_state(&mut r, "top", ItemState::Done, by(7)).unwrap();
     set_state(&mut r, "mid", ItemState::Done, by(7)).unwrap();
-    assert_eq!(progress(&r, "top"), reads(ProgressState::InProgress, 2, 3));
-    assert!(!model(&r).reads_done("mid"));
+    assert_eq!(progress(&r, "top"), reads(2, 3));
+    assert!(!model(&r).reads_done("mid") && !model(&r).reads_done("top"));
 }
 
 #[test]
@@ -424,10 +417,7 @@ fn a_conflicted_leaf_is_not_done_and_a_thread_holding_a_parent_finishes_with_its
     set_state(&mut b, "y", ItemState::Parked, by(3)).unwrap();
     a.join(&b.state).unwrap();
     assert!(model(&a).items["y"].state.is_conflict());
-    assert_eq!(
-        model(&a).progress("p").map(|p| (p.state, p.done)),
-        Some((ProgressState::InProgress, 1))
-    );
+    assert_eq!(model(&a).progress("p"), Some(Progress { done: 1, total: 2 }));
     // A parent reads as done once its leaves are.
     assert!(!model(&a).reads_done("p"));
     set_state(&mut a, "y", ItemState::Done, by(5)).unwrap();

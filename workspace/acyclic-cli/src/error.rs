@@ -117,8 +117,8 @@ impl From<WriteError> for CliError {
             WriteError::NoItem(_) => Self::new("not-found", exit::NOT_FOUND, message),
             WriteError::Deleted(_) => Self::refused("deleted", message),
             WriteError::ParentCycle(_) => Self::refused("parent-cycle", message),
-            WriteError::LinkCycle(path) => {
-                Self::refused("link-cycle", message).with(json!({"items": path}))
+            WriteError::WaitsForCycle(path) => {
+                Self::refused("waits-for-cycle", message).with(json!({"items": path}))
             },
             WriteError::SelfLink(_) => Self::refused("self-link", message),
         }

@@ -125,7 +125,7 @@ fn import(data: &Json) -> String {
             .filter_map(|(kind, one, many)| {
                 let n = changes
                     .iter()
-                    .filter(|change| change["entity"] == *kind && change["action"] == action)
+                    .filter(|change| change["record"] == *kind && change["action"] == action)
                     .count();
                 (n > 0).then(|| format!("{n} {}", if n == 1 { one } else { many }))
             })
@@ -346,14 +346,15 @@ fn list_table(rows: Vec<&Json>, width: Option<u16>) -> String {
     table(rows, &columns, width)
 }
 
-/// Field names with `kind`, `id` and `title` first, as a record is named, then the rest in order.
+/// Field names with `kind`, `record`, `id` and `title` first, as a record is named, then the rest in order.
 fn leading<'a>(keys: impl IntoIterator<Item = &'a String>) -> Vec<&'a String> {
     let mut keys: Vec<&String> = keys.into_iter().collect();
     keys.sort_by_key(|key| match key.as_str() {
         "kind" => 0,
-        "id" => 1,
-        "title" => 2,
-        _ => 3,
+        "record" => 1,
+        "id" => 2,
+        "title" => 3,
+        _ => 4,
     });
     keys
 }
@@ -375,7 +376,7 @@ fn empty(value: &Json) -> bool {
 }
 
 /// A readiness, an item's or a thread's, as a phrase: `waiting for a (not done)`, `claimed by session/s`, and so on.
-/// `None` for a status this build doesn't know, which then prints field by field.
+/// `None` for a readiness this build doesn't know, which then prints field by field.
 fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
     let text = |key: &str| fields.get(key).map(compact).unwrap_or_default();
     // A thread's readiness lists the members that would be ready while it is held.
@@ -383,7 +384,7 @@ fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
         Some(items) if !empty(items) => format!("; ready: {}", compact(items)),
         _ => String::new(),
     };
-    let phrase = match fields.get("status")?.as_str()? {
+    let phrase = match fields.get("readiness")?.as_str()? {
         "waiting" => {
             let waiting = fields.get("waiting")?.as_object()?;
             let each = waiting.iter().map(|(id, wait)| {
@@ -410,7 +411,7 @@ fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
 }
 
 /// A value on one line: text as it is, a list joined with commas, an embedded record by its `id`, a readiness as a
-/// phrase, and another record's fields that say something as `name value`, its `status` first.
+/// phrase, and another record's fields that say something as `name value`, its `readiness` first.
 fn compact(value: &Json) -> String {
     match value {
         Json::Object(fields) if let Some(phrase) = readiness(fields) => phrase,
@@ -453,13 +454,13 @@ fn compact(value: &Json) -> String {
         Json::Object(fields) => {
             let rest = fields
                 .iter()
-                .filter(|(key, value)| *key != "status" && !empty(value))
+                .filter(|(key, value)| *key != "readiness" && !empty(value))
                 .map(|(key, value)| format!("{key} {}", compact(value)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            match (fields.get("status"), rest.is_empty()) {
-                (Some(status), true) => compact(status),
-                (Some(status), false) => format!("{} ({rest})", compact(status)),
+            match (fields.get("readiness"), rest.is_empty()) {
+                (Some(readiness), true) => compact(readiness),
+                (Some(readiness), false) => format!("{} ({rest})", compact(readiness)),
                 (None, _) => rest,
             }
         },

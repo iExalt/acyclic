@@ -638,7 +638,7 @@ pub fn line(entry: &Value) -> String {
     let text = match entry["kind"].as_str().unwrap_or_default() {
         "conflict" => format!(
             "{} {}'s {} was written differently on two machines",
-            entry["entity"].as_str().unwrap_or_default(),
+            entry["record"].as_str().unwrap_or_default(),
             entry["id"].as_str().unwrap_or_default(),
             entry["field"].as_str().unwrap_or_default()
         ),
@@ -652,7 +652,7 @@ pub fn line(entry: &Value) -> String {
         "contest" => {
             format!("{} has a claim to sort out", title(&entry["thread"]))
         },
-        "link-cycle" | "parent-cycle" => "Items form a cycle".to_owned(),
+        "waits-for-cycle" | "parent-cycle" => "Items form a cycle".to_owned(),
         "thread-cycle" => {
             let threads: Vec<String> =
                 entry["threads"].as_array().into_iter().flatten().map(title).collect();

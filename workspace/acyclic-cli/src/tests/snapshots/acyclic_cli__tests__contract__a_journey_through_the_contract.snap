@@ -138,7 +138,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
             "id": "01900000-0000-7000-8000-0000000000a1",
             "parent": null,
             "readiness": {
-              "status": "ready"
+              "readiness": "ready"
             },
             "stage": "ready",
             "state": "open",
@@ -189,7 +189,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item done Second
     "code": "not-ready",
     "details": {
       "readiness": {
-        "status": "waiting",
+        "readiness": "waiting",
         "waiting": {
           "01900000-0000-7000-8000-0000000000a1": {
             "why": "open"
@@ -224,7 +224,7 @@ $ ACYCLIC_ACTOR=session/pi acyclic thread claim Start
         "items": [
           "01900000-0000-7000-8000-0000000000a1"
         ],
-        "status": "claimed"
+        "readiness": "claimed"
       }
     },
     "message": "thread 01900000-0000-7000-8000-0000000000f0 isn't ready to claim: it has no ready work, or someone else holds it; `acyclic thread show 01900000-0000-7000-8000-0000000000f0` says why"
@@ -240,7 +240,7 @@ $ ACYCLIC_ACTOR=session/pi acyclic item done First
     "details": {
       "readiness": {
         "holder": "session/mac",
-        "status": "claimed"
+        "readiness": "claimed"
       }
     },
     "message": "item 01900000-0000-7000-8000-0000000000a1 isn't yours to finish: it isn't ready, or someone else holds it; `acyclic item show 01900000-0000-7000-8000-0000000000a1` says which"
@@ -283,7 +283,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
 {
   "data": [
     {
-      "brief": null,
       "claims": [
         {
           "holder": "session/mac",
@@ -307,7 +306,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
           "id": "01900000-0000-7000-8000-0000000000a1",
           "parent": null,
           "readiness": {
-            "status": "done"
+            "readiness": "done"
           },
           "stage": "done",
           "state": "done",
@@ -320,7 +319,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
           "parent": null,
           "readiness": {
             "holder": "session/mac",
-            "status": "claimed"
+            "readiness": "claimed"
           },
           "stage": "in-progress",
           "state": "open",
@@ -328,6 +327,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
           "title": "Second"
         }
       ],
+      "notes": null,
       "progress": {
         "counts": {
           "done": 1,
@@ -344,7 +344,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Start
         "items": [
           "01900000-0000-7000-8000-0000000000a2"
         ],
-        "status": "claimed"
+        "readiness": "claimed"
       },
       "title": "Start"
     }
@@ -394,7 +394,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
             "id": "01900000-0000-7000-8000-0000000000a2",
             "parent": null,
             "readiness": {
-              "status": "ready"
+              "readiness": "ready"
             },
             "stage": "ready",
             "state": "open",
@@ -500,7 +500,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       "notes": null,
       "parent": null,
       "readiness": {
-        "status": "ready"
+        "readiness": "ready"
       },
       "role": "item",
       "stage": "ready",
@@ -543,7 +543,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread ready
             "id": "01900000-0000-7000-8000-0000000000a2",
             "parent": null,
             "readiness": {
-              "status": "ready"
+              "readiness": "ready"
             },
             "stage": "ready",
             "state": "open",
@@ -587,7 +587,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item list
         "id": "01900000-0000-7000-8000-0000000000a1",
         "parent": null,
         "readiness": {
-          "status": "done"
+          "readiness": "done"
         },
         "stage": "done",
         "state": "done",
@@ -598,7 +598,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item list
         "id": "01900000-0000-7000-8000-0000000000a2",
         "parent": null,
         "readiness": {
-          "status": "ready"
+          "readiness": "ready"
         },
         "stage": "ready",
         "state": "open",
@@ -715,7 +715,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
 {
   "data": [
     {
-      "brief": null,
       "claims": [],
       "counts": {
         "conflicted": 0,
@@ -732,7 +731,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
           "id": "01900000-0000-7000-8000-0000000000a1",
           "parent": null,
           "readiness": {
-            "status": "done"
+            "readiness": "done"
           },
           "stage": "done",
           "state": "done",
@@ -744,7 +743,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
           "id": "01900000-0000-7000-8000-0000000000a2",
           "parent": null,
           "readiness": {
-            "status": "ready"
+            "readiness": "ready"
           },
           "stage": "ready",
           "state": "open",
@@ -752,6 +751,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
           "title": "Second"
         }
       ],
+      "notes": null,
       "progress": {
         "counts": {
           "done": 1,
@@ -767,7 +767,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic thread show Work
         "items": [
           "01900000-0000-7000-8000-0000000000a2"
         ],
-        "status": "ready"
+        "readiness": "ready"
       },
       "title": "Work"
     }
@@ -808,7 +808,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
       "notes": null,
       "parent": null,
       "readiness": {
-        "status": "done"
+        "readiness": "done"
       },
       "role": "item",
       "stage": "done",
@@ -831,7 +831,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First Second
       "notes": null,
       "parent": null,
       "readiness": {
-        "status": "ready"
+        "readiness": "ready"
       },
       "role": "item",
       "stage": "ready",
@@ -1060,7 +1060,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item edit First --title Renamed --waits-for 
 # exit 1
 {
   "error": {
-    "code": "link-cycle",
+    "code": "waits-for-cycle",
     "details": {
       "items": [
         "01900000-0000-7000-8000-0000000000a1",
@@ -1094,7 +1094,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show First
       "notes": null,
       "parent": null,
       "readiness": {
-        "status": "done"
+        "readiness": "done"
       },
       "role": "item",
       "stage": "done",
@@ -1134,7 +1134,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Second
       "notes": null,
       "parent": null,
       "readiness": {
-        "status": "unthreaded"
+        "readiness": "unthreaded"
       },
       "role": "item",
       "stage": "unthreaded",
@@ -1337,11 +1337,10 @@ $ ACYCLIC_ACTOR=session/mac acyclic item show Goal
           "ready": 0,
           "unthreaded": 0,
           "waiting": 0
-        },
-        "state": "done"
+        }
       },
       "readiness": {
-        "status": "parent"
+        "readiness": "parent"
       },
       "role": "project",
       "stage": "done",

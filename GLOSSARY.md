@@ -30,8 +30,7 @@ _Avoid_: note (that is the item's own notes field)
 ## Execution
 
 **Readiness**:
-Whether an item or thread can start now, given its waits-for links and claims. JSON keeps the older key `status`
-for readiness values.
+Whether an item or thread can start now, given its waits-for links and claims. JSON says it under `readiness`.
 _Avoid_: status (for readiness alone), unblocked
 
 **Blocker**:
@@ -48,7 +47,8 @@ _Avoid_: partition, breakdown
 
 **Thread**:
 A bounded piece of work that one continuing agent conversation works through from start to finish. A thread exists
-while it has a record; an item that names any other thread holds a dangling reference.
+while it has a record; an item that names any other thread holds a dangling reference. Its notes say what the work
+is and how to go about it; stored data keeps their older field name `brief`.
 _Avoid_: workstream, track, lane, operation
 
 **Wave**:
@@ -109,7 +109,7 @@ _Avoid_: pile, group, archive
 
 **State**:
 What is set by hand on an item: `open`, `parked` or `done`. An unset state reads as `open`. State is stored;
-readiness and stage are computed on read. A parent's progress also derives from its leaves and may be in progress.
+readiness and stage are computed on read. A parent's stage derives from its leaves, and may be in progress.
 Stored data keeps the older value `backlog` for open, so replicas of older versions keep reading it; commands and
 imports still take `backlog` as open, and nothing shows it.
 _Avoid_: backlog (for open)
@@ -135,7 +135,8 @@ An item waits for another when it can't start until that one is done: `item edit
 relationship between items besides their parents.
 _Avoid_: blocker link, depends_on, blocks (in prose), hard dependency, relates to
 
-Stored data keeps the older kind name `blocks` for a waits-for link.
+Stored data keeps the older kind name `blocks` for a waits-for link. Links that would close a loop form a waits-for
+cycle, `waits-for-cycle` in JSON.
 
 **Dangling reference**:
 A parent, thread or waits-for target that names a record that doesn't exist or was deleted. It lands on
@@ -149,7 +150,9 @@ The repository that holds one trust domain's items and their changes; it is not 
 _Avoid_: board, project (for the repository)
 
 **Record**:
-A stored entry in the tracker, such as an item, thread or repository, named by its id.
+A stored entry in the tracker, such as an item, thread or repository, named by its id. JSON names its kind under
+`record`, as in a conflict or a dangling reference.
+_Avoid_: entity
 
 **Session**:
 The server token issued by `acyclic up` for access to the app and API. The stored actor kind `session/<id>` keeps
@@ -225,5 +228,7 @@ _Avoid_: record (that is a stored tracker entry), log, ADR (for the general idea
 - "project": a top-level **Item** in acyclic, but a registered checkout in Paseo. Resolved: "project" means the
   acyclic sense here; say "Paseo project" for the other.
 - "thread" and "workstream": earlier drafts said workstream. Resolved: **Thread**, the planning skills' word too.
+- "brief": a thread's notes were once called its brief, and stored data still names the field so. Resolved: say
+  notes for that field; **Brief** names only what an agent receives when a thread is deployed.
 - "thread" and a chat: in chat apps a thread is one conversation. Here a **Thread** is one continuing conversation
   across its **Runs**, so the two senses agree.

@@ -76,7 +76,7 @@ pub(crate) struct ItemFields {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ThreadFields {
     pub title: Option<String>,
-    pub brief: Change<String>,
+    pub notes: Change<String>,
 }
 
 /// What a repository record's `add` or `edit` sets.
@@ -249,8 +249,8 @@ pub(crate) fn thread_changes(id: &str, fields: &ThreadFields, adding: Adding) ->
     if let Some(title) = &fields.title {
         assigns.push(field(ThreadAssign::Title(title.clone())));
     }
-    if let Some(brief) = fields.brief.given() {
-        assigns.push(field(ThreadAssign::Brief(brief.cloned())));
+    if let Some(notes) = fields.notes.given() {
+        assigns.push(field(ThreadAssign::Notes(notes.cloned())));
     }
     changes(Record::Thread(id.to_owned()), assigns, adding)
 }
@@ -298,14 +298,13 @@ fn changes(record: Record, assigns: Vec<Assign>, adding: Adding) -> ChangeSet {
 mod tests;
 
 /// The flag that sets a field, as an add's refusal names it, in the order the flags are checked.
-const FLAGS: [(&str, &str); 9] = [
+const FLAGS: [(&str, &str); 8] = [
     ("title", "--title"),
     ("parent", "--parent"),
     ("notes", "--notes"),
     ("state", "--state"),
     ("waits-for", "--waits-for"),
     ("thread", "--thread"),
-    ("brief", "--brief"),
     ("name", "--name"),
     ("default-branch", "--default-branch"),
 ];
@@ -333,7 +332,7 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
         Rule::Deleted(record) => WriteError::Deleted(record.id().to_owned()).into(),
         Rule::SelfLink => WriteError::SelfLink(record.map_or("", Record::id).to_owned()).into(),
         Rule::ParentCycle(_) => WriteError::ParentCycle(record.map_or("", Record::id).to_owned()).into(),
-        Rule::LinkCycle(cycle) => WriteError::LinkCycle(cycle.clone()).into(),
+        Rule::WaitsForCycle(cycle) => WriteError::WaitsForCycle(cycle.clone()).into(),
         Rule::LineageLink { from, to } => CliError::refused("lineage-link", violation.to_string())
             .with(json!({"item": from, "waits_for": to})),
         Rule::TitleTaken(other) => {

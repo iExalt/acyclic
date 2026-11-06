@@ -47,7 +47,7 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every r
      "thread": "01900000-0000-7000-8000-000000000002", "waits_for": ["01900000-0000-7000-8000-000000000003"]}
   ],
   // A thread groups items for one continuing agent conversation; an item joins one with its "thread". Optional:
-  // brief.
+  // notes ("brief", as older documents say, reads as notes).
   "threads": [
     {"id": "01900000-0000-7000-8000-000000000002", "title": "Spring planting"}
   ]
@@ -142,9 +142,9 @@ pub struct Thread {
     pub id: String,
     /// A short title.
     pub title: String,
-    /// The brief.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub brief: Option<String>,
+    /// Its notes; `brief`, as older documents say, reads as notes.
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "brief")]
+    pub notes: Option<String>,
 }
 
 /// Why a document couldn't be read.

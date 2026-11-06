@@ -122,7 +122,7 @@ waits-for and thread it belongs with.
 3. `acyclic item done <item> --commit <owner/name>@<sha>` once its pull request has merged, naming the commit that
    landed on the default branch (the squash commit), or `--evidence` when the result isn't a commit. See "Details". It
    finishes only what your thread holds, or what is ready, and a parent once its children are done; don't use `--force`
-   to finish someone else's work. A parent needs no `item done`: its `progress` reads done once every leaf under it is,
+   to finish someone else's work. A parent needs no `item done`: its `stage` reads done once every leaf under it is,
    and work waiting on it waits on those leaves. `acyclic thread release <thread>` once none of its items is left ready.
 4. `acyclic thread` and `acyclic repository` keep threads and repository records; an item's thread is set with
    `acyclic item edit --thread`. `acyclic thread list` lists the threads with their counts, and `acyclic thread show
@@ -132,7 +132,7 @@ waits-for and thread it belongs with.
    the threads its work waits on (a row's `waits_for`), with those that wait on none and that none waits on under
    `anytime`.
 5. Grouping work into threads is yours: create threads with `acyclic thread add`, fill them with `acyclic item edit
-   --thread`, and give each a title and brief. New or moved work joins the thread its parent passes down, or else the
+   --thread`, and give each a title and notes. New or moved work joins the thread its parent passes down, or else the
    one its siblings share; an add, a move under another parent or an import reports it as `placed`. Threads whose
    work waits on each other can't all finish: `acyclic needs` lists them as a `thread-cycle`, and a waits-for or a
    member should move.

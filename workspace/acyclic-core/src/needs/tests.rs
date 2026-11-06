@@ -63,7 +63,7 @@ fn the_state_puts_its_problems_on_the_list() {
     link(&mut a, "dep", "kid", by).unwrap();
     b.join(&a.state).unwrap();
 
-    // Concurrent: a title conflict, a link cycle, a contest, a clock ahead.
+    // Concurrent: a title conflict, a waits-for cycle, a contest, a clock ahead.
     model::set(&mut a, &item_key("x").unwrap(), field::TITLE, Some(&"one"), user(2)).unwrap();
     model::set(&mut b, &item_key("x").unwrap(), field::TITLE, Some(&"two"), user(2)).unwrap();
     link(&mut a, "x", "y", user(2)).unwrap();
@@ -77,7 +77,7 @@ fn the_state_puts_its_problems_on_the_list() {
     let entries = list(&a);
     let has = |want: &Entry| assert!(entries.contains(want), "missing {want:?} in {entries:#?}");
     has(&Entry::Conflict { kind: "item".into(), id: "x".into(), field: "title".into() });
-    has(&Entry::LinkCycle { items: vec!["x".into(), "y".into()] });
+    has(&Entry::WaitsForCycle { items: vec!["x".into(), "y".into()] });
     has(&Entry::Contest {
         thread: "tx".into(),
         holders: vec!["session/a".into(), "session/b".into()],

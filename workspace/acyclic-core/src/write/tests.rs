@@ -72,7 +72,7 @@ fn expected_fields_and_one_wait_edge_match_the_model_values() {
 }
 
 #[test]
-fn expected_thread_title_and_brief_match_and_mismatch() {
+fn expected_thread_title_and_notes_match_and_mismatch() {
     let mut r = replica("a");
     commit_ok(&mut r, 1, vec![thread("t")]);
     let expected = [
@@ -83,7 +83,7 @@ fn expected_thread_title_and_brief_match_and_mismatch() {
         },
         Expectation::ThreadField {
             thread: "t".into(),
-            field: ExpectedThreadField::Brief,
+            field: ExpectedThreadField::Notes,
             value: ExpectedValue::Unset(()),
         },
     ];
@@ -364,7 +364,7 @@ fn a_created_record_needs_a_field_write_and_the_model_matches_rereading() {
         1,
         vec![
             thread,
-            Change::Set(Assign::Thread("t".into(), ThreadAssign::Brief(None))),
+            Change::Set(Assign::Thread("t".into(), ThreadAssign::Notes(None))),
             repository,
             Change::Set(Assign::Repository("r".into(), RepositoryAssign::Owner("example".into()))),
             item,
@@ -433,12 +433,12 @@ fn only_violations_the_change_set_introduces_are_refused() {
     commit_ok(&mut a, 4, vec![item("p", ItemAssign::WaitsFor("q".into(), true))]);
     commit_ok(&mut b, 4, vec![item("q", ItemAssign::WaitsFor("p".into(), true))]);
     a.join(&b.state).unwrap();
-    assert_eq!(read(&a).link_cycles().len(), 1);
+    assert_eq!(read(&a).waits_for_cycles().len(), 1);
     // An unrelated write still goes through; a new cycle doesn't.
     commit_ok(&mut a, 5, vec![item("p", ItemAssign::Title("P2".into()))]);
     commit_ok(&mut a, 6, vec![add("s", vec![ItemAssign::WaitsFor("p".into(), true)])]);
     let rules = refused(&a, vec![item("p", ItemAssign::WaitsFor("s".into(), true))]);
-    assert!(matches!(rules.as_slice(), [Rule::LinkCycle(_)]), "{rules:?}");
+    assert!(matches!(rules.as_slice(), [Rule::WaitsForCycle(_)]), "{rules:?}");
 }
 
 #[test]
