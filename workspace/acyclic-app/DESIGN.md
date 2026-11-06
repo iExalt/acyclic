@@ -90,7 +90,9 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
 - **Phone (under 900 px):** a 44 px bar on top (the view's name, Search, the outline, New item, the menu), the views,
   Needs you among them, in a tab bar along the bottom, its tabs 44 px with nothing around them, panels as sheets rising
   from the bottom. Each bar is its buttons' height, as Linear's and Slack's are. The outline's button and sheet are both
-  called Outline; its projects carry no count, as opening one shows its threads.
+  called Outline; its projects carry no count, as opening one shows its threads. The Outline's sheet opens on the
+  initiative switcher, a row to each initiative with its open count, above the projects. The bar names the initiative
+  in context after the view's name, muted, as the sheet is out of sight when closed, left out with a single initiative.
 - **Sheets, on a phone:** two heights. A panel's first is 144 px: its title, its status and its main action, so the Map
   keeps most of the screen beside it (the user: "This hurts especially when browsing half the map and half an item"),
   taller only where a long title or status pushes the main action, or an item's status, further down; while it loads,
@@ -113,6 +115,28 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
   else, which its hover says too. Its fold button, at its top, folds it to a 52 px rail of the controls' icons, Needs
   you's count on its icon, and unfolds it from the same place; each device remembers. (Rows wrapping to three lines, in
   a scroll area of their own, read as clutter.)
+- **The initiative switcher** (the user's pick, "A: sidebar list"): an Initiatives section between New item and the
+  projects, a row to each initiative, its open count at the end (open leaves under it, those done or canceled left out),
+  the busiest first so the order stays put as the choice changes. Choosing a row puts that initiative in context and
+  opens nothing; the row is filled and its count in the ink, as the muted count read 4.3:1 on the fill in light. The
+  initiative in context is kept in the navigation place and the address (`?initiative=`), so a reload keeps it, and
+  until one is chosen it is the first row. A history entry holds its initiative: Back and Forward restore it, except for
+  an entry written before one was chosen, which leaves the one in context. The address bar's link carries it; the link
+  copied from an item's or a thread's panel does not. It orders the lists, is where New item goes, and marks the
+  switcher; it does not yet scope the Map or the Threads view.
+- **The lists group by initiative** (the user's pick, "Grouped"): the Overview's Needs you, In progress, Up next and
+  projects, and Needs you's view, cover every initiative, the one in context first, the rest in the switcher's order,
+  then rows in none under "No initiative". Wide, a sub-heading names each group with its count and the rows carry no
+  label; on a phone, with no room for headings, each row ends in its initiative's name in the muted ink instead. A
+  thread with tasks in several initiatives is under each, and a phone's label names the first with the count of the rest
+  ("Big +1"). An entry takes its item's initiative, else its thread's. Wide, the Overview's thread and project titles
+  are one line, cut short with the whole on hover, so Up next's rows have a known height and its whole block fits the
+  first view at 1280 x 800. That holds with any number of initiatives because Up next is bounded: each row takes 60 px
+  and each heading 44, and rows stop where they would end past 770 px. Each populated initiative first gets one row, in
+  order, and the rest of the eight rows go to them in order, so eight rows under up to three headings show, and fewer
+  under more (one under each of six); an initiative beyond that is counted in "more in Threads". A phone has no
+  headings, so only the eight rows apply. Needs you and In progress share the rule without the fold: each populated
+  initiative gets a row before any takes a second, so the one in context need not fill the list first.
 - **The Overview, wide:** Needs you beside In progress, with Up next under it, once the Overview is 680 px wide, a 976
   px window beside the sidebar (each at least 320 px, each up to eight rows; five for Needs you under 700 px, where they
   stack), the projects across the page below them in columns of rows; an open panel keeps its width clear. From 1,280 px
@@ -308,10 +332,12 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   such as the slot, or a window turned, shows the selected item again if it hid it; a phone's keyboard, which shortens
   the Map too, leaves it where it is while the user types. While a sheet changes height or covers the Map, the reveal
   waits until it settles and leaves room. Another selection, manual panning or zooming, or Fit takes precedence.
-- **New item asks for little:** a title, a project (the one in context, else the only initiative, else it asks) and a
-  thread. Its id is a UUIDv7 the app makes, so a pending add is drawn under its real id and a retried send is the same
-  add. Added, the item's panel takes the focus, and its Status says Saving… until the server has placed it, rather than
-  its state first; its editor opens on Title. A picked thread, then the parent or selected item's thread, takes
+- **New item asks for little:** a title, a project and a thread. Its project starts as the selected item's, when that is
+  in the initiative in context, else none, which puts the item under the initiative in context as a project of its own;
+  the choices are the projects, grouped by initiative with the one in context first. None leaves an item outside every
+  initiative. Its id is a UUIDv7 the app makes, so a pending add is drawn under its real id and a retried send is the
+  same add. Added, the item's panel takes the focus, and its Status says Saving… until the server has placed it, rather
+  than its state first; its editor opens on Title. A picked thread, then the parent or selected item's thread, takes
   precedence; otherwise a project's sole visible thread supplies the default. Changing Project updates that default
   until the user chooses a thread, including Automatic; a reopened draft keeps its choice. Automatic follows the
   tracker's parent, sibling or ancestor placement policy, leaving no thread when none applies. On a narrow phone the
@@ -474,3 +500,8 @@ before what went wrong.
   box made "the entire map … shift over".
 - 2026-11-04: source updates that only shrink top-level boxes repack them automatically; chevron folds still hold their
   places, and Undo restores the earlier source's packing.
+- 2026-11-06: the initiative switcher is a sidebar section, and a phone's Outline sheet opens on it ("A: sidebar
+  list"), the lists group their rows under initiative sub-headings with a trailing label on a phone ("Grouped"), Up
+  next fits the first view at 1280 x 800, and New item defaults to the initiative in context; the user chose them. The
+  Map and Threads are not yet scoped to it. Proposed: the initiative in context is kept in the address and the
+  navigation place, orders the groups with the one in context first, and the Overview's Needs you rows keep wrapping.

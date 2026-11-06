@@ -22,11 +22,11 @@ describe("outlineOf", () => {
   it("lists each project with its threads, a thread in two under both, and threads in no project apart", () => {
     expect(outlineOf(model, threads)).toEqual({
       projects: [
-        { id: "p1", title: "P1", noInitiative: true, threads: [{ id: "t", also: ["p2"] }] },
+        { id: "p1", title: "P1", initiative: null, threads: [{ id: "t", also: ["p2"] }] },
         {
           id: "p2",
           title: "P2",
-          noInitiative: true,
+          initiative: null,
           threads: [
             { id: "t", also: ["p1"] },
             { id: "u", also: [] },
@@ -44,9 +44,9 @@ describe("outlineOf", () => {
       item("lost"),
       item("b", "lost"),
     ]);
-    expect(outlineOf(tops, []).projects.map((project) => [project.id, project.noInitiative])).toEqual([
-      ["epic", false],
-      ["lost", true],
+    expect(outlineOf(tops, []).projects.map((project) => [project.id, project.initiative])).toEqual([
+      ["epic", "init"],
+      ["lost", null],
     ]);
   });
 
@@ -142,7 +142,7 @@ describe("a task in no thread, a thread of one", () => {
         {
           id: "p",
           title: "P",
-          noInitiative: true,
+          initiative: null,
           threads: [
             { id: "t", also: [] },
             { id: "claimed.one", also: [] },

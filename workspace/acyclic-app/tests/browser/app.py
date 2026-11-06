@@ -624,6 +624,30 @@ def overview_journey(page, view, name, failures):
     headings = overview.locator(".overview-section h2").all_inner_texts()
     if headings != ["Needs you", "In progress", "Up next", "Projects"]:
         failures.append(f"{name}: the Overview's lists are {headings}")
+    if not view.get("has_touch"):
+        # Up next, whole, sits in the first view at 1280 x 800, with two initiatives' work under their headings.
+        # The initiative in context comes first and the plan's own fills Up next, so the second is put in context to show both.
+        size = page.viewport_size
+        page.set_viewport_size({"width": 1280, "height": 800})
+        switch = page.locator("button.initiative")
+        switch.nth(1).click()
+        page.locator("button.initiative[aria-current=true]").nth(0).wait_for(timeout=5_000)
+        fold = overview.evaluate(
+            """o => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => {
+              const s = o.querySelector('#overview-next').closest('section');
+              done({
+                bottom: Math.max(...[...s.children].map((e) => e.getBoundingClientRect().bottom)),
+                groups: s.querySelectorAll('.group-head').length,
+                height: innerHeight,
+              });
+            })))"""
+        )
+        page.set_viewport_size(size)
+        switch.first.click()
+        if fold["groups"] < 2 or fold["bottom"] > fold["height"]:
+            failures.append(f"{name}: Up next ({fold['groups']} initiatives) ends at {fold['bottom']:.0f} px of {fold['height']}")
+        else:
+            print(f"{name}: Up next, under {fold['groups']} initiatives, ends at {fold['bottom']:.0f} of {fold['height']} px")
     row = overview.locator("[data-overview-thread]").first
     thread = row.get_attribute("data-overview-thread")
     row.click()
@@ -1242,7 +1266,9 @@ def command_journey(page, view, origin, plan, name, failures):
         heading.wait_for(state="detached", timeout=5_000)
         page.go_back()
         page.get_by_test_id("overview").wait_for(timeout=5_000)
-        if page.url != f"{origin}/":
+        # Home is the bare address, but for the initiative in context, which the address keeps for a reload.
+        opened = {k: v for k, v in parse_qs(urlsplit(page.url).query).items() if k != "initiative"}
+        if page.url.split("?")[0] != f"{origin}/" or opened:
             failures.append(f"{name}: Back after the command menu's item didn't come home: {page.url}")
     else:
         # Dismissed, the focus goes back to where it was: the item's panel, still open under it.
@@ -1993,6 +2019,49 @@ HOSTILE = '<img src=x onerror="window.pwned = true">'
 def outline_journey(page, view, plan, name, failures):
     """Selecting an item marks its project and its thread's row there, opening the project. On a phone the projects
     come as a sheet over the item's, and Back closes the sheet first, staying in the app."""
+    # The switcher: a row to each initiative, the first in context until one is chosen; choosing another moves the mark
+    # and the address, a phone's bar names it with the sheet closed, and a reload keeps it. The first is chosen again
+    # after, so what New item defaults to is as the journeys after expect.
+    phone = view.get("has_touch")
+    sheet = page.get_by_test_id("projects")
+    if phone:
+        page.get_by_test_id("projects-button").click()
+        sheet.wait_for(timeout=5_000)
+    choices = page.locator("button.initiative")
+    first, chosen = choices.first, choices.nth(1)
+    if choices.count() < 2 or first.get_attribute("aria-current") != "true":
+        failures.append(f"{name}: the switcher didn't list the initiatives with the first in context")
+    else:
+        initiative = chosen.get_attribute("data-initiative")
+        title = chosen.locator(".initiative-name").inner_text()
+        was = first.get_attribute("data-initiative")
+        marked_now = lambda id: f"button.initiative[data-initiative='{id}'][aria-current=true]"
+        chosen.click()
+        try:
+            page.locator(marked_now(initiative)).wait_for(timeout=5_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: choosing {title} didn't mark it in the switcher")
+        if f"initiative={initiative}" not in page.url:
+            failures.append(f"{name}: choosing {title} left the address {page.url}")
+        if phone:
+            page.get_by_test_id("projects-button").click()
+            sheet.wait_for(state="detached", timeout=5_000)
+        page.reload()
+        if phone:
+            page.get_by_test_id("in-context").wait_for(timeout=10_000)
+            if page.get_by_test_id("in-context").inner_text() != title:
+                failures.append(f"{name}: the phone's bar didn't name {title} after a reload")
+            page.get_by_test_id("projects-button").click()
+            sheet.wait_for(timeout=5_000)
+        try:
+            page.locator(marked_now(initiative)).wait_for(timeout=10_000)
+        except PlaywrightTimeout:
+            failures.append(f"{name}: a reload didn't keep {title} in context")
+        page.locator(f"button.initiative[data-initiative='{was}']").click()
+        if phone:
+            page.get_by_test_id("projects-button").click()
+            sheet.wait_for(state="detached", timeout=5_000)
+        wait_drawn(page, len(plan.default()))
     # Only a leaf is in a thread, and the Map draws one once the box above it is open.
     picked = next(
         id
@@ -2011,8 +2080,6 @@ def outline_journey(page, view, plan, name, failures):
     tap_middle(page, view, picked)
     inspector = page.get_by_test_id("inspector")
     inspector.wait_for()
-    phone = view.get("has_touch")
-    sheet = page.get_by_test_id("projects")
     if phone:
         # The item's sheet opens at a height that ends on a row, its Thread row whole or not at all, not cut through
         # its text under the tab bar. Measured once it has come to rest.
@@ -3962,6 +4029,16 @@ def shard_run(shard):
                 remote = directory / f"origin-{items}.git"
                 subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
             plan = tracker(directory, env, items, remote, cycles=items < SMALL_TRACKER)
+            # A second initiative, so the switcher has a row to choose. The small tracker, which the Overview's journey runs on,
+            # gives it ready work, so Up next has two populated initiatives.
+            second = json.loads(run(env, "initiative", "add", "--title", "Second initiative"))["data"]["initiative"]
+            if items < SMALL_TRACKER:
+                epic = json.loads(run(env, "item", "add", "--title", "Second epic", "--parent", second))["data"]["item"]
+                # In a thread of its own, as a task alone would be picked by the Threads journey, whose panel it opens no thread's.
+                thread = json.loads(run(env, "thread", "add", "--title", "Second work"))["data"]["thread"]
+                for number in (1, 2):
+                    run(env, "item", "add", "--title", f"Second task {number}", "--parent", epic, "--thread", thread)
+                plan = Plan(env)
             server = subprocess.Popen(
                 [ACYCLIC, "up", "--port", "0"],
                 env=env,

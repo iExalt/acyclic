@@ -359,6 +359,7 @@ describe("history places by depth", () => {
     item: place.item,
     thread: place.thread,
     needsAt: place.needsAt,
+    initiative: place.initiative,
   });
 
   it("keeps Needs you restoration data in each projected entry", () => {
@@ -467,6 +468,7 @@ describe("history places", () => {
       needsLeft: { control: needsLeft.control, entry: needsLeft.entry, top: needsLeft.top },
       cameFrom: { item: "a", by: "thread", view: "map" },
       needsAt: "need:one",
+      initiative: null,
       thread: "t",
       item: "a",
       view: "needs",
@@ -478,6 +480,7 @@ describe("history places", () => {
       { ...persistent, item: "b" },
       { ...persistent, thread: "other" },
       { ...persistent, needsAt: "other" },
+      { ...persistent, initiative: "init" },
       { ...persistent, cameFrom: { ...cameFrom, view: "overview" } },
       { ...persistent, cameFrom: { ...cameFrom, by: "item" } },
       { ...persistent, cameFrom: { ...cameFrom, item: "b" } },
@@ -696,6 +699,42 @@ describe("Back and Forward", () => {
       missing: ["item", "thread"],
     });
     expect(landingPlace({ ...held, item: "c", thread: null }, has)).toMatchObject({ missing: [] });
+  });
+});
+
+describe("the initiative in context", () => {
+  it("is chosen by the switcher and kept through every other move, which scopes nothing else", () => {
+    const chosen = go(onMap, { kind: "initiative", id: "i2" });
+    expect(chosen).toEqual({ place: at({ view: "map", initiative: "i2" }), requests: {} });
+    for (const intent of [
+      { kind: "goTo", view: "needs", at: null },
+      { kind: "select", id: "c", pin: null },
+      { kind: "thread", id: "t" },
+      { kind: "add", parent: null },
+    ] satisfies Intent[])
+      expect(go(chosen.place, intent).place.initiative).toBe("i2");
+    expect(go(chosen.place, { kind: "initiative", id: null }).place.initiative).toBeNull();
+  });
+
+  it("survives a reload: it is in the address, read back, and an address without it leaves the one in context", () => {
+    expect(addressOf({ ...NOTHING, initiative: "i2" })).toBe("/?initiative=i2");
+    expect(addressOf({ ...NOTHING, view: "needs", initiative: "i2" }, "?engine=inline")).toBe(
+      "/?engine=inline&view=needs&initiative=i2",
+    );
+    expect(parse("?initiative=i2")).toEqual({ ...NOTHING, initiative: "i2" });
+    const reloaded = go(START, { kind: "link", wanted: parse("?view=threads&initiative=i2") });
+    expect(reloaded.place).toMatchObject({ view: "threads", initiative: "i2" });
+    // A link that names none, a notification's, leaves it be; so does an entry written before one was chosen.
+    const here = at({ initiative: "i2" });
+    expect(go(here, { kind: "link", wanted: parse("?item=a") }).place.initiative).toBe("i2");
+    expect(go(here, { kind: "restore", place: START }).place.initiative).toBe("i2");
+    expect(go(here, { kind: "restore", place: at({ initiative: "i1" }) }).place.initiative).toBe("i1");
+  });
+
+  it("is held in a history entry, and one holding none reads as none", () => {
+    expect(placeIn({ layers: 0, place: stored(at({ initiative: "i2" })) })?.initiative).toBe("i2");
+    expect(placeIn({ layers: 1, place: { view: "map", item: null, thread: null } })?.initiative).toBeNull();
+    expect(placeIn({ layers: 1, place: { view: "map", item: null, thread: null, initiative: 3 } })).toBeNull();
   });
 });
 

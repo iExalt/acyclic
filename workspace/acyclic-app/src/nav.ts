@@ -61,6 +61,11 @@ export interface Place {
   needsAt: string | null;
   /** Where Needs you's view was left for what an entry opened, until the user comes back to it. */
   needsLeft: NeedsLeft | null;
+  /**
+   * The initiative the user chose to work in, which orders the lists, is where New item goes and is marked in the
+   * switcher; null until they choose, when the first of the switcher is in context. It scopes nothing else.
+   */
+  initiative: string | null;
   overlays: Overlays;
 }
 
@@ -73,6 +78,7 @@ export const START: Place = {
   cameFrom: null,
   needsAt: null,
   needsLeft: null,
+  initiative: null,
   overlays: CLOSED,
 };
 
@@ -140,6 +146,8 @@ export type Intent =
   | { kind: "outline"; id: string }
   /** The thread an item's panel names: to it as `thread` does, the item kept under it, for closing it to reopen. */
   | { kind: "itemThread"; id: string }
+  /** An initiative chosen in the switcher, or none chosen (null). */
+  | { kind: "initiative"; id: string | null }
   /** To a view, the tabs, keys, the command menu and the Overview's links all: Needs you at the entry `at`, if any. */
   | { kind: "goTo"; view: View; at: string | null }
   /** Escape and Back: `count` layers from the top, unless a form holding typing would close. */
@@ -248,6 +256,8 @@ function move(place: Place, intent: Intent, world: World): Step {
         requests: { frame: { thread: intent.id } },
       };
     }
+    case "initiative":
+      return only({ ...place, initiative: intent.id });
     case "goTo": {
       // An item is shown on the Map, so going to another view leaves it. The Overview and Needs you are lists, over
       // which a thread's panel would only cover what the user went to see; the Threads view shows it picked.
@@ -306,7 +316,12 @@ function move(place: Place, intent: Intent, world: World): Step {
       return only({ ...place, needsLeft: intent.left });
     case "restore": {
       // As a link opens what it names, with where it came from as it was: the transient layers never come back.
-      const to: Place = { ...intent.place, overlays: CLOSED };
+      // An entry written before an initiative was chosen leaves the one in context.
+      const to: Place = {
+        ...intent.place,
+        initiative: intent.place.initiative ?? place.initiative,
+        overlays: CLOSED,
+      };
       const onMap = to.view === "map";
       return {
         place: to,
@@ -323,7 +338,15 @@ function move(place: Place, intent: Intent, world: World): Step {
       const to = intent.wanted;
       const onMap = to.view === "map";
       return {
-        place: { ...START, view: to.view, item: to.item, thread: to.thread, needsAt: to.needsAt },
+        // An address that names no initiative leaves the one in context, as a notification's does.
+        place: {
+          ...START,
+          view: to.view,
+          item: to.item,
+          thread: to.thread,
+          needsAt: to.needsAt,
+          initiative: to.initiative ?? place.initiative,
+        },
         // On the Map, an item is brought into view, else a thread framed; over another view, left open there, as it
         // was when the address was written.
         requests:
@@ -455,12 +478,14 @@ export interface Wanted {
   thread: string | null;
   /** The entry Needs you's view opens at, if any. */
   needsAt: string | null;
+  /** The initiative in context, once chosen, so a reload keeps it. */
+  initiative: string | null;
 }
 
-export const NOTHING: Wanted = { view: HOME, item: null, thread: null, needsAt: null };
+export const NOTHING: Wanted = { view: HOME, item: null, thread: null, needsAt: null, initiative: null };
 
 const VIEWS: readonly View[] = ["overview", "map", "threads", "needs"];
-const OWNED = ["view", "item", "thread", "needs"];
+const OWNED = ["view", "item", "thread", "needs", "initiative"];
 
 /**
  * The address for what is open, from `/` on: bare at home with nothing open. Only the parameters the app's state owns
@@ -475,6 +500,7 @@ export function addressOf(wanted: Wanted, search = ""): string {
   if (wanted.item !== null) query.set("item", wanted.item);
   if (wanted.thread !== null) query.set("thread", wanted.thread);
   if (wanted.view === "needs" && wanted.needsAt !== null) query.set("needs", wanted.needsAt);
+  if (wanted.initiative !== null) query.set("initiative", wanted.initiative);
   const text = query.toString();
   return text === "" ? "/" : `/?${text}`;
 }
@@ -493,6 +519,7 @@ export function parse(search: string): Wanted {
     item,
     thread: query.get("thread") || null,
     needsAt: view === "needs" ? query.get("needs") || null : null,
+    initiative: query.get("initiative") || null,
   };
 }
 
@@ -519,6 +546,7 @@ export const samePlace = (a: Place | null, b: Place | null): boolean =>
     a.item === b.item &&
     a.thread === b.thread &&
     a.needsAt === b.needsAt &&
+    a.initiative === b.initiative &&
     sameCameFrom(a.cameFrom, b.cameFrom) &&
     sameNeedsLeft(a.needsLeft, b.needsLeft));
 
@@ -570,7 +598,7 @@ function needsLeftIn(value: unknown): NeedsLeft | null | undefined {
 export function placeIn(state: unknown): Place | null {
   if (!plainObject(state) || !plainObject(state.place)) return null;
   const place = state.place;
-  const { view, item, thread, needsAt, cameFrom, needsLeft } = place;
+  const { view, item, thread, needsAt, cameFrom, needsLeft, initiative } = place;
   const origin = cameFromIn(cameFrom);
   const left = needsLeftIn(needsLeft);
   if (
@@ -578,6 +606,7 @@ export function placeIn(state: unknown): Place | null {
     !idOrNull(item) ||
     !idOrNull(thread) ||
     (needsAt !== undefined && !idOrNull(needsAt)) ||
+    (initiative !== undefined && !idOrNull(initiative)) ||
     origin === undefined ||
     left === undefined
   )
@@ -588,6 +617,7 @@ export function placeIn(state: unknown): Place | null {
     item,
     thread,
     needsAt: needsAt ?? null,
+    initiative: initiative ?? null,
     cameFrom: origin,
     needsLeft: left,
   };
@@ -601,7 +631,10 @@ export function landingPlace(
   place: Place,
   has: Parameters<typeof landing>[1],
 ): { place: Place; missing: ("item" | "thread")[] } {
-  const found = landing({ view: place.view, item: place.item, thread: place.thread, needsAt: place.needsAt }, has);
+  const found = landing(
+    { view: place.view, item: place.item, thread: place.thread, needsAt: place.needsAt, initiative: place.initiative },
+    has,
+  );
   return {
     place: { ...place, item: found.wanted.item, thread: found.wanted.thread },
     missing: found.missing,

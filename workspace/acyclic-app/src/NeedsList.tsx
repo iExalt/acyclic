@@ -2,18 +2,21 @@
 // allows. Each entry is a line, with what it names to select under it, then the actions the app can take on it, so
 // the button comes after what it acts on.
 
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
 import type { Command } from "./api";
 import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { useHeld } from "./held";
+import { groupRows, groupTitle, type ListScope, rowLabel } from "./initiatives";
 import type { Line } from "./lines";
 import type { NeedsLeft } from "./nav";
 import { isCollapsible, type Need, needView, threadLabel } from "./needs";
 import { Prose } from "./Prose";
-import { useWide } from "./wide";
+import { SIDE_BY_SIDE, useWide } from "./wide";
 
 export interface NeedsListProps {
   needs: Need[];
+  /** The initiatives the entries stand under. */
+  scope: ListScope;
   titleOf: (id: string) => string;
   lines: ReadonlyMap<string, Line>;
   busy: boolean;
@@ -32,6 +35,7 @@ export interface NeedsListProps {
 
 export function NeedsList({
   needs,
+  scope,
   titleOf,
   lines,
   busy,
@@ -45,6 +49,14 @@ export function NeedsList({
   const views = needs.map((need) => needView(need, lines, titleOf));
   const target = at;
   const wide = useWide();
+  // Wide, entries stand under their initiative's heading; on a phone each says its own.
+  const headed = useWide(SIDE_BY_SIDE);
+  const groups = groupRows(
+    views.map((view, index) => ({ view, index, of: scope.ofNeed(needs[index] as Need) })),
+    (row) => row.of,
+    scope.order,
+    scope.context,
+  );
   const [disclosures, setDisclosures] = useState<{
     target: string | null;
     restore: NeedsLeft | undefined;
@@ -120,118 +132,136 @@ export function NeedsList({
           Nothing needs you. Conflicts, cycles and done work still waiting on open work show here.
         </p>
       ) : null}
-      <ul className="needs">
-        {views.map((view, index) => {
-          const eligible = isCollapsible(view);
-          const isExpanded = wide || expanded.has(view.key);
-          const collapsed = eligible && !isExpanded;
-          const detailsId = `${disclosureId}-${index}`;
-          return (
-            <li
-              key={view.key}
-              data-need={view.key}
-              data-at={view.key === target || undefined}
-              // A row J and K move to, and the Overview opens the list at: focusable, but no control, so Enter on it does
-              // nothing; Tab reaches its actions.
-              data-row
-              tabIndex={-1}
-            >
-              {view.thread === null ? (
-                <p
-                  className="facts line need-head"
-                  style={lineStyle(view.line)}
-                  data-collapsed={collapsed || undefined}
+      {groups.map((group) => (
+        <Fragment key={group.initiative ?? ""}>
+          {headed ? (
+            <h3 className="group-head" data-initiative={group.initiative ?? ""}>
+              <span>{groupTitle(group.initiative, scope.titles)}</span>
+              <span className="group-n">{group.rows.length}</span>
+            </h3>
+          ) : null}
+          <ul className="needs">
+            {group.rows.map(({ view, index, of }) => {
+              const eligible = isCollapsible(view);
+              const isExpanded = wide || expanded.has(view.key);
+              const collapsed = eligible && !isExpanded;
+              const detailsId = `${disclosureId}-${index}`;
+              return (
+                <li
+                  key={view.key}
+                  data-need={view.key}
+                  data-at={view.key === target || undefined}
+                  // A row J and K move to, and the Overview opens the list at: focusable, but no control, so Enter on it does
+                  // nothing; Tab reaches its actions.
+                  data-row
+                  tabIndex={-1}
                 >
-                  <NeedBadge line={view.line} />
-                  <Prose text={view.text} />
-                </p>
-              ) : (
-                <button
-                  type="button"
-                  className="row line need-head"
-                  style={lineStyle(view.line)}
-                  data-pick-thread={view.thread}
-                  data-collapsed={collapsed || undefined}
-                  onClick={leave(
-                    view.key,
-                    ":scope > [data-pick-thread]",
-                    () => view.thread && onPickThread(view.thread),
+                  {view.thread === null ? (
+                    <p
+                      className="facts line need-head"
+                      style={lineStyle(view.line)}
+                      data-collapsed={collapsed || undefined}
+                    >
+                      <NeedBadge line={view.line} />
+                      <Prose text={view.text} />
+                      {headed ? null : (
+                        <span className="initiative-tag">{rowLabel(of, scope.titles, scope.context)}</span>
+                      )}
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      className="row line need-head"
+                      style={lineStyle(view.line)}
+                      data-pick-thread={view.thread}
+                      data-collapsed={collapsed || undefined}
+                      onClick={leave(
+                        view.key,
+                        ":scope > [data-pick-thread]",
+                        () => view.thread && onPickThread(view.thread),
+                      )}
+                    >
+                      <Badge line={view.line} />
+                      <Prose text={view.text} />
+                      {headed ? null : (
+                        <span className="initiative-tag">{rowLabel(of, scope.titles, scope.context)}</span>
+                      )}
+                    </button>
                   )}
-                >
-                  <Badge line={view.line} />
-                  <Prose text={view.text} />
-                </button>
-              )}
-              {eligible && !wide ? (
-                <button
-                  type="button"
-                  className="need-disclosure-toggle"
-                  aria-expanded={isExpanded}
-                  aria-controls={detailsId}
-                  onClick={() => toggle(view.key)}
-                >
-                  {isExpanded ? "Hide details" : "Show details"}
-                </button>
-              ) : null}
-              <div id={detailsId} className="need-details" hidden={collapsed}>
-                {view.note === null ? null : <p className="why need-why">{view.note}</p>}
-                <ul className="rows need-items">
-                  {view.threads.map((thread) => {
-                    const label = threadLabel(thread, lines);
-                    return (
-                      <li key={`t-${thread.id}`}>
-                        <button
-                          type="button"
-                          className="row line"
-                          style={lineStyle(label.line)}
-                          data-pick-thread={thread.id}
-                          onClick={leave(view.key, `.need-items [data-pick-thread="${CSS.escape(thread.id)}"]`, () =>
-                            onPickThread(thread.id),
-                          )}
-                        >
-                          <Badge line={label.line} />
-                          <Prose text={label.text} />
-                        </button>
-                      </li>
-                    );
-                  })}
-                  {view.items.map((id) => (
-                    <li key={`i-${id}`}>
-                      <button
-                        type="button"
-                        className="row"
-                        data-select={id}
-                        onClick={leave(view.key, `[data-select="${CSS.escape(id)}"]`, () => onSelect(id))}
-                      >
-                        <Prose text={titleOf(id)} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                {view.actions.length === 0 ? null : (
-                  <div className="actions need-actions">
-                    {view.actions.map((action) => (
-                      <button
-                        type="button"
-                        key={action.label}
-                        className="quiet"
-                        data-action={action.action}
-                        {...held(
-                          `${view.key} ${action.action}`,
-                          () => onCommand(action.command, action.done),
-                          after(index),
-                        )}
-                      >
-                        {action.label}
-                      </button>
-                    ))}
+                  {eligible && !wide ? (
+                    <button
+                      type="button"
+                      className="need-disclosure-toggle"
+                      aria-expanded={isExpanded}
+                      aria-controls={detailsId}
+                      onClick={() => toggle(view.key)}
+                    >
+                      {isExpanded ? "Hide details" : "Show details"}
+                    </button>
+                  ) : null}
+                  <div id={detailsId} className="need-details" hidden={collapsed}>
+                    {view.note === null ? null : <p className="why need-why">{view.note}</p>}
+                    <ul className="rows need-items">
+                      {view.threads.map((thread) => {
+                        const label = threadLabel(thread, lines);
+                        return (
+                          <li key={`t-${thread.id}`}>
+                            <button
+                              type="button"
+                              className="row line"
+                              style={lineStyle(label.line)}
+                              data-pick-thread={thread.id}
+                              onClick={leave(
+                                view.key,
+                                `.need-items [data-pick-thread="${CSS.escape(thread.id)}"]`,
+                                () => onPickThread(thread.id),
+                              )}
+                            >
+                              <Badge line={label.line} />
+                              <Prose text={label.text} />
+                            </button>
+                          </li>
+                        );
+                      })}
+                      {view.items.map((id) => (
+                        <li key={`i-${id}`}>
+                          <button
+                            type="button"
+                            className="row"
+                            data-select={id}
+                            onClick={leave(view.key, `[data-select="${CSS.escape(id)}"]`, () => onSelect(id))}
+                          >
+                            <Prose text={titleOf(id)} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {view.actions.length === 0 ? null : (
+                      <div className="actions need-actions">
+                        {view.actions.map((action) => (
+                          <button
+                            type="button"
+                            key={action.label}
+                            className="quiet"
+                            data-action={action.action}
+                            {...held(
+                              `${view.key} ${action.action}`,
+                              () => onCommand(action.command, action.done),
+                              after(index),
+                            )}
+                          >
+                            {action.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+                </li>
+              );
+            })}
+          </ul>
+        </Fragment>
+      ))}
     </section>
   );
 }
