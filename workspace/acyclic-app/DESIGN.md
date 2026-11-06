@@ -411,7 +411,8 @@ before what went wrong.
   the initiative and the item, `Initiative: item`, cut to the tile with an ellipsis, with "+n" for each further one. A
   hover (a title on the Map) names them all in full, and a tap opens the first, in its own initiative. The tile grows
   by the chip's room, its title and marks centred above it, so the layout is as before with taller tiles; an open
-  box's own wait has no place in its title strip and shows no stub. A finished item's waits show none.
+  box's own wait on another initiative shows no stub while the box is open, as its title strip has no place for one; it
+  appears once the box is folded, and the Inspector lists it. A finished item's waits show none.
 - **Threads' waits stay named.** Every tile names the threads it waits on and any cycle peers. On wide screens, arrows
   appear only for a hovered or picked thread; phone layouts keep the names without arrows.
 - **Packed tight, in order where it counts.** The top level is packed into a rectangle with as little room wasted as

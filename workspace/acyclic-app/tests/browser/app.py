@@ -2068,6 +2068,35 @@ def outline_journey(page, view, plan, name, failures):
         if phone:
             page.get_by_test_id("projects-button").click()
             sheet.wait_for(state="detached", timeout=5_000)
+        # A wait that leaves the initiative is a stub on its tile; tapped, it follows the item, putting the item's
+        # initiative in context, and the second is chosen again after.
+        waiter = next((id for id, row in plan.elsewhere.items() if row["links"]["waits_for"]), None)
+        if waiter is None:
+            failures.append(f"{name}: no task in {title} waits for an item of the first initiative, so the stub went unchecked")
+        else:
+            wanted = plan.elsewhere[waiter]["links"]["waits_for"][0]
+            try:
+                drawn = page.get_by_test_id("map").evaluate("(m, id) => m.cy.getElementById(id).length", f"stub {waiter}")
+                if drawn != 1:
+                    failures.append(f"{name}: {waiter}'s wait on {wanted}, in another initiative, drew {drawn} stubs, not 1")
+                else:
+                    tap_middle(page, view, f"stub {waiter}")
+                    page.wait_for_url(re.compile(f"item={wanted}.*initiative={was}|initiative={was}.*item={wanted}"), timeout=10_000)
+                    page.get_by_test_id("inspector").wait_for(timeout=10_000)
+                    page.keyboard.press("Escape")
+                    page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
+                    if phone:
+                        page.get_by_test_id("projects-button").click()
+                        sheet.wait_for(timeout=5_000)
+                    chosen.click()
+                    page.locator(marked_now(initiative)).wait_for(timeout=5_000)
+                    if phone:
+                        page.get_by_test_id("projects-button").click()
+                        sheet.wait_for(state="detached", timeout=5_000)
+                    wait_drawn(page, len(plan.elsewhere))
+                    settled_map(page)
+            except PlaywrightTimeout:
+                failures.append(f"{name}: tapping {waiter}'s stub didn't open {wanted} in its own initiative, at {page.url}")
         page.reload()
         if phone:
             page.get_by_test_id("in-context").wait_for(timeout=10_000)
@@ -4087,8 +4116,14 @@ def shard_run(shard):
                 epic = json.loads(run(env, "item", "add", "--title", "Second epic", "--parent", second))["data"]["item"]
                 # In a thread of its own, as a task alone would be picked by the Threads journey, whose panel it opens no thread's.
                 thread = json.loads(run(env, "thread", "add", "--title", "Second work"))["data"]["thread"]
-                for number in (1, 2):
-                    run(env, "item", "add", "--title", f"Second task {number}", "--parent", epic, "--thread", thread)
+                tasks = [
+                    json.loads(run(env, "item", "add", "--title", f"Second task {number}", "--parent", epic, "--thread", thread))["data"]["item"]
+                    for number in (1, 2)
+                ]
+                # One wait leaves the initiative, for the Map's stub: on an item of the fixture's that has work left and is
+                # drawn in its default view, so following it opens no box.
+                far = next(id for id in plan.default() if not plan.children(id) and plan.items[id]["stage"] == "ready")
+                run(env, "item", "edit", tasks[0], "--waits-for", far)
                 plan = Plan(env)
             server = subprocess.Popen(
                 [ACYCLIC, "up", "--port", "0"],

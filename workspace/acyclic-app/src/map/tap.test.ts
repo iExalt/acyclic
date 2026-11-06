@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Tapped, tapAction } from "./tap";
+import { stubTap, type Tapped, tapAction } from "./tap";
 
 const tap = (over: Partial<Tapped>) =>
   tapAction({ picking: false, doneBox: false, kind: "leaf", thread: null, chevron: false, ...over });
@@ -29,5 +29,17 @@ describe("tapAction", () => {
   it("selects an item or a box", () => {
     expect(tap({})).toBe("select");
     expect(tap({ kind: "box" })).toBe("select");
+  });
+});
+
+describe("stubTap", () => {
+  const stub = { node: "tile", target: "far" };
+
+  it("opens what the stub names", () => {
+    expect(stubTap(false, stub)).toEqual({ action: "open", item: "far" });
+  });
+
+  it("passes a tap through to the stub's tile while an edit waits for a target", () => {
+    expect(stubTap(true, stub)).toEqual({ action: "through", node: "tile" });
   });
 });

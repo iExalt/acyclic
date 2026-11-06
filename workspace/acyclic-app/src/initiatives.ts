@@ -64,7 +64,7 @@ export function threadInitiatives(model: Model): Map<string, Set<string | null>>
  * The waits each unfinished item in `context` has on items in another initiative, which the Map draws as stubs, as
  * it draws no edge to what it doesn't show: each wait names the item and its initiative, in the order a stub says
  * them. Items waited for that the plan lacks are left out, as are the waits of finished work, which nothing waits
- * behind. None with no initiative in context, as then everything is drawn.
+ * behind, and waits on done work, which are met; a wait on canceled work stays, as it is stuck. None with no initiative in context, as then everything is drawn.
  */
 export function crossingWaits(
   items: readonly Item[],
@@ -81,7 +81,8 @@ export function crossingWaits(
     const found: Crossing[] = [];
     for (const id of item.links.waits_for) {
       const other = byId.get(id);
-      if (other === undefined || other.initiative === context) continue;
+      // A met wait is no block. One on canceled work is stuck, which Needs you lists too, so it stays.
+      if (other === undefined || other.initiative === context || other.stage === "done") continue;
       found.push({ id, title: other.title, initiative: groupTitle(other.initiative, titles) });
     }
     if (found.length > 0) out.set(item.id, found.sort(byCrossing));

@@ -325,6 +325,26 @@ describe("crossingWaits", () => {
     ]);
   });
 
+  it("leaves out a wait on done work, which is met, and keeps one on canceled work, which is stuck", () => {
+    const waiting = [
+      item("w", null, ["done", "gone", "cancelled"], { initiative: "big", stage: "ready" }),
+      item("done", null, [], { initiative: "small", stage: "done" }),
+      item("cancelled", null, [], { initiative: "small", stage: "canceled", state: "canceled" }),
+    ];
+    expect(
+      crossingWaits(waiting, "big", titles)
+        .get("w")
+        ?.map((one) => one.id),
+    ).toEqual(["cancelled"]);
+    expect(
+      crossingWaits(
+        waiting.filter((one) => one.id !== "cancelled"),
+        "big",
+        titles,
+      ).size,
+    ).toBe(0);
+  });
+
   it("leaves out waits inside the initiative, on what the plan lacks, and finished work's, and has none with no context", () => {
     expect(crossingWaits(items, "small", titles).size).toBe(0);
     expect(crossingWaits(items, null, titles).size).toBe(0);

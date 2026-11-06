@@ -38,7 +38,7 @@ import {
 } from "./reveal";
 import { type Fonts, type Scene, type SceneNode, type Selection, scene, UNMEASURED } from "./scene";
 import { styleFor, WEIGHT } from "./style";
-import { tapAction } from "./tap";
+import { stubTap, tapAction } from "./tap";
 import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
@@ -875,12 +875,19 @@ export default function PlanMap({
       const { onSelect, onPick, onThread, onOpen } = handlers.current;
       const now = ++taps.current;
       const target = event.target as cytoscape.NodeSingular | Core;
-      const node = target !== core && "isNode" in target && target.isNode() ? target : null;
-      // A stub opens what it names, unless an edit waits for a target, which a stub is not.
+      let node = target !== core && "isNode" in target && target.isNode() ? target : null;
+      // A stub opens what it names; while an edit waits for a target, the tap is the tile's under it.
       if (node?.hasClass("stub")) {
-        cancelViewIntent();
-        if (onPick === null) onOpen?.(String(node.data("target")));
-        return;
+        const through = stubTap(onPick !== null, {
+          node: String(node.data("node")),
+          target: String(node.data("target")),
+        });
+        if (through.action === "open") {
+          cancelViewIntent();
+          onOpen?.(through.item);
+          return;
+        }
+        node = core.getElementById(through.node);
       }
       if (node === null) {
         cancelViewIntent();

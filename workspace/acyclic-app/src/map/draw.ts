@@ -69,6 +69,7 @@ export function elementsOf(
         width: stub.width,
         height: stub.height,
         layer: stub.layer,
+        node: stub.node,
         target: stub.target,
         full: stub.full,
       },
