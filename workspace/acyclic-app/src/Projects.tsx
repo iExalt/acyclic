@@ -95,7 +95,7 @@ export function Projects({ outline, lines, picked, current, onPickThread, onSele
                   onClick={() => onSelectProject(project.id)}
                 >
                   <Prose text={project.title} />
-                  {project.noInitiative ? <span className="muted"> No initiative</span> : null}
+                  {project.initiative === null ? <span className="muted"> No initiative</span> : null}
                 </button>
               </div>
               {!expanded ? null : project.threads.length === 0 ? (

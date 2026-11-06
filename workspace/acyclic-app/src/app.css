@@ -2499,3 +2499,130 @@ button.notice-backdrop:hover {
     }
   }
 }
+
+/* Initiatives. The switcher: a row to an initiative with its open count, the one in context filled, as the sidebar's
+   views are. The selected row's count is the ink, not the muted: on the fill, the muted reads under 4.5:1 in light. */
+.initiatives {
+  --current: color-mix(in srgb, var(--ink) 11%, transparent);
+}
+button.initiative {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border-color: transparent;
+  font-size: 14px;
+  text-align: start;
+}
+button.initiative > .initiative-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.initiative > .initiative-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+button.initiative[aria-current="true"] {
+  background: var(--current);
+  font-weight: 650;
+}
+button.initiative[aria-current="true"] > .initiative-count {
+  color: var(--ink);
+}
+/* The sidebar's count is the number alone; the Outline's sheet, where it stands alone, says what it counts. */
+.initiatives .open {
+  display: none;
+}
+.inspector .initiatives .open {
+  display: inline;
+}
+@media (pointer: coarse) {
+  button.initiative {
+    min-height: var(--hit);
+  }
+}
+/* A sub-heading in a list that covers every initiative: its title and how many rows it holds, ruled off below. */
+.group-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 28px;
+  margin: 8px 0 0;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+.group-head:first-of-type {
+  margin-top: 2px;
+}
+.group-head > .group-n {
+  font-weight: 500;
+}
+/* A row's initiative, trailing on a phone, where there are no headings. */
+.initiative-tag {
+  flex: none;
+  align-self: center;
+  max-width: 7.5em;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.overview-row:has(> .initiative-tag) {
+  grid-template-columns: 1.6em minmax(0, 1fr) auto auto;
+  column-gap: 8px;
+}
+button.overview-row:not(:has(> .badge)):has(> .initiative-tag) {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+/* A phone's bar says which initiative is in context after the view's name, since its switcher is out of sight. */
+.brand:has(> .in-context) {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.brand h1 {
+  flex: 0 0 auto;
+}
+.in-context {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brand:has(.notice-trigger) .in-context {
+  display: none;
+}
+/* Wide, a thread's or project's title in the Overview is one line, cut short with its whole name on hover, so Up next's
+   rows are a known height and its block, whole, fits the first view at 1280 x 800; a phone's wrap, with room for it. */
+@media (min-width: 900px) {
+  .overview-row .row-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .overview-row:has(> .what > .row-title) .what {
+    padding: 6px 0;
+  }
+}
+/* Under a heading, which rules itself off, the first entry needs no rule of its own above it. */
+.group-head + .needs {
+  margin-top: 0;
+}
+.group-head + .needs > li:first-child {
+  border-top: none;
+}

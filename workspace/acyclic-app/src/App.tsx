@@ -22,8 +22,18 @@ import {
   readHistory,
   replaceDepth,
 } from "./history";
+import { InitiativeSwitcher } from "./InitiativeSwitcher";
 import { Inspector } from "./Inspector";
 import { Icon, X } from "./icons";
+import {
+  contextOf,
+  contextTitle,
+  type ListScope,
+  needInitiatives,
+  startProject,
+  switcherRows,
+  threadInitiatives,
+} from "./initiatives";
 import { type KeyAction, nextRow, SHORTCUTS, step, typingIn, type Waiting } from "./keys";
 import { byTitle, linesOf } from "./lines";
 import { buildModel } from "./map/model";
@@ -248,6 +258,22 @@ export function App() {
     () => new Map((loaded?.initiatives ?? []).map((one) => [one.id, one.title])),
     [loaded],
   );
+  /** The switcher's rows, and the initiative in context: the one chosen, else the first. */
+  const switcher = useMemo(() => switcherRows(loaded?.initiatives ?? [], model), [loaded, model]);
+  const context = contextOf(place.initiative, switcher);
+  const scope = useMemo<ListScope>(() => {
+    const none: ReadonlySet<string | null> = new Set([null]);
+    const ofThreads = model === null ? new Map<string, Set<string | null>>() : threadInitiatives(model);
+    return {
+      order: switcher.map((one) => one.id),
+      context,
+      titles: new Map(switcher.map((one) => [one.id, one.title])),
+      ofThread: (id) => ofThreads.get(id) ?? none,
+      ofNeed: (need) => needInitiatives(need, model, ofThreads),
+      ofProject: (id) => new Set([model?.items.get(id)?.initiative ?? null]),
+    };
+  }, [switcher, context, model]);
+  const chooseInitiative = (id: string) => go({ kind: "initiative", id });
   const itemsById = useMemo(() => new Map(shown.map((item) => [item.id, item])), [shown]);
   const waves = useMemo(
     () => (loaded === null || outline === null ? null : wavesView(loaded.threads, outline)),
@@ -473,6 +499,7 @@ export function App() {
     item: chosen?.id ?? null,
     thread,
     needsAt: view === "needs" ? needsAt : null,
+    initiative: place.initiative,
   };
   const hereNow = useRef(here);
   hereNow.current = here;
@@ -849,6 +876,13 @@ export function App() {
       needs={load.needs.length}
       onAdd={() => startAdd(null)}
       menu={menu}
+      initiatives={
+        !wide || switcher.length === 0 ? null : (
+          <InitiativeSwitcher rows={switcher} context={context} onChoose={chooseInitiative} />
+        )
+      }
+      // With one initiative there is nothing to tell apart, so the bar leaves it unsaid.
+      context={wide || switcher.length < 2 ? null : contextTitle(context, switcher)}
       outline={
         outline === null || !wide ? null : (
           <Projects
@@ -916,6 +950,7 @@ export function App() {
             titleOf={titleOf}
             counts={counts}
             outline={outline}
+            scope={scope}
             items={itemsById}
             onNeeds={(key) => goTo("needs", key ?? null)}
             onPickThread={toThread}
@@ -926,6 +961,7 @@ export function App() {
         {view === "needs" ? (
           <NeedsList
             needs={load.needs}
+            scope={scope}
             titleOf={titleOf}
             lines={lines}
             busy={busy}
@@ -964,8 +1000,10 @@ export function App() {
             // The thread picked, else the one of the item it goes in, else of the item selected, as the project is.
             thread={thread ?? model?.items.get(adding.parent ?? selected ?? "")?.thread ?? null}
             projects={outline?.projects ?? []}
-            initiatives={loaded?.initiatives ?? []}
-            project={current.project}
+            initiative={context === null ? null : { id: context, title: contextTitle(context, switcher) ?? context }}
+            initiativeTitles={scope.titles}
+            // The project of the item selected, when it is in the initiative in context: the one in context wins.
+            project={startProject(current.project, (id) => model?.items.get(id)?.initiative, context)}
             projectThreads={outline?.projects ?? []}
             threads={sorted.map((one) => ({ id: one.id, label: one.title }))}
             draft={adding.draft}
@@ -1015,6 +1053,7 @@ export function App() {
         )}
         {panel === "projects" && outline !== null ? (
           <ProjectsSheet onClose={() => go({ kind: "shut", layer: "projects" })} onDismiss={() => closeTop.current(1)}>
+            <InitiativeSwitcher rows={switcher} context={context} onChoose={chooseInitiative} />
             <Projects
               outline={outline}
               lines={lines}

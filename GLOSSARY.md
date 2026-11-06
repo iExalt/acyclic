@@ -115,7 +115,8 @@ _Avoid_: inbox, notifications
 ## The app
 
 **Overview**:
-The app's home: lists of what needs the user, the threads in progress and up next, and the projects.
+The app's home: lists of what needs the user, the threads in progress and up next, and the projects, each covering
+every initiative, its rows under the initiatives' headings (labelled with theirs on a phone).
 _Avoid_: dashboard, home page
 
 **Map**:
@@ -129,6 +130,16 @@ _Avoid_: lanes
 **Outline**:
 The projects and their threads as a tree, in the sidebar or a phone's sheet.
 _Avoid_: tree view, navigator
+
+**Switcher**:
+The sidebar's list of initiatives, each with its open count, or the top of a phone's Outline sheet. Choosing a row puts
+that initiative in context; a phone's bar names the one in context.
+_Avoid_: tabs, filter
+
+**Initiative in context**: The initiative the user chose in the switcher, else the first of it. The lists put its rows
+first, New item goes under it when no project is chosen, and the switcher marks it. It scopes nothing else: the
+Overview, Up next and Needs you still list every initiative. The address keeps it, so a reload does. _Avoid_: current
+initiative, active initiative, filter
 
 **Up next**:
 The threads with work ready to start, by id.

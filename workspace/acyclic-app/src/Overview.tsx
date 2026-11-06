@@ -2,16 +2,18 @@
 // as lists to scan; each row opens what it names. Nothing here acts on the plan: a decision is made in Needs you's
 // view, where it is the entry's own, and a row here, a preview of it, only opens it there.
 
+import { Fragment, type ReactNode } from "react";
 import type { Counts, Item } from "./api";
 import { Badge, lineStyle, NeedBadge } from "./Badge";
 import { ChevronRight, Icon } from "./icons";
+import { type Group, groupRows, groupTitle, type ListScope, rowLabel, shownGroups } from "./initiatives";
 import type { Line } from "./lines";
 import { countText, type Need, needView } from "./needs";
 import type { Outline } from "./outline";
 import { Prose } from "./Prose";
 import { StageCounts } from "./Stage";
 import { threadLists } from "./threadLists";
-import { COLUMNS, useWide } from "./wide";
+import { COLUMNS, SIDE_BY_SIDE, useWide } from "./wide";
 
 /**
  * How many rows each section shows before it says how many more: from 700 px, as many in Needs you as In progress
@@ -29,6 +31,8 @@ export interface OverviewProps {
   /** Each thread's items by stage. */
   counts: ReadonlyMap<string, Counts>;
   outline: Outline | null;
+  /** The initiatives the lists group their rows under. */
+  scope: ListScope;
   /** The plan's items by id, for each project's own progress. */
   items: ReadonlyMap<string, Pick<Item, "progress">>;
   /** Goes to Needs you, at the entry `key` names if given. */
@@ -45,6 +49,7 @@ export function Overview({
   titleOf,
   counts,
   outline,
+  scope,
   items,
   onNeeds,
   onPickThread,
@@ -52,12 +57,14 @@ export function Overview({
   onView,
 }: OverviewProps) {
   const { working, next } = threadLists(counts);
+  // Wide, rows stand under their initiative's heading; on a phone, which has no room for headings, each says its own.
+  const headed = useWide(SIDE_BY_SIDE);
   const needsShown = useWide(COLUMNS) ? THREADS_SHOWN : NEEDS_SHOWN_STACKED;
   // In three columns, an Up next half as long as the longest list beside it stacks under In progress, and the projects
   // take its column, rather than leave most of it empty and start below the first view.
   const longest = Math.max(Math.min(needs.length, needsShown), Math.min(working.length, THREADS_SHOWN));
   const shortNext = 2 * Math.max(1, Math.min(next.length, THREADS_SHOWN)) <= longest;
-  const thread = (id: string) => {
+  const thread = (id: string, label: string | null) => {
     const line = lines.get(id);
     const tally = counts.get(id);
     return (
@@ -73,19 +80,47 @@ export function Overview({
         >
           <Badge line={line} />
           <span className="what">
-            <Prose text={line?.name ?? id} />
+            <span className="row-title" title={line?.name ?? id}>
+              <Prose text={line?.name ?? id} />
+            </span>
             {tally === undefined ? null : (
               <span className="detail">
                 <StageCounts counts={tally} />
               </span>
             )}
           </span>
+          {label === null ? null : <span className="initiative-tag">{label}</span>}
           <span className="go">
             <Icon of={ChevronRight} size={16} />
           </span>
         </button>
       </li>
     );
+  };
+  /** `rows` under their initiatives' headings when wide, else one list; at most `limit` rows show, the rest counted. */
+  const listed = <T,>(
+    rows: readonly T[],
+    of: (row: T) => ReadonlySet<string | null>,
+    limit: number,
+    row: (one: T, label: string | null) => ReactNode,
+  ) => {
+    const groups = groupRows(rows, of, scope.order, scope.context);
+    const shown = shownGroups(groups, limit);
+    if (!headed)
+      return (
+        <ul className="rows">
+          {shown.flatMap((group) => group.rows.map((one) => row(one, rowLabel(of(one), scope.titles, scope.context))))}
+        </ul>
+      );
+    return shown.map((group: Group<T>) => (
+      <Fragment key={group.initiative ?? ""}>
+        <h3 className="group-head" data-initiative={group.initiative ?? ""}>
+          <span>{groupTitle(group.initiative, scope.titles)}</span>
+          <span className="group-n">{groups.find((one) => one.initiative === group.initiative)?.rows.length}</span>
+        </h3>
+        <ul className="rows">{group.rows.map((one) => row(one, null))}</ul>
+      </Fragment>
+    ));
   };
   const more = (shown: number, all: number, label: string, open: () => void) =>
     all <= shown ? null : (
@@ -121,31 +156,30 @@ export function Overview({
             Nothing needs you. Conflicts, cycles and done work still waiting on open work show here.
           </p>
         ) : (
-          <ul className="rows">
-            {needs.slice(0, needsShown).map((need) => {
-              const view = needView(need, lines, titleOf);
-              return (
-                <li key={view.key}>
-                  <button
-                    type="button"
-                    className="row overview-row"
-                    data-row
-                    style={lineStyle(view.line)}
-                    onClick={() => onNeeds(view.key)}
-                  >
-                    <NeedBadge line={view.line} />
-                    <span className="what">
-                      <Prose text={view.text} />
-                      {view.detail === null ? null : <span className="detail">{view.detail}</span>}
-                    </span>
-                    <span className="go">
-                      <Icon of={ChevronRight} size={16} />
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          listed(needs, scope.ofNeed, needsShown, (need, label) => {
+            const view = needView(need, lines, titleOf);
+            return (
+              <li key={view.key}>
+                <button
+                  type="button"
+                  className="row overview-row"
+                  data-row
+                  style={lineStyle(view.line)}
+                  onClick={() => onNeeds(view.key)}
+                >
+                  <NeedBadge line={view.line} />
+                  <span className="what">
+                    <Prose text={view.text} />
+                    {view.detail === null ? null : <span className="detail">{view.detail}</span>}
+                  </span>
+                  {label === null ? null : <span className="initiative-tag">{label}</span>}
+                  <span className="go">
+                    <Icon of={ChevronRight} size={16} />
+                  </span>
+                </button>
+              </li>
+            );
+          })
         )}
         {more(needsShown, needs.length, "in Needs you", () => onNeeds())}
       </section>
@@ -159,7 +193,7 @@ export function Overview({
           {working.length === 0 ? (
             <p className="empty">No thread has work in progress or in review.</p>
           ) : (
-            <ul className="rows">{working.slice(0, THREADS_SHOWN).map(thread)}</ul>
+            listed(working, scope.ofThread, THREADS_SHOWN, (id, label) => thread(id, label))
           )}
           {more(THREADS_SHOWN, working.length, "in Threads", () => onView("threads"))}
         </section>
@@ -176,7 +210,7 @@ export function Overview({
           {next.length === 0 ? (
             <p className="empty">No thread has work ready to start.</p>
           ) : (
-            <ul className="rows">{next.slice(0, THREADS_SHOWN).map(thread)}</ul>
+            listed(next, scope.ofThread, THREADS_SHOWN, (id, label) => thread(id, label))
           )}
           {more(THREADS_SHOWN, next.length, "in Threads", () => onView("threads"))}
         </section>
@@ -194,8 +228,11 @@ export function Overview({
         {outline === null || outline.projects.length === 0 ? (
           <p className="empty">No projects yet: add an item, and work inside it.</p>
         ) : (
-          <ul className="rows">
-            {outline.projects.map((project) => {
+          listed(
+            outline.projects,
+            (project) => scope.ofProject(project.id),
+            Number.POSITIVE_INFINITY,
+            (project, label) => {
               const progress = items.get(project.id)?.progress;
               return (
                 <li key={project.id}>
@@ -207,24 +244,26 @@ export function Overview({
                     onClick={() => onSelectProject(project.id)}
                   >
                     <span className="what">
-                      <Prose text={project.title} />
+                      <span className="row-title" title={project.title}>
+                        <Prose text={project.title} />
+                      </span>
                       <span className="detail">
                         {progress === undefined ? (
                           `${project.threads.length} threads`
                         ) : (
                           <StageCounts counts={progress.counts} />
                         )}
-                        {project.noInitiative ? <span className="muted"> · No initiative</span> : null}
                       </span>
                     </span>
+                    {label === null ? null : <span className="initiative-tag">{label}</span>}
                     <span className="go">
                       <Icon of={ChevronRight} size={16} />
                     </span>
                   </button>
                 </li>
               );
-            })}
-          </ul>
+            },
+          )
         )}
       </section>
     </section>

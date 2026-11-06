@@ -45,6 +45,13 @@ export interface ShellProps {
   onAdd: () => void;
   /** The menu's controls. */
   menu: ReactNode;
+  /** The initiative switcher above the outline on a wider screen, or null with none to choose from. */
+  initiatives: ReactNode;
+  /**
+   * The initiative in context, named in a phone's bar so it shows with the Outline closed; null where there is
+   * nothing to tell apart.
+   */
+  context: string | null;
   /** The outline beside the views on a wider screen, or null while the plan loads. */
   outline: ReactNode;
   /** On a phone, the outline is a sheet: whether it is open, and what opens or closes it. */
@@ -198,6 +205,11 @@ function SidebarChrome(props: ShellProps & { folded: boolean; fold: () => void }
           <Icon of={Plus} />
           <span className="text">New item</span>
         </button>
+        {folded || props.initiatives === null ? null : (
+          <nav className="switcher" aria-label="Initiatives">
+            {props.initiatives}
+          </nav>
+        )}
         {folded ? null : (
           <nav className="threads" aria-label="Projects and threads">
             {props.outline}
@@ -221,6 +233,12 @@ function PhoneChrome(props: ShellProps) {
     <header className="bar">
       <div className="brand" ref={props.noticeHost} tabIndex={-1}>
         <h1>{title}</h1>
+        {/* Where the Outline's switcher is out of sight, the bar says which initiative is in context. */}
+        {props.context === null ? null : (
+          <span className="in-context" data-testid="in-context">
+            {props.context}
+          </span>
+        )}
       </div>
       <button type="button" className="icon" aria-label="Search" onClick={props.onSearch} data-action="search">
         <Icon of={Search} size={20} />

@@ -1,10 +1,12 @@
-// Adding an item: a title, its thread, and, when no parent is given, the project or initiative it goes in. Its id is
+// Adding an item: a title, its thread, and, when no parent is given, the project it goes in, or else the initiative in
+// context, where it becomes a project of its own. Its id is
 // made as the form opens, so a send that is repeated is the same add.
 
 import { type FormEvent, useRef, useState } from "react";
 import type { NewItem } from "./edits";
 import { useFieldInView, useFocusIn } from "./focus";
 import { Icon, X } from "./icons";
+import { groupRows, groupTitle, newParent } from "./initiatives";
 import { uniqueProjectThread } from "./outline";
 import { uuidv7 } from "./uuid";
 
@@ -14,10 +16,12 @@ export interface AddFormProps {
   /** The thread it starts in. */
   thread: string | null;
   /** With no parent, the projects to put it in, and the one it starts in. */
-  projects: readonly { id: string; title: string }[];
+  projects: readonly { id: string; title: string; initiative: string | null }[];
   project: string | null;
-  /** With no parent, the initiatives an epic can go in: with several, the server needs one named. */
-  initiatives: readonly { id: string; title: string }[];
+  /** With no parent and no project, the initiative in context it goes under, as a project of its own. */
+  initiative: { id: string; title: string } | null;
+  /** Each initiative's title, which groups the projects. */
+  initiativeTitles: ReadonlyMap<string, string>;
   /** Visible threads in each project, used only while the thread choice remains automatic. */
   projectThreads: readonly { id: string; threads: readonly { id: string }[] }[];
   /** Each thread, named as everywhere a badge doesn't stand beside it. */
@@ -35,7 +39,8 @@ export function AddForm({
   thread: initialThread,
   projects,
   project: initialProject,
-  initiatives,
+  initiative,
+  initiativeTitles,
   projectThreads,
   threads,
   draft,
@@ -58,7 +63,7 @@ export function AddForm({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (title.trim() === "") return;
-    onSubmit({ id, title: title.trim(), parent: parent ?? project, thread });
+    onSubmit({ id, title: title.trim(), parent: newParent(parent, project, initiative?.id ?? null), thread });
   };
   return (
     <form
@@ -82,33 +87,29 @@ export function AddForm({
         {/* biome-ignore lint/a11y/noAutofocus: the form opens to take a title */}
         <input name="title" value={title} autoFocus onChange={(event) => setTitle(event.target.value)} />
       </label>
-      {parent !== null || (projects.length === 0 && initiatives.length < 2) ? null : (
+      {parent !== null || (projects.length === 0 && initiative === null) ? null : (
         <label>
           Project
           <select
             name="project"
-            value={project ?? ""}
+            // A draft's parent that is an initiative, which no project here stands for, is the first option.
+            value={projects.some((one) => one.id === project) ? (project ?? "") : ""}
             onChange={(event) => {
               const next = event.target.value === "" ? null : event.target.value;
               setProject(next);
               if (!threadChosen) setThread(inferredThread(next));
             }}
           >
-            <option value="">None, in the only initiative</option>
-            {projects.map((one) => (
-              <option key={one.id} value={one.id}>
-                {one.title}
-              </option>
-            ))}
-            {initiatives.length === 0 ? null : (
-              <optgroup label="Initiatives">
-                {initiatives.map((one) => (
+            <option value="">{initiative === null ? "None" : `None, a new project in ${initiative.title}`}</option>
+            {projectGroups(projects, initiative?.id ?? null, initiativeTitles).map((group) => (
+              <optgroup key={group.initiative ?? ""} label={group.label}>
+                {group.projects.map((one) => (
                   <option key={one.id} value={one.id}>
                     {one.title}
                   </option>
                 ))}
               </optgroup>
-            )}
+            ))}
           </select>
         </label>
       )}
@@ -143,4 +144,18 @@ export function AddForm({
       </div>
     </form>
   );
+}
+
+/** The projects by initiative, the one in context first, as the lists group them. */
+function projectGroups(
+  projects: readonly { id: string; title: string; initiative: string | null }[],
+  context: string | null,
+  titles: ReadonlyMap<string, string>,
+) {
+  const groups = groupRows(projects, (one) => [one.initiative], [...titles.keys()], context);
+  return groups.map((group) => ({
+    initiative: group.initiative,
+    label: groupTitle(group.initiative, titles),
+    projects: group.rows,
+  }));
 }

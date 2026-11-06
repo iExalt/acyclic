@@ -10,8 +10,8 @@ export const oneOf = (item: string) => `${item}.one`;
 export interface ProjectRow {
   id: string;
   title: string;
-  /** Whether the project is in no initiative, so it is shown as such rather than left out of sight. */
-  noInitiative: boolean;
+  /** The initiative it is in, or null for a project in none, which is shown as such rather than left out of sight. */
+  initiative: string | null;
   /** The threads with work under it, in the order given; `also` names the other projects each has work in. */
   threads: { id: string; also: string[] }[];
 }
@@ -29,7 +29,7 @@ export interface Outline {
  * included, is in the thread. A task in no thread is in the thread of one it stands for, if `threads` lists it.
  */
 export function outlineOf(model: Model, threads: readonly string[]): Outline {
-  const projects: { id: string; title: string; noInitiative: boolean; threads: Set<string> }[] = [];
+  const projects: { id: string; title: string; initiative: string | null; threads: Set<string> }[] = [];
   for (const root of topOrder(model)) {
     if ((model.children.get(root) ?? []).length === 0) continue;
     const touched = new Set<string>();
@@ -42,7 +42,7 @@ export function outlineOf(model: Model, threads: readonly string[]): Outline {
     projects.push({
       id: root,
       title: model.items.get(root)?.title ?? root,
-      noInitiative: model.items.get(root)?.initiative === null,
+      initiative: model.items.get(root)?.initiative ?? null,
       threads: touched,
     });
   }
@@ -52,7 +52,7 @@ export function outlineOf(model: Model, threads: readonly string[]): Outline {
     projects: projects.map((project) => ({
       id: project.id,
       title: project.title,
-      noInitiative: project.noInitiative,
+      initiative: project.initiative,
       threads: threads
         .filter((thread) => project.threads.has(thread))
         .map((thread) => ({ id: thread, also: homes(thread).filter((other) => other !== project.id) })),
