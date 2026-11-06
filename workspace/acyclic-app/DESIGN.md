@@ -399,7 +399,7 @@ before what went wrong.
 - **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too, and
   the other links recede, the tiles staying as they are; a folded box shows its items' links; the links a drawn way
   already implies stay out, since drawn straight they would cut across items. Touch has no hover; a tap selects, which
-  shows them all.
+  shows them all. Hovering an item with no highlightable link leaves the other links at their current emphasis.
 - **Unlinked comes first.** Items with no link inside their box (the glossary's Unlinked; Any time is the Threads
   view's word, for threads) stand in columns on its left, before its graph, as
   the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first). A dashed

@@ -211,11 +211,12 @@ export function scene(
       implied,
       route: way === undefined || source === undefined || target === undefined ? null : segmentsOf(way, source, target),
       lit: joins,
-      // The lit thread's route stays lit while the pointer crosses other items.
-      dim: (thread !== null && !joins && !touches) || (hovered !== null && !shows && !joins),
+      dim: thread !== null && !joins && !touches,
       hovered: shows,
     });
   }
+  // Only dim for hover when a connection is highlighted; the lit thread's route stays lit.
+  if (edges.some((edge) => edge.hovered)) for (const edge of edges) edge.dim ||= !edge.hovered && !edge.lit;
   // A dot drawn once where several links split, lit if any of them is.
   const junctions = new Map<string, SceneJunction>();
   for (const edge of edges)
