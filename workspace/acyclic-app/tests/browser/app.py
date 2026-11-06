@@ -239,6 +239,11 @@ def add_thread_cycles(env):
             )
 
 
+# Trackers below this many items are the small ones: they sync with an origin, so a second clone can write a conflict,
+# and hold the cycles of threads Needs you names. The large one needs neither.
+SMALL_TRACKER = 1000
+
+
 @timed
 def tracker(directory, env, items, remote=None, cycles=False):
     """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it, and
@@ -273,7 +278,6 @@ def tracker(directory, env, items, remote=None, cycles=False):
         add_thread_cycles(env)
     # Done work waiting on open work, so Needs you holds an entry that names items. The open leaf and everything above
     # it wait for nothing, so the link closes no cycle.
-
     done = next(item["id"] for item in data["items"] if item.get("state") == "done")
     unwaiting = next(
         item["id"]
@@ -3843,10 +3847,10 @@ def shard_run(shard):
             }
             # The small tracker syncs with an origin, so the journeys can write a conflict from a second clone.
             remote = None
-            if items < 1000:
+            if items < SMALL_TRACKER:
                 remote = directory / f"origin-{items}.git"
                 subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
-            plan = tracker(directory, env, items, remote, cycles=items < 1000)
+            plan = tracker(directory, env, items, remote, cycles=items < SMALL_TRACKER)
             server = subprocess.Popen(
                 [ACYCLIC, "up", "--port", "0"],
                 env=env,
