@@ -701,6 +701,9 @@ fn canceling_refuses_done_work_and_another_holders_claim_unless_forced_and_frees
     commit_ok(&mut r, 3, vec![item("child", ItemAssign::State(ItemState::Done))]);
     assert_eq!(canceling(&r, "parent", true), [Rule::CancelDone]);
     // Someone else's claim refuses, on the item or on a parent over it; the actor's own, or force, doesn't.
+    crate::claim::claim(&mut r, "t", "actor/user", 3, (60_000, 60_000), false).unwrap();
+    assert_eq!(canceling(&r, "free", false), []);
+    assert!(crate::claim::release(&mut r, &crate::claim::thread_key("t").unwrap(), "actor/user"));
     crate::claim::claim(&mut r, "t", "session/other", 4, (60_000, 60_000), false).unwrap();
     let held = Rule::CancelHeld { holder: "session/other".into() };
     assert_eq!(canceling(&r, "free", false), [held]);
@@ -708,6 +711,15 @@ fn canceling_refuses_done_work_and_another_holders_claim_unless_forced_and_frees
     // Canceled, the state is stored as `canceled`, and what it frees is its title.
     commit_ok(&mut r, 5, vec![Change::Cancel { item: "free".into(), force: true }]);
     assert_eq!(read(&r).items["free"].state, Value::One(ItemState::Canceled));
+    let stored = |r: &Replica| {
+        let key = crate::model::item_key("free").unwrap();
+        r.state.field(&key, "state").unwrap().values().map(|v| v.value.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(stored(&r), [json!("canceled")]);
+    // Opened again, it is stored as `backlog`, as open always is.
+    commit_ok(&mut r, 5, vec![item("free", ItemAssign::State(ItemState::Backlog))]);
+    assert_eq!(stored(&r), [json!("backlog")]);
+    commit_ok(&mut r, 5, vec![Change::Cancel { item: "free".into(), force: true }]);
     let minted = Change::Add {
         record: Record::Item("twin".into()),
         minted: true,

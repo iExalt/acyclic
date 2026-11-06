@@ -280,6 +280,12 @@ pub struct ReadinessEvaluator<'a> {
     winners: RefCell<BTreeMap<String, Option<claim::Claim>>>,
     /// Each item's stage, memoized, since a rollup counts every leaf under every parent.
     stages: RefCell<BTreeMap<String, Option<Stage>>>,
+    /// Whether any item's state holds canceled, found on first use.
+    any_canceled: OnceCell<bool>,
+    /// The items under a part canceled by hand, built on first use.
+    under_canceled: OnceCell<BTreeSet<&'a str>>,
+    /// Whether each item reads canceled, memoized: [`Model::reads_canceled`] walks the item's subtree or ancestors.
+    canceled: RefCell<BTreeMap<String, bool>>,
 }
 
 impl<'a> ReadinessEvaluator<'a> {
@@ -301,7 +307,59 @@ impl<'a> ReadinessEvaluator<'a> {
             members: OnceCell::new(),
             winners: RefCell::default(),
             stages: RefCell::default(),
+            any_canceled: OnceCell::new(),
+            under_canceled: OnceCell::new(),
+            canceled: RefCell::default(),
         }
+    }
+
+    /// Whether an item reads canceled, as [`Model::reads_canceled`] says, but built once for every item: the part
+    /// canceled by hand is found from its own state, and a parent from its children.
+    fn reads_canceled(&self, id: &str) -> bool {
+        // Nothing is canceled in most trackers, and then nothing reads canceled: no work to remember.
+        let any = *self.any_canceled.get_or_init(|| {
+            self.model.items.values().any(|item| item.state.all().contains(&&ItemState::Canceled))
+        });
+        if !any {
+            return false;
+        }
+        if let Some(known) = self.canceled.borrow().get(id) {
+            return *known;
+        }
+        let Some(item) = self.model.items.get(id) else { return false };
+        // A parent cycle ends here: it reads as not canceled while it is being worked out.
+        self.canceled.borrow_mut().insert(id.to_owned(), false);
+        let under = self.under_canceled.get_or_init(|| {
+            let mut under = BTreeSet::new();
+            let mut stack: Vec<&str> = self
+                .model
+                .items
+                .values()
+                .filter(|item| item.state == Value::One(ItemState::Canceled))
+                .map(|item| item.id.as_str())
+                .collect();
+            while let Some(at) = stack.pop() {
+                for child in self.model.children(at) {
+                    if under.insert(child) {
+                        stack.push(child);
+                    }
+                }
+            }
+            under
+        });
+        let kids = self.model.children(id);
+        let reads = if kids.is_empty() {
+            !item.is_done() && (item.is_canceled() || under.contains(id))
+        } else if item.state == Value::One(ItemState::Canceled) {
+            true
+        } else if under.contains(id) {
+            // Under a part canceled by hand, unless every leaf that is left is done.
+            !self.model.reads_done(id)
+        } else {
+            kids.into_iter().all(|child| self.reads_canceled(child))
+        };
+        self.canceled.borrow_mut().insert(id.to_owned(), reads);
+        reads
     }
 
     /// An item's readiness, or `None` for an unknown item.
@@ -340,7 +398,7 @@ impl<'a> ReadinessEvaluator<'a> {
         if item.is_done() {
             return Some(Readiness::Done);
         }
-        if self.model.reads_canceled(id) {
+        if self.reads_canceled(id) {
             return Some(Readiness::Canceled);
         }
         if self.cyclic.contains(id) {
@@ -382,7 +440,7 @@ impl<'a> ReadinessEvaluator<'a> {
             .flatten()
             .copied()
             // Finished work is skipped.
-            .filter(|id| !self.model.reads_finished(id))
+            .filter(|id| !self.model.items[*id].is_done() && !self.reads_canceled(id))
             .filter(|id| self.unclaimed(id, &self.model.items[*id]).is_none())
             .map(str::to_owned)
             .collect();
@@ -399,6 +457,12 @@ impl<'a> ReadinessEvaluator<'a> {
         } else {
             ThreadReadiness::Ready { items }
         })
+    }
+
+    /// Whether an item reads canceled: the model's own answer, remembered for the whole evaluator.
+    #[must_use]
+    pub fn canceled(&self, id: &str) -> bool {
+        self.reads_canceled(id)
     }
 
     /// The holders of the live claims covering an item: those on its thread.
@@ -597,18 +661,14 @@ impl<'a> ReadinessEvaluator<'a> {
             if item.is_done() {
                 return None;
             }
-            return Some(if self.model.reads_canceled(dependency) {
-                Wait::Canceled
-            } else {
-                Wait::Open
-            });
+            return Some(if self.reads_canceled(dependency) { Wait::Canceled } else { Wait::Open });
         }
         if item.state == Value::One(ItemState::Parked) {
             return Some(Wait::Open);
         }
         // A part canceled by hand, or with nothing under it but canceled work, is canceled as a whole; one with a
         // canceled leaf among others is waited for as a whole, and proceeds when its other work is done.
-        if self.model.reads_canceled(dependency) {
+        if self.reads_canceled(dependency) {
             return Some(Wait::Canceled);
         }
         self.leaves_wait(dependent, dependency)
@@ -625,7 +685,7 @@ impl<'a> ReadinessEvaluator<'a> {
         self.model
             .children(parent)
             .into_iter()
-            .filter(|child| !self.model.reads_canceled(child))
+            .filter(|child| !self.reads_canceled(child))
             .find_map(|child| self.dependency_wait(dependent, child))
     }
 }

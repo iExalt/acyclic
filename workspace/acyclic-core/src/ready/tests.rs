@@ -202,6 +202,52 @@ fn open_leaves_under_a_part_canceled_by_hand_read_canceled_until_it_is_opened_ag
 }
 
 #[test]
+fn the_evaluators_memoized_canceled_reading_is_the_models_for_every_item() {
+    let mut r = replica("a");
+    items(
+        &mut r,
+        &["top", "cut", "c1", "c2", "mix", "m1", "m2", "all", "a1", "a2", "dn", "d1", "d2"],
+    );
+    for (kid, parent) in [
+        ("cut", "top"),
+        ("c1", "cut"),
+        ("c2", "cut"),
+        ("mix", "top"),
+        ("m1", "mix"),
+        ("m2", "mix"),
+        ("all", "top"),
+        ("a1", "all"),
+        ("a2", "all"),
+        ("dn", "cut"),
+        ("d1", "dn"),
+        ("d2", "dn"),
+    ] {
+        set_parent(&mut r, kid, Some(parent), by(2)).unwrap();
+    }
+    for (id, state) in [
+        ("cut", ItemState::Canceled),
+        ("m1", ItemState::Canceled),
+        ("m2", ItemState::Done),
+        ("a1", ItemState::Canceled),
+        ("a2", ItemState::Canceled),
+        ("d1", ItemState::Done),
+        ("d2", ItemState::Done),
+    ] {
+        set_state(&mut r, id, state, by(3)).unwrap();
+    }
+    let model = Model::read(&r.state).unwrap();
+    let evaluator = ReadinessEvaluator::new(&r.state, &model, NOW);
+    let mut reading = Vec::new();
+    for id in model.items.keys() {
+        assert_eq!(evaluator.canceled(id), model.reads_canceled(id), "{id}");
+        reading.push((id.as_str(), model.reads_canceled(id)));
+    }
+    // Pinned: a part under one canceled by hand reads canceled unless it reads done; an all-canceled part reads so.
+    let canceled: Vec<&str> = reading.iter().filter(|(_, c)| *c).map(|(id, _)| *id).collect();
+    assert_eq!(canceled, ["a1", "a2", "all", "c1", "c2", "cut", "m1"]);
+}
+
+#[test]
 fn a_thread_is_finished_when_every_leaf_is_done_or_canceled_and_an_empty_one_is_not() {
     let mut r = replica("a");
     items(&mut r, &["x", "y"]);

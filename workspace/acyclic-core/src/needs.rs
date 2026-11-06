@@ -341,7 +341,7 @@ fn waits_on_canceled(
     entries: &mut BTreeSet<Entry>,
 ) -> Result<(), Error> {
     for link in &model.links {
-        if !model.items.contains_key(&link.from) || !model.reads_canceled(&link.to) {
+        if !model.items.contains_key(&link.from) || !readiness.canceled(&link.to) {
             continue;
         }
         let stage = if model.children(&link.from).is_empty() {
