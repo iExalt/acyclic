@@ -2321,6 +2321,9 @@ def edit_journey(page, view, env, plan, box, name, failures):
     ).wait_for(timeout=10_000)
     if page.get_by_test_id("map").get_attribute("data-nodes") != str(base):
         failures.append(f"{name}: a tap on {box}'s title opened or closed it")
+    # Selecting frames the box about 100 ms after its inspector shows, which moves the camera under whatever the journey
+    # centred meanwhile, so the tap below hit another leaf on a loaded machine. Taps wait for the camera to hold still.
+    settled_corner(page, box)
     # Selecting shows the item's notes, as text. The leaf sits above the inspector, as a person would hold it, so the
     # Map need not pan to show what is added inside it.
     tap_middle(page, view, first, rise=0.2)
