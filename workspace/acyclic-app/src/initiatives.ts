@@ -1,8 +1,8 @@
 // Initiatives in the lists: the switcher's rows and their open counts, the initiative in context, and how the Overview,
 // Up next and Needs you group their rows under initiatives. Pure, so the rules are tested without a browser.
 
-import type { Initiative } from "./api";
-import type { Model } from "./map/model";
+import type { Initiative, Item } from "./api";
+import { byCrossing, type Crossing, type Model } from "./map/model";
 import type { Need } from "./needs";
 import { oneOf } from "./outline";
 
@@ -56,6 +56,36 @@ export function threadInitiatives(model: Model): Map<string, Set<string | null>>
     const there = out.get(thread) ?? new Set<string | null>();
     there.add(item.initiative);
     out.set(thread, there);
+  }
+  return out;
+}
+
+/**
+ * The waits each unfinished item in `context` has on items in another initiative, which the Map draws as stubs, as
+ * it draws no edge to what it doesn't show: each wait names the item and its initiative, in the order a stub says
+ * them. Items waited for that the plan lacks are left out, as are the waits of finished work, which nothing waits
+ * behind, and waits on done work, which are met; a wait on canceled work stays, as it is stuck. None with no initiative in context, as then everything is drawn.
+ */
+export function crossingWaits(
+  items: readonly Item[],
+  context: string | null,
+  titles: ReadonlyMap<string, string>,
+): Map<string, Crossing[]> {
+  const out = new Map<string, Crossing[]>();
+  if (context === null) return out;
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const finished = (item: Item) =>
+    item.stage === "done" || item.stage === "canceled" || item.state === "done" || item.state === "canceled";
+  for (const item of items) {
+    if (item.initiative !== context || finished(item)) continue;
+    const found: Crossing[] = [];
+    for (const id of item.links.waits_for) {
+      const other = byId.get(id);
+      // A met wait is no block. One on canceled work is stuck, which Needs you lists too, so it stays.
+      if (other === undefined || other.initiative === context || other.stage === "done") continue;
+      found.push({ id, title: other.title, initiative: groupTitle(other.initiative, titles) });
+    }
+    if (found.length > 0) out.set(item.id, found.sort(byCrossing));
   }
   return out;
 }

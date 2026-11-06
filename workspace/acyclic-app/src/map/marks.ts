@@ -28,15 +28,19 @@ export interface Thread {
   ink: string;
 }
 
-/** The marks' image for a tile `width` by `height`, as SVG markup. */
+/**
+ * The marks' image for a tile `width` by `height`, as SVG markup. The `reserve` at its foot, a stub's room, is left
+ * clear: its stripe runs the whole height, and the badge and icon sit mid-way in the rest.
+ */
 export function markSvg(
   stage: Stage | null,
   thread: Thread | null,
   width: number,
   height: number,
   palette: Palette,
+  reserve = 0,
 ): string {
-  const middle = height / 2;
+  const middle = (height - reserve) / 2;
   const parts: string[] = [];
   // A task in no thread has a thread's stripe and dot, left grey: the muted ink in place of a line's colour.
   const colour = thread === null ? palette.muted : thread.colour;
@@ -66,10 +70,11 @@ export function boxMarkSvg(
   palette: Palette,
   thread: Thread | null = null,
   header = STRIP,
+  reserve = 0,
 ): string {
   const tall = kind === "box" ? header : height;
   // Keep the open-box controls inside the fixed hit area at the top of a taller header.
-  const middle = kind === "box" ? STRIP / 2 : tall / 2;
+  const middle = kind === "box" ? STRIP / 2 : (tall - reserve) / 2;
   const left = (TITLE - CHEVRON) / 2;
   const stroke = `fill="none" stroke="${palette.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
   const parts = [`<path transform="translate(${left} ${middle - CHEVRON / 2})" d="${CHEVRONS[kind]}" ${stroke}/>`];
@@ -94,14 +99,15 @@ export function markOf(
   width: number,
   height: number,
   palette: Palette,
+  reserve = 0,
 ): string {
   let mine = made.get(palette);
   if (mine === undefined) {
     mine = new Map();
     made.set(palette, mine);
   }
-  return once(mine, JSON.stringify([stage, thread, width, height]), () =>
-    markSvg(stage, thread, width, height, palette),
+  return once(mine, JSON.stringify([stage, thread, width, height, reserve]), () =>
+    markSvg(stage, thread, width, height, palette, reserve),
   );
 }
 
@@ -114,6 +120,7 @@ export function boxMarkOf(
   palette: Palette,
   thread: Thread | null = null,
   header = STRIP,
+  reserve = 0,
 ): string {
   let mine = made.get(palette);
   if (mine === undefined) {
@@ -121,8 +128,16 @@ export function boxMarkOf(
     made.set(palette, mine);
   }
   // A box's strip is as tall whatever it holds, so its height doesn't key it.
-  const key = JSON.stringify([kind, stage, width, kind === "box" ? 0 : height, thread, kind === "box" ? header : 0]);
-  return once(mine, key, () => boxMarkSvg(kind, stage, width, height, palette, thread, header));
+  const key = JSON.stringify([
+    kind,
+    stage,
+    width,
+    kind === "box" ? 0 : height,
+    thread,
+    kind === "box" ? header : 0,
+    kind === "box" ? 0 : reserve,
+  ]);
+  return once(mine, key, () => boxMarkSvg(kind, stage, width, height, palette, thread, header, reserve));
 }
 
 function once(mine: Map<string, string>, key: string, svg: () => string): string {

@@ -183,3 +183,37 @@ describe("a box's stage", () => {
     expect(stageOf("r")).toBeNull();
   });
 });
+
+describe("scene stubs", () => {
+  const gate = { id: "far", title: "Far", initiative: "Home lab" };
+  const alone = buildModel([item("a", null, [], { stage: "ready" }), item("b")], new Map([["a", [gate]]]));
+  const open = visible(alone, { collapsed: new Set() });
+  const laid: Placed = {
+    ...placed,
+    nodes: new Map(open.nodes.map((node, i) => [node.id, { x: i * 300, y: 10, width: 200, height: 94 }])),
+  };
+
+  it("draws a stub on the foot of the tile it is for, over it, and only for it", () => {
+    const drawn = scene(open, laid, { item: null, thread: null }, () => null);
+    expect(drawn.stubs).toHaveLength(1);
+    expect(drawn.stubs[0]).toMatchObject({ node: "a", target: "far", width: 184, height: 20, x: 100, layer: 1 });
+    // Its foot: inside the tile, a margin up from its bottom edge.
+    expect(drawn.stubs[0]?.y).toBe(10 + 94 - 8 - 10);
+    expect(drawn.nodes.find((node) => node.id === "a")?.reserve).toBeGreaterThan(0);
+    expect(drawn.nodes.find((node) => node.id === "b")?.reserve).toBe(0);
+  });
+
+  it("dims a stub with its tile, outside the lit thread", () => {
+    const threaded = buildModel(
+      [item("a", null, [], { thread: "t" }), item("b", null, [], { thread: "u" })],
+      new Map([["b", [gate]]]),
+    );
+    const view = visible(threaded, { collapsed: new Set() });
+    const at: Placed = {
+      ...placed,
+      nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 300, y: 0, width: 200, height: 94 }])),
+    };
+    const drawn = scene(view, at, { item: null, thread: "t" }, (id) => threaded.items.get(id)?.thread ?? null);
+    expect(drawn.stubs.map((stub) => stub.dim)).toEqual([true]);
+  });
+});

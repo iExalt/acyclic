@@ -961,6 +961,59 @@ button.project-title {
 .thread-tile .looped {
   color: var(--signal);
 }
+/* What a thread has in another initiative, in a tray under its tile that carries on its stripe: a stub for each, a
+   quiet dashed chip, muted, so it draws less than a real block, with only its arrow in the signal's colour as a link
+   across boxes is on the Map; it opens what it names. */
+.has-away > .thread-tile {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-width: 0;
+}
+.away {
+  display: grid;
+  gap: 4px;
+  padding: 0 8px 8px;
+  border: 1px solid var(--rule);
+  border-top: 0;
+  border-left: 4px solid var(--line, var(--rule));
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--tile);
+}
+.thread-tile[aria-current="true"] + .away {
+  border-color: var(--ink);
+  border-left-color: var(--line, var(--ink));
+}
+.away .stub {
+  display: flex;
+  min-width: 0;
+  min-height: 28px;
+  padding: 2px 8px;
+  align-items: center;
+  border: 1px dashed var(--muted);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+  white-space: pre;
+}
+.away .stub .arrow {
+  color: var(--signal);
+}
+.away .stub .where {
+  font-weight: 750;
+}
+.away .stub .named {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.away .more {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
 @media (max-width: 899px) {
   .waves .columns {
     gap: 16px;
@@ -987,8 +1040,14 @@ button.project-title {
   .thread-tile .projects,
   .thread-tile .counts,
   .thread-tile .after,
-  .thread-tile .looped {
+  .thread-tile .looped,
+  .away .stub,
+  .away .more {
     font-size: 13px;
+  }
+  /* A finger's height, as the tile's own. */
+  .away .stub {
+    min-height: var(--hit);
   }
 }
 .arrows {
@@ -2234,7 +2293,7 @@ dl.facts .chip:hover:not(:disabled) {
   display: flex;
   gap: 10px;
   align-items: center;
-  min-height: 36px;
+  min-height: var(--hit);
   padding: 0 10px;
   border: none;
   border-radius: 6px;

@@ -19,7 +19,7 @@ import { FRESH_WATCH, intentsPending, stepFrame } from "./framed";
 import { createGesture } from "./gesture";
 import { metricsOf, TILE_WIDTH } from "./labelmetrics";
 import type { Placed } from "./layout";
-import { buildModel, collapsedWith, type Model, sourceKey, topOf, type View, visible } from "./model";
+import { buildModel, type Crossing, collapsedWith, type Model, sourceKey, topOf, type View, visible } from "./model";
 import { busy, subscribe, track } from "./motion";
 import {
   firstView,
@@ -38,7 +38,7 @@ import {
 } from "./reveal";
 import { type Fonts, type Scene, type SceneNode, type Selection, scene, UNMEASURED } from "./scene";
 import { styleFor, WEIGHT } from "./style";
-import { tapAction } from "./tap";
+import { stubTap, tapAction } from "./tap";
 import { wheelZoom } from "./wheel";
 
 /** The furthest the Map zooms in. */
@@ -112,6 +112,10 @@ export interface PlanMapProps {
   onPick: ((item: string | null) => void) | null;
   /** A finished thread's box tapped: its thread is picked, as the sidebar picks one. */
   onThread?: (thread: string) => void;
+  /** The waits each item has on items outside `items`, drawn as stubs on its tile. */
+  outside?: ReadonlyMap<string, Crossing[]> | undefined;
+  /** A stub tapped: the item it names is opened, in its own initiative. */
+  onOpen?: ((item: string) => void) | undefined;
   /** Whether the Map view is active, so its controls and loading message don't cover another view. */
   active: boolean;
 }
@@ -137,6 +141,8 @@ export default function PlanMap({
   framed,
   onPick,
   onThread,
+  outside,
+  onOpen,
   active,
 }: PlanMapProps) {
   const host = useRef<HTMLDivElement>(null);
@@ -147,8 +153,8 @@ export default function PlanMap({
   // The plan as drawn, each box's finished work folded into doneBoxes, which only the Map holds.
   const { model, doneBoxes } = useMemo(() => {
     const named = new Map<string, string>(JSON.parse(names));
-    return foldDone(buildModel(items), (thread) => named.get(thread) ?? null);
-  }, [items, names]);
+    return foldDone(buildModel(items, outside), (thread) => named.get(thread) ?? null);
+  }, [items, names, outside]);
   // The folded source model carries geometry changes but not the Map's local chevron toggles.
   const source = useMemo(() => sourceKey(model, doneBoxes), [model, doneBoxes]);
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
@@ -732,7 +738,7 @@ export default function PlanMap({
       // Keep the request until the open Map can show it; a fully covered Map cannot satisfy a reveal.
       tryShow();
       // What the renderer holds, for the journeys to compare with the plan.
-      element.dataset.nodes = String(core.nodes().not(".junction, .divider").length);
+      element.dataset.nodes = String(core.nodes().not(".junction, .divider, .stub").length);
       element.dataset.edges = String(core.edges().length);
       element.dataset.lit = String(drawn.nodes.filter((node) => node.lit).length);
       element.dataset.litEdges = String(drawn.edges.filter((edge) => edge.lit).length);
@@ -853,8 +859,8 @@ export default function PlanMap({
   }, [thread, drawn, focus, selected]);
 
   // The latest handlers, so the tap listener is added once.
-  const handlers = useRef({ onSelect, onPick, onThread });
-  handlers.current = { onSelect, onPick, onThread };
+  const handlers = useRef({ onSelect, onPick, onThread, onOpen });
+  handlers.current = { onSelect, onPick, onThread, onOpen };
   /** Counts taps, so a tap's late reveal gives way to a newer tap's. */
   const taps = useRef(0);
   function cancelViewIntent() {
@@ -866,10 +872,23 @@ export default function PlanMap({
     const core = cy.current;
     if (core === null) return;
     const tap = (event: cytoscape.EventObject) => {
-      const { onSelect, onPick, onThread } = handlers.current;
+      const { onSelect, onPick, onThread, onOpen } = handlers.current;
       const now = ++taps.current;
       const target = event.target as cytoscape.NodeSingular | Core;
-      const node = target !== core && "isNode" in target && target.isNode() ? target : null;
+      let node = target !== core && "isNode" in target && target.isNode() ? target : null;
+      // A stub opens what it names; while an edit waits for a target, the tap is the tile's under it.
+      if (node?.hasClass("stub")) {
+        const through = stubTap(onPick !== null, {
+          node: String(node.data("node")),
+          target: String(node.data("target")),
+        });
+        if (through.action === "open") {
+          cancelViewIntent();
+          onOpen?.(through.item);
+          return;
+        }
+        node = core.getElementById(through.node);
+      }
       if (node === null) {
         cancelViewIntent();
         if (onPick !== null) onPick(null);
@@ -954,6 +973,20 @@ export default function PlanMap({
     // A pointer over an item shows its links; touch has no hover, and gives none of these.
     const enter = (event: cytoscape.EventObject) => setHovered((event.target as cytoscape.NodeSingular).id());
     const leave = () => setHovered(null);
+    // A stub's full names show as the Map's hover title, as the canvas has no element to hold one, and its pointer is a
+    // hand: it opens what it names.
+    const over = (event: cytoscape.EventObject) => {
+      const element = host.current;
+      if (element === null) return;
+      element.title = String((event.target as cytoscape.NodeSingular).data("full"));
+      element.style.cursor = "pointer";
+    };
+    const off = () => {
+      const element = host.current;
+      if (element === null) return;
+      element.removeAttribute("title");
+      element.style.removeProperty("cursor");
+    };
     core.on("tap", tap);
     core.on("viewport", kickFramed);
     core.on("tapstart", "node", press);
@@ -962,6 +995,8 @@ export default function PlanMap({
     core.on("tapend", release);
     core.on("mouseover", HOVERABLE, enter);
     core.on("mouseout", HOVERABLE, leave);
+    core.on("mouseover", "node.stub", over);
+    core.on("mouseout", "node.stub", off);
     // Leaving the Map from over an item gives the renderer no move off it.
     const element = host.current;
     element?.addEventListener("mouseleave", leave);
@@ -969,6 +1004,8 @@ export default function PlanMap({
       element?.removeEventListener("mouseleave", leave);
       core.off("mouseover", HOVERABLE, enter);
       core.off("mouseout", HOVERABLE, leave);
+      core.off("mouseover", "node.stub", over);
+      core.off("mouseout", "node.stub", off);
       core.off("tap", tap);
       core.off("viewport", kickFramed);
       core.off("tapstart", "node", press);

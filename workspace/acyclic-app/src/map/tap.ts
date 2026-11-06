@@ -29,3 +29,11 @@ export function tapAction(tapped: Tapped): TapAction {
   if (tapped.thread !== null) return "thread";
   return tapped.kind === "collapsed" ? "toggle" : "ignore";
 }
+
+/** What a tap on a stub does: open what it names, or, while an edit waits for a target, count as a tap on its tile. */
+export type StubTap = { action: "open"; item: string } | { action: "through"; node: string };
+
+/** A stub is no item to pick, so a tap on one while an edit waits for a target falls through to the tile under it. */
+export function stubTap(picking: boolean, stub: { node: string; target: string }): StubTap {
+  return picking ? { action: "through", node: stub.node } : { action: "open", item: stub.target };
+}

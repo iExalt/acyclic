@@ -123,7 +123,15 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
   until one is chosen it is the first row. A history entry holds its initiative: Back and Forward restore it, except for
   an entry written before one was chosen, which leaves the one in context. The address bar's link carries it; the link
   copied from an item's or a thread's panel does not. It orders the lists, is where New item goes, and marks the
-  switcher; it does not yet scope the Map or the Threads view.
+  switcher; the Map, the Threads view and the outline show only its work.
+- **The Threads view names what crosses initiatives.** Waves are computed across the whole tracker and numbered for
+  the view without gaps. A tile with work in another initiative, or after a thread in one, has a tray under it that
+  carries on its stripe, a stub for each: `↗ Initiative: task` for each unfinished task of the thread there (three at
+  most, then "+n more in other initiatives"), and `after ↗ Initiative: thread` for each thread in an earlier wave that
+  the view lacks (`waits in a cycle with` for one in its own wave). The text is cut to the tile, its full name is the
+  stub's title, and a tap opens the task, or goes to the thread on the Map, in its own initiative. The arrows' routes
+  keep clear of the tray, which counts as the tile. A thread in several initiatives is named by the first, with the
+  count of the rest, as a phone's row labels are.
 - **The lists group by initiative** (the user's pick, "Grouped"): the Overview's Needs you, In progress, Up next and
   projects, and Needs you's view, cover every initiative, the one in context first, the rest in the switcher's order,
   then rows in none under "No initiative". Wide, a sub-heading names each group with its count and the rows carry no
@@ -392,10 +400,20 @@ before what went wrong.
   the other links recede, the tiles staying as they are; a folded box shows its items' links; the links a drawn way
   already implies stay out, since drawn straight they would cut across items. Touch has no hover; a tap selects, which
   shows them all.
-- **Any time comes first.** Items with no link inside their box stand in columns on its left, before its graph, as
+- **Unlinked comes first.** Items with no link inside their box (the glossary's Unlinked; Any time is the Threads
+  view's word, for threads) stand in columns on its left, before its graph, as
   the Threads view's Any time column stands before wave 1 (the user's call: what can start now reads first). A dashed
   line, in the links' colour, runs down between the columns and the graph, so where one ends and the other starts reads
   at a glance (the user's ask).
+- **Stubs name what crosses.** A wait from an unfinished item to an item in another initiative leaves the plan drawn, so
+  no edge shows it; the item's tile, or the folded box that hides it, carries a stub instead: a quiet dashed chip at its
+  foot (the user asked for it quieter than the mock's amber: muted text and dash, so it draws less than a real block),
+  its arrow alone in the signal's colour, as a link across boxes is, naming the initiative and the item,
+  `Initiative: item`, cut to the tile with an ellipsis, with "+n" for each further one. A hover (a title on the Map)
+  names them all in full, and a tap opens the first, in its own initiative. The tile grows by the chip's room, its title
+  and marks centred above it, so the layout is as before with taller tiles; an open box's own wait on another initiative
+  shows no stub while the box is open, as its title strip has no place for one; it appears once the box is folded, and
+  the Inspector lists it. A finished item's waits show none.
 - **Threads' waits stay named.** Every tile names the threads it waits on and any cycle peers. On wide screens, arrows
   appear only for a hovered or picked thread; phone layouts keep the names without arrows.
 - **Packed tight, in order where it counts.** The top level is packed into a rectangle with as little room wasted as
@@ -500,8 +518,11 @@ before what went wrong.
   box made "the entire map … shift over".
 - 2026-11-04: source updates that only shrink top-level boxes repack them automatically; chevron folds still hold their
   places, and Undo restores the earlier source's packing.
+- 2026-11-06: work that crosses initiatives is shown, not drawn: stubs on the Map and in the Threads view (see "Stubs
+  name what crosses" and the Threads view's trays), and the Map's no-link column is Unlinked. The look is the mock's
+  dashed chips made quieter at the user's ask: muted text and dash, the arrow alone in the signal's colour.
 - 2026-11-06: the initiative switcher is a sidebar section, and a phone's Outline sheet opens on it ("A: sidebar
   list"), the lists group their rows under initiative sub-headings with a trailing label on a phone ("Grouped"), Up
   next fits the first view at 1280 x 800, and New item defaults to the initiative in context; the user chose them. The
-  Map and Threads are not yet scoped to it. Proposed: the initiative in context is kept in the address and the
+  Map, Threads view and outline are scoped to it. Proposed: the initiative in context is kept in the address and the
   navigation place, orders the groups with the one in context first, and the Overview's Needs you rows keep wrapping.

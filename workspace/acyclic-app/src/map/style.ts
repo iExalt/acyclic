@@ -4,6 +4,7 @@ import type cytoscape from "cytoscape";
 import type { Stage } from "../api";
 import type { Palette } from "../palette";
 import { STRIP } from "./chevron";
+import { STUB_TEXT_LEFT } from "./labelmetrics";
 import { BOX_TEXT_LEFT, MARKS_LEFT, QUIET } from "./marks";
 
 /** The face labels are drawn in. */
@@ -50,6 +51,9 @@ export function styleFor(p: Palette, family = FONT): cytoscape.StylesheetJson {
   }
   return style;
 }
+
+/** The shift up of a title that a stub's room at the foot of its node makes off-centre. */
+const lifted = (node: cytoscape.NodeSingular) => -Number(node.data("reserve") ?? 0) / 2;
 
 /** Boxes are the zones of the map and items its stations; a lit item takes its thread's line colour. */
 function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
@@ -128,6 +132,8 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
         "text-halign": "left-inside",
         "text-justification": "left",
         "text-margin-x": MARKS_LEFT,
+        // The room at its foot a stub takes is not the title's: the title is centred in what is left.
+        "text-margin-y": lifted,
       },
     },
     ...stagesOf(p),
@@ -141,6 +147,7 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
       style: {
         "border-color": p.muted,
         "font-weight": WEIGHT.bold,
+        "text-margin-y": lifted,
       },
     },
     { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 1.5 } },
@@ -199,6 +206,33 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
         "segment-distances": (edge: cytoscape.EdgeSingular) => edge.data("distances") as string,
       },
     },
+    // A wait that leaves the initiative: a quiet dashed chip at a tile's foot, muted, so it draws less than a real
+    // block does, with only its arrow in the signal's colour, as a link across boxes is; it takes a tap, which opens
+    // what it names.
+    {
+      selector: "node.stub",
+      style: {
+        "background-opacity": 0,
+        "border-width": 1,
+        "border-style": "dashed",
+        "border-opacity": 1,
+        "border-color": p.muted,
+        color: p.muted,
+        "font-size": 12,
+        "text-halign": "left-inside",
+        "text-justification": "left",
+        "text-valign": "center",
+        "text-margin-x": STUB_TEXT_LEFT,
+        "background-image": arrow(p.signal),
+        "background-fit": "none",
+        "background-clip": "node",
+        "background-position-x": "8px",
+        "background-position-y": "50%",
+        "text-margin-y": 0,
+        "z-index": (node: cytoscape.NodeSingular) => TILES + 2 * (node.data("layer") as number) + 1,
+      },
+    },
+    { selector: "node.stub.dim", style: { opacity: 0.35 } },
     {
       selector: "edge.crossing",
       style: { "line-style": "dashed", "line-color": p.signal, "target-arrow-color": p.signal },
@@ -251,6 +285,12 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
       style: { width: 7, height: 7, "background-color": "data(line)", "border-width": 0 },
     },
   ];
+}
+
+/** The stub's arrow, 12 px square, as an image. */
+function arrow(colour: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><path d="M3 9L9 3M4.5 3H9v4.5" fill="none" stroke="${colour}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 /** A dash 4 px long in `colour` with a 4 px gap, as an image a pixel wide, repeated down a divider. */

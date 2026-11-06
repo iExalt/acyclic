@@ -323,3 +323,47 @@ describe("a junction's dot", () => {
     warn.mockRestore();
   });
 });
+
+describe("a stub", () => {
+  const gate = { id: "far", title: "Far", initiative: "Home lab" };
+  const shot = (outside: boolean) => {
+    const model = buildModel([item("a"), item("b")], outside ? new Map([["a", [gate]]]) : new Map());
+    const view = visible(model, { collapsed: new Set() });
+    const placed: Placed = {
+      width: 500,
+      height: 500,
+      laidOut: [],
+      routes: new Map(),
+      junctions: new Map(),
+      dividers: new Map(),
+      redundant: new Set(),
+      nodes: new Map(view.nodes.map((node, i) => [node.id, { x: i * 300, y: 0, width: 200, height: 94 }])),
+    };
+    return elementsOf(
+      scene(view, placed, { item: null, thread: null }, () => null),
+      undefined,
+      new Map(),
+      PALETTES.dark,
+    );
+  };
+
+  it("is a node of its own that says where a tap goes and what it names in full, drawn over its tile", () => {
+    const stub = shot(true).find((one) => one.classes.includes("stub"));
+    expect(stub?.data).toMatchObject({
+      id: "stub a",
+      label: "Home lab: Far",
+      target: "far",
+      full: "Home lab: Far",
+      layer: 1,
+    });
+    expect(shot(false).some((one) => one.classes.includes("stub"))).toBe(false);
+  });
+
+  it("is added and removed with the wait, and the tile keeps the room for it", () => {
+    const next = shot(true);
+    const change = diff(new Map(shot(false).map((one) => [one.data.id, one])), next);
+    expect(change.add.map((one) => one.data.id)).toEqual(["stub a"]);
+    expect(change.update.find((one) => one.id === "a")?.data).toMatchObject({ reserve: 30 });
+    expect(diff(new Map(next.map((one) => [one.data.id, one])), shot(false)).remove).toEqual(["stub a"]);
+  });
+});
