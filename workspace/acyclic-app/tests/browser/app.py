@@ -2904,6 +2904,8 @@ def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
             f"{name}: folding after Undo moved the other root other than up or left by the room given up: "
             f"{before['nodes'][other]} -> {folded['nodes'][other]}, gave {gave_w}x{gave_h}"
         )
+    if any(abs(folded["nodes"][other][field] - before["nodes"][other][field]) > 1 for field in ("w", "h")):
+        failures.append(f"{name}: folding after Undo resized the other root")
     if not same_node(reopened["nodes"][other], before["nodes"][other]):
         failures.append(f"{name}: reopening after Undo did not restore the other root")
     hold_during_gesture(page, env, project, other, chain, name, failures)
