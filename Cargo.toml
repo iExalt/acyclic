@@ -44,6 +44,13 @@ tower-http = { version = "0.7.1", default-features = false, features = ["fs", "c
 inherits = "dev"
 opt-level = 1
 
+# The dependencies, the gix crates among them, run unoptimised in CI, where the line above is set back to 0 for the
+# workspace's own crates. Each journey waits on the CLI and server reading, importing and writing, and with the dependencies at
+# level 1 the journeys ran in 92 s on four cores where they took 112 s. A cold build of them takes 60 s longer (117 s against 57 s),
+# paid only when Cargo.lock changes: the CI cache holds them. Levels 2 and 3 ran no faster (94 and 93 s) and built more slowly.
+[profile.journeys.package."*"]
+opt-level = 1
+
 # The shipped binary carries gix, with its network and TLS stack. Thin LTO with one codegen unit made it 9% smaller (stripped, 29.2 to
 # 26.5 MB) at the cost of nothing on a cold build and 2.3 times the time of a release build after an edit; fat LTO made it 17% smaller
 # but a cold build took 1.7 times and an edited one 5 times as long. Panics stay unwinding, as the server catches those of a task.
