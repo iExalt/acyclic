@@ -5,7 +5,6 @@ import type { Command, Item } from "./api";
 
 /** The states a command may set; `done` is set by `acyclic item done`, with evidence. */
 export const STATES = ["backlog", "parked"] as const;
-export const SIZES = ["xs", "s", "m", "l", "xl"] as const;
 /** Explain stored backlog separately from the status computed for a leaf. */
 export function stateHint(draft: Pick<ItemDraft, "state" | "thread">, isLeaf: boolean): string | null {
   if (!isLeaf || draft.state !== "backlog") return null;
@@ -18,7 +17,6 @@ export interface ItemDraft {
   state: string;
   thread: string;
   notes: string;
-  size: string;
 }
 
 export function draftOf(item: Item): ItemDraft {
@@ -27,7 +25,6 @@ export function draftOf(item: Item): ItemDraft {
     state: item.state,
     thread: item.thread ?? "",
     notes: item.notes ?? "",
-    size: item.size ?? "",
   };
 }
 
@@ -41,7 +38,7 @@ export function changes(base: ItemDraft, draft: ItemDraft): Partial<ItemDraft> {
   const title = draft.title.trim();
   if (title !== "" && title !== base.title) out.title = title;
   if (draft.state !== base.state && (STATES as readonly string[]).includes(draft.state)) out.state = draft.state;
-  for (const field of ["thread", "notes", "size"] as const) if (draft[field] !== base[field]) out[field] = draft[field];
+  for (const field of ["thread", "notes"] as const) if (draft[field] !== base[field]) out[field] = draft[field];
   return out;
 }
 

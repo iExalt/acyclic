@@ -365,22 +365,12 @@ fn done_at_is_the_first_done_and_re_marking_done_writes_nothing() {
 fn equal_concurrent_values_read_as_one_and_unreadable_ones_fail() {
     let (mut a, mut b) = pair(&["x"]);
     let key = item_key("x").unwrap();
-    set(&mut a, &key, field::SIZE, Some(&Size::M), by(2)).unwrap();
-    set(&mut b, &key, field::SIZE, Some(&Size::M), by(2)).unwrap();
+    set(&mut a, &key, field::NOTES, Some(&"same"), by(2)).unwrap();
+    set(&mut b, &key, field::NOTES, Some(&"same"), by(2)).unwrap();
     a.join(&b.state).unwrap();
-    assert_eq!(model(&a).items["x"].size, Value::One(Size::M));
+    assert_eq!(model(&a).items["x"].notes, Value::One("same".to_owned()));
     a.write(&key, field::STATE, "actor/user", 3, Some(json!("from-the-future"))).unwrap();
     assert!(matches!(Model::read(&a.state), Err(Error::Format(_))));
-}
-
-/// A name for each variant, written as an exhaustive `match` so that adding a variant fails to compile here until
-/// it is listed in its enum's `ALL`.
-fn listed_in_all() {
-    for size in Size::ALL {
-        match size {
-            Size::Xs | Size::S | Size::M | Size::L | Size::Xl => {},
-        }
-    }
 }
 
 fn names<T: Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(
@@ -396,8 +386,7 @@ fn names<T: Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debu
 }
 
 #[test]
-fn every_variant_of_a_value_enum_is_listed_and_round_trips() {
-    listed_in_all();
+fn every_variant_of_a_value_enum_round_trips() {
     let states = [ItemState::Backlog, ItemState::Parked, ItemState::Done];
     assert_eq!(names(&states), ["backlog", "parked", "done"]);
     let progress = [
@@ -409,7 +398,6 @@ fn every_variant_of_a_value_enum_is_listed_and_round_trips() {
     let progress: Vec<Json> =
         progress.iter().map(|state| serde_json::to_value(state).unwrap()).collect();
     assert_eq!(progress, [json!("backlog"), json!("parked"), json!("in-progress"), json!("done")]);
-    assert_eq!(names(&Size::ALL), ["xs", "s", "m", "l", "xl"]);
 }
 
 #[test]

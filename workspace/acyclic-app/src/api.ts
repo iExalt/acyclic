@@ -11,7 +11,7 @@ export type Raw<T> = T | null | { conflict: (T | null)[] };
 
 /** A condition the server checks with an app write under the tracker lock. */
 export type Expected =
-  | { kind: "item-field"; item: string; field: "title" | "parent" | "state" | "notes" | "size"; value: Raw<string> }
+  | { kind: "item-field"; item: string; field: "title" | "parent" | "state" | "notes"; value: Raw<string> }
   | { kind: "thread-field"; thread: string; field: "title" | "brief"; value: Raw<string> }
   | { kind: "waits-for"; item: string; target: string; present: boolean }
   | { kind: "started-at-most"; item: string; count: number }
@@ -25,7 +25,6 @@ interface RawItem {
   thread: Raw<string>;
   state: Raw<string>;
   notes: Raw<string>;
-  size: Raw<string>;
   links: { waits_for: string[]; waited_on_by: string[] };
   /**
    * Where it stands, as core tells it: a leaf's own stage, or a parent's from its leaves. A parent with no leaves to
@@ -79,7 +78,7 @@ export function countsText(counts: Counts): string {
 }
 
 /** The fields whose conflicts the app settles for display. */
-export type Settled = "title" | "parent" | "thread" | "state" | "notes" | "size";
+export type Settled = "title" | "parent" | "thread" | "state" | "notes";
 
 /**
  * An item with every field ready to draw: a conflicted field reads as its first value in the tracker's order, and
@@ -91,7 +90,6 @@ export interface Item extends Omit<RawItem, Settled> {
   thread: string | null;
   state: string;
   notes: string | null;
-  size: string | null;
   conflicts: Partial<Record<Settled, (string | null)[]>>;
 }
 
@@ -125,7 +123,6 @@ export function settle(raw: RawItem): Item {
     thread: pick("thread"),
     state,
     notes: pick("notes"),
-    size: pick("size"),
     conflicts,
   };
 }

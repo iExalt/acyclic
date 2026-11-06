@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use acyclic_core::model::{ItemState, Size};
+use acyclic_core::model::ItemState;
 use std::fmt::Write as _;
 
 use clap::builder::{PossibleValuesParser, TypedValueParser};
@@ -448,9 +448,6 @@ pub enum ItemCommand {
         /// Its notes.
         #[arg(long)]
         notes: Option<String>,
-        /// Its size.
-        #[arg(long, value_parser = values(&Size::ALL))]
-        size: Option<Size>,
         /// A repository it touches; repeat for more.
         #[arg(short = 'r', long, value_name = "REPOSITORY")]
         #[serde(default)]
@@ -502,7 +499,6 @@ pub enum ItemCommand {
 
 /// What `item edit` changes.
 #[derive(Debug, clap::Args, Serialize, Deserialize)]
-#[expect(clippy::struct_excessive_bools, reason = "each field has a flag that clears it")]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemEdit {
     /// The item.
@@ -534,13 +530,6 @@ pub struct ItemEdit {
     #[arg(long)]
     #[serde(default)]
     pub no_notes: bool,
-    /// A new size.
-    #[arg(long, value_parser = values(&Size::ALL))]
-    pub size: Option<Size>,
-    /// Clear its size.
-    #[arg(long)]
-    #[serde(default)]
-    pub no_size: bool,
     /// Add a repository it touches; repeat for more.
     #[arg(short = 'r', long, value_name = "REPOSITORY")]
     #[serde(default)]
@@ -564,7 +553,6 @@ impl ItemEdit {
         clears("parent", self.parent.is_some(), self.no_parent)?;
         clears("thread", self.thread.is_some(), self.no_thread)?;
         clears("notes", self.notes.is_some(), self.no_notes)?;
-        clears("size", self.size.is_some(), self.no_size)?;
         overlaps("repository", &self.repository, &self.no_repository)?;
         overlaps("waits-for", &self.waits_for, &self.no_waits_for)
     }

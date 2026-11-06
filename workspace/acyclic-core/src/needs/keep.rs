@@ -3,7 +3,7 @@
 
 use serde_json::Value as Json;
 
-use crate::model::{By, Evidence, Item, ItemState, Model, Size, Value};
+use crate::model::{By, Evidence, Item, ItemState, Model, Value};
 use crate::schema::{item as field, kind, link, repository, thread};
 use crate::state::{Error, Key, State};
 use crate::write::{
@@ -134,11 +134,6 @@ fn keep(
         },
         (kind::ITEM, field::THREAD) => {
             parsed(value).map_or(Keep::Not(Unkept::Unreadable), |v| item(ItemAssign::Thread(v)))
-        },
-        (kind::ITEM, field::SIZE) => match value {
-            Json::Null => item(ItemAssign::Size(None)),
-            _ => typed(value)
-                .map_or(Keep::Not(Unkept::Unreadable), |s: Size| item(ItemAssign::Size(Some(s)))),
         },
         (kind::ITEM, field::EVIDENCE) => match value {
             Json::Null => Keep::Not(Unkept::NoCommand),

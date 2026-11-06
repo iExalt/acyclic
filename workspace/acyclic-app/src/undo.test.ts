@@ -36,16 +36,17 @@ describe("undo", () => {
   });
 
   it("sets an item's fields back, clearing one that was empty, while each still holds what was set", () => {
-    const undo = undoOf({ item: { edit: { item: "dig", title: "Dig deep", "no-notes": true, size: "m" } } }, before);
-    expect(undo?.command).toEqual({ item: { edit: { item: "dig", title: "Dig", notes: "deep", "no-size": true } } });
+    const undo = undoOf({ item: { edit: { item: "dig", title: "Dig deep", "no-notes": true } } }, before);
+    expect(undo?.command).toEqual({ item: { edit: { item: "dig", title: "Dig", notes: "deep" } } });
     expect(undo?.expect).toEqual([
       { kind: "item-field", item: "dig", field: "title", value: "Dig deep" },
       { kind: "item-field", item: "dig", field: "notes", value: null },
-      { kind: "item-field", item: "dig", field: "size", value: "m" },
     ]);
-    expect(undo?.holds(after("dig", { title: "Dig deep", notes: null, size: "m" }))).toBe(true);
+    expect(undo?.holds(after("dig", { title: "Dig deep", notes: null }))).toBe(true);
     // Someone else changed one of them since: the undo would take back their change too.
-    expect(undo?.holds(after("dig", { title: "Dig deeper", notes: null, size: "m" }))).toBe(false);
+    expect(undo?.holds(after("dig", { title: "Dig deeper", notes: null }))).toBe(false);
+    const filled = undoOf({ item: { edit: { item: "sow", notes: "rows" } } }, before);
+    expect(filled?.command).toEqual({ item: { edit: { item: "sow", "no-notes": true } } });
   });
 
   it("takes back a waits-for added or removed, as item edits, while it is still so", () => {

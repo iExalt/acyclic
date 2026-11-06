@@ -37,7 +37,7 @@ describe("the plan's reads", () => {
 
   it("keeps a saved edit's fields over an older read, under the write still out", () => {
     const beds = item("beds", null, [], { notes: "old" });
-    const base = { title: "Beds", state: "backlog", thread: "", notes: "old", size: "" };
+    const base = { title: "Beds", state: "backlog", thread: "", notes: "old" };
     const draft = { ...base, notes: "new" };
     const saved = answered(start(NO_READS), { kind: "edit", id: "beds", edited: { base, draft } });
     const older = shown(saved, 1, [beds]);

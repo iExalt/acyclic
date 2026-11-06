@@ -15,7 +15,6 @@ pub(super) fn item(n: u8, state: Option<State>, parent: Option<u8>) -> Item {
         thread: None,
         repositories: None,
         waits_for: None,
-        size: None,
         evidence: None,
     }
 }
@@ -88,6 +87,11 @@ fn removed_and_unknown_fields_are_refused() {
         r#","state":"done","evidence":{"repository":"r","commit":"abc1234"}"#,
     ] {
         assert!(matches!(Import::from_json(&one(removed)), Err(ParseError::Json(_))), "{removed}");
+    }
+    // A retired key is refused by name, not dropped.
+    for retired in ["size", "archived"] {
+        let err = Import::from_json(&one(&format!(r#","{retired}":"m""#))).unwrap_err();
+        assert!(err.to_string().contains(&format!("unknown field `{retired}`")), "{err}");
     }
     let threads = format!(
         "{{\"format\":\"{FORMAT}\",\"version\":3,\"threads\":[{{\"id\":\"{}\",\"title\":\"T\",\"items\":[]}}]}}",

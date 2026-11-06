@@ -185,7 +185,8 @@ fn threads_that_wait_on_each_other_are_one_thread_cycle() {
 }
 
 /// Trackers written by earlier versions hold kinds and fields no reader gives meaning to any more: proposals,
-/// questions, global settings, and a thread's approval and autonomy level. Every reader skips them.
+/// questions, global settings, a thread's approval and autonomy level, and the retired fields. Every reader skips
+/// them.
 #[test]
 fn kinds_and_fields_no_reader_knows_are_skipped() {
     let mut r = replica("a");
@@ -206,9 +207,34 @@ fn kinds_and_fields_no_reader_knows_are_skipped() {
     for (key, name, value) in old {
         r.write(&key, name, "session/old", 2, Some(value)).unwrap();
     }
+    // Retired fields two replicas wrote apart conflict in the state, but lie dormant: no conflict, no need.
+    let x = item_key("x").unwrap();
+    let repo = Key::new(kind::REPOSITORY, "r").unwrap();
+    let retired = [
+        (x.clone(), "size", json!("m"), json!("xl")),
+        (x.clone(), "archived", json!(true), json!(false)),
+        (x.clone(), "reopened", json!(true), json!(null)),
+        (x.clone(), "repository/r", json!(true), json!(false)),
+        (Key::new(kind::THREAD, "t").unwrap(), "repository/r", json!(true), json!(false)),
+        (repo.clone(), repository::INSTALLATION, json!("1"), json!("2")),
+    ];
+    for (key, name, mine, theirs) in &retired {
+        apart(&mut r, key, name, mine, theirs);
+    }
+    let dormant = |r: &Replica| {
+        retired.iter().map(|(key, name, ..)| r.state.field(key, name).cloned()).collect::<Vec<_>>()
+    };
+    let before = dormant(&r);
+    assert!(before.iter().all(|register| register.as_ref().is_some_and(|r| r.len() == 2)));
     let model = Model::read(&r.state).unwrap();
     assert_eq!(model.thread_of("x"), Some("t"));
+    assert_eq!(model.conflicts().count(), 0);
     assert_eq!(list(&r), [], "nothing about them reaches the list");
+    // A new write to the same records leaves them as they were.
+    model::set(&mut r, &x, field::TITLE, Some(&"new"), user(6)).unwrap();
+    model::set(&mut r, &repo, repository::DEFAULT_BRANCH, Some(&"main"), user(6)).unwrap();
+    assert_eq!(dormant(&r), before);
+    assert_eq!(Model::read(&r.state).unwrap().conflicts().count(), 0);
 }
 
 #[test]
@@ -291,10 +317,10 @@ fn each_value_of_a_conflict_is_kept_by_a_change_the_judge_accepts_or_says_why_no
     );
 
     // A clear is kept where the field can be cleared.
-    apart(&mut r, &x, field::SIZE, &json!("m"), &json!(null));
+    apart(&mut r, &x, field::NOTES, &json!("n"), &json!(null));
     assert_eq!(
-        keeps_in(&r, field::SIZE),
-        [set(ItemAssign::Size(Some(model::Size::M))), set(ItemAssign::Size(None))]
+        keeps_in(&r, field::NOTES),
+        [set(ItemAssign::Notes(Some("n".into()))), set(ItemAssign::Notes(None))]
     );
 
     // Putting x under its own child is refused by the judge, so no command is offered for it.

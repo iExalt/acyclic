@@ -218,7 +218,6 @@ impl<'a> CommandContext<'a> {
                 thread,
                 state,
                 notes,
-                size,
                 repository,
                 waits_for,
             }) => {
@@ -228,7 +227,6 @@ impl<'a> CommandContext<'a> {
                     thread: Change::of(thread.clone(), false),
                     state: state.map(StateWord::state),
                     notes: Change::of(notes.clone(), false),
-                    size: Change::of(*size, false),
                     repositories: Delta { add: repository.clone(), remove: Vec::new() },
                     waits_for: Delta { add: waits_for.clone(), remove: Vec::new() },
                 };
@@ -262,7 +260,6 @@ impl<'a> CommandContext<'a> {
                     thread: Change::of(edit.thread.clone(), edit.no_thread),
                     state: edit.state.map(StateWord::state),
                     notes: Change::of(edit.notes.clone(), edit.no_notes),
-                    size: Change::of(edit.size, edit.no_size),
                     repositories: Delta {
                         add: edit.repository.clone(),
                         remove: edit.no_repository.clone(),

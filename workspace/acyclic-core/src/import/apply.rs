@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::{Value as Json, json};
 
 use super::{Import, KeyKind, ValidationError, owner_name};
-use crate::model::{By, Evidence, Model, Size, WriteError};
+use crate::model::{By, Evidence, Model, WriteError};
 use crate::place::Inherited;
 use crate::schema::kind;
 use crate::state::{Error, Replica};
@@ -331,9 +331,6 @@ fn item_fields(item: &super::Item) -> Vec<Assign> {
     if let Some(parent) = &item.parent {
         with.push(field(ItemAssign::Parent(Some(parent.clone()))));
     }
-    if let Some(size) = item.size {
-        with.push(field(ItemAssign::Size(Some(size.into()))));
-    }
     if let Some(evidence) = &item.evidence {
         let commit = evidence.commit.as_ref().and_then(|c| c.rsplit_once('@'));
         with.push(field(ItemAssign::Evidence(Some(Evidence {
@@ -561,7 +558,6 @@ fn held(before: &Model, at: &FieldAddr) -> Json {
             FieldName::Notes => json!(item.notes),
             FieldName::State => json!(item.state),
             FieldName::Parent => json!(item.parent),
-            FieldName::Size => json!(item.size),
             FieldName::Evidence => json!(item.evidence),
             FieldName::Thread => json!(item.thread),
             _ => Json::Null,
@@ -579,19 +575,6 @@ fn held(before: &Model, at: &FieldAddr) -> Json {
         }),
     };
     value.unwrap_or(Json::Null)
-}
-
-/// The model's size for an imported one.
-impl From<super::Size> for Size {
-    fn from(size: super::Size) -> Self {
-        match size {
-            super::Size::Xs => Self::Xs,
-            super::Size::S => Self::S,
-            super::Size::M => Self::M,
-            super::Size::L => Self::L,
-            super::Size::Xl => Self::Xl,
-        }
-    }
 }
 
 #[cfg(test)]

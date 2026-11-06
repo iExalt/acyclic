@@ -2875,7 +2875,6 @@ def form_journey(page, view, env, remote, id, name, failures):
     # Fields: only what changed is sent.
     page.locator("[data-action=edit]").click()
     form.locator("input[name=title]").fill("Edited in the app")
-    form.locator("select[name=size]").select_option("m")
     form.locator("textarea[name=notes]").fill("Plain notes")
     if view == VIEWS["phone"]:
         # A link offered while typing belongs to the notice, so Enter cannot submit the dirty editor.
@@ -2970,8 +2969,8 @@ def form_journey(page, view, env, remote, id, name, failures):
         env,
         id,
         lambda row: (
-            (row["title"], row["size"], row["notes"], row["state"])
-            == ("Edited in the app", "m", "Plain notes", "parked")
+            (row["title"], row["notes"], row["state"])
+            == ("Edited in the app", "Plain notes", "parked")
         ),
         f"{id}'s new fields, and the state set while the editor was open",
         failures,
