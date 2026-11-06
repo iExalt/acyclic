@@ -214,6 +214,9 @@ class Plan:
         return len(drawn)
 
 
+LONG_CODE = "workspace/acyclic-app/src/a/very/long/path/that/has/no/spaces/to/break/at/" + "x" * 60 + "/file.tsx"
+
+
 @timed
 def tracker(directory, env, items, remote=None):
     """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it."""
@@ -253,6 +256,13 @@ def tracker(directory, env, items, remote=None):
         and not any(waits[one] for one in line(item["id"]))
     )
     run(env, "item", "edit", done, "--waits-for", unwaiting)
+    # A long path in backticks in the notes of the item the link journeys open, which the panel must wrap.
+    first = min(
+        item["id"]
+        for item in data["items"]
+        if parent.get(item["id"]) is not None and parent.get(parent[item["id"]]) is None
+    )
+    run(env, "item", "edit", first, "--notes", f"Kept in `{LONG_CODE}` for good.")
     if remote is not None:
         run(env, "sync")
     with detail(f"tracker {items}: final read"):
@@ -635,6 +645,17 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         return
     if title.inner_text() != plan.items[id]["title"] or page.url != link:
         failures.append(f"{name}: a link to {id} opened {title.inner_text()!r} at {page.url}")
+    # A long path in the notes wraps inside the panel, which gets no sideways scrollbar for it.
+    fit = page.get_by_test_id("inspector").evaluate(
+        """p => {
+            const edge = p.getBoundingClientRect().right;
+            const code = [...p.querySelectorAll("[data-testid=notes] code")];
+            return { code: code.length, over: Math.max(0, ...code.map((c) => c.getBoundingClientRect().right - edge)),
+                     wide: p.scrollWidth - p.clientWidth };
+        }"""
+    )
+    if fit["code"] != 1 or fit["over"] > 0.5 or fit["wide"] > 0:
+        failures.append(f"{name}: a long path in {id}'s notes ran {fit['over']:.0f} px past its panel, scrolling it {fit['wide']} px ({fit['code']} code)")
     page.go_back()
     title.wait_for(state="detached", timeout=5_000)
     # The Map stays shown; on a phone it is away from home, one more Back.
@@ -1348,6 +1369,20 @@ def search_selection_journey(context, origin, plan, name, failures):
         page.close()
 
 
+def header_marks(page, testid):
+    """Where a panel's title and its Close button are once it has come to rest."""
+    page.wait_for_function(
+        "id => document.querySelector(`[data-testid=${id}]`)?.getAnimations().length === 0", arg=testid
+    )
+    return page.get_by_test_id(testid).evaluate(
+        """p => {
+            const h2 = p.querySelector("h2").getBoundingClientRect();
+            const close = p.querySelector("button[aria-label=Close]").getBoundingClientRect();
+            return { title_x: h2.left, title_y: h2.top, close_y: close.top, close_right: close.right };
+        }"""
+    )
+
+
 @timed
 def keys_journey(page, plan, name, failures):
     """Single keys go to views and edit the item shown, a key typed in a field is the field's, and the menu's switch
@@ -1364,6 +1399,7 @@ def keys_journey(page, plan, name, failures):
     page.keyboard.type(plan.items[id]["title"])
     page.keyboard.press("Enter")
     page.locator("[data-testid=inspector] h2").wait_for(timeout=5_000)
+    shown = header_marks(page, "inspector")
     page.keyboard.press("e")
     form = page.get_by_test_id("item-form")
     form.wait_for(timeout=5_000)
@@ -1381,6 +1417,14 @@ def keys_journey(page, plan, name, failures):
     form.wait_for(state="detached", timeout=5_000)
     page.keyboard.press("Escape")
     page.locator("[data-testid=inspector]").wait_for(state="detached", timeout=5_000)
+    # The New item panel's title and Close button sit where the item panel's do.
+    page.locator("[data-action=add-top]").click()
+    page.get_by_test_id("add-form").wait_for(timeout=5_000)
+    added = header_marks(page, "add-form")
+    if any(abs(added[key] - shown[key]) > 0.5 for key in shown):
+        failures.append(f"{name}: New item's header {added} isn't the item panel's {shown}")
+    page.get_by_test_id("add-form").get_by_role("button", name="Cancel").click()
+    page.get_by_test_id("add-form").wait_for(state="detached", timeout=5_000)
     from_menu(page, lambda: page.get_by_test_id("shortcuts").click())
     # Off the switch, which as a field would take the keys for itself.
     page.evaluate("() => document.activeElement?.blur()")
@@ -1982,6 +2026,20 @@ def outline_journey(page, view, plan, name, failures):
         failures.append(f"{name}: picking {thread} from {picked}'s panel didn't swap it for the thread's")
     page.keyboard.press("Escape")
     if not phone:
+        # Hovering a project's row fills all of it, its chevron as much as its title. A row that isn't the marked one,
+        # which is filled already.
+        row = page.locator(".project:not([aria-current=true]) > .project-row").first
+        row.wait_for(timeout=5_000)
+        if not page.evaluate("matchMedia('(hover: hover)').matches"):
+            failures.append(f"{name}: the browser has no hover, so the outline's hover wasn't checked")
+        page.mouse.move(0, 0)
+        rest = row.evaluate("r => getComputedStyle(r).backgroundColor")
+        for part in ("chevron", "title"):
+            row.locator(f"button.{'chevron' if part == 'chevron' else 'project-title'}").hover()
+            lit = row.evaluate("r => getComputedStyle(r).backgroundColor")
+            if lit == rest:
+                failures.append(f"{name}: hovering a project's {part} left its row {lit}, as it is at rest")
+        page.mouse.move(0, 0)
         # With a project open, a long name in the outline is cut short rather than the sidebar scrolling sideways.
         wide = page.locator(".sidebar-body").evaluate("b => b.scrollWidth - b.clientWidth")
         if wide > 0:
