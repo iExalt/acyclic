@@ -249,16 +249,12 @@ fn every_readiness_reads_as_a_phrase() {
     use acyclic_core::ready::{Readiness, ThreadReadiness, Wait};
     let phrase = |status: Json| readiness(status.as_object().unwrap());
     let s = |text: &str| text.to_owned();
-    let waiting = [
-        (s("a"), Wait::Open),
-        (s("b"), Wait::InReview),
-        (s("c"), Wait::Unverified { repository: s("r"), reason: s("no clone") }),
-    ];
+    let waiting = [(s("a"), Wait::Open), (s("b"), Wait::Open)];
     let items: Vec<(Json, &str)> = vec![
         (json!(Readiness::Ready), "ready"),
         (
             json!(Readiness::Blocked { waiting: waiting.into_iter().collect() }),
-            "blocked by a (not done), b (in review), c (merge unverified: no clone)",
+            "blocked by a (not done), b (not done)",
         ),
         (json!(Readiness::Unthreaded), "unthreaded"),
         (json!(Readiness::Claimed { holder: s("session/s") }), "claimed by session/s"),
@@ -274,11 +270,6 @@ fn every_readiness_reads_as_a_phrase() {
         (json!(Readiness::Parent), "parent"),
         (json!(Readiness::Parked), "parked"),
         (json!(Readiness::Done), "done"),
-        (json!(Readiness::InReview), "in review"),
-        (
-            json!(Readiness::Unverified { repository: s("r"), reason: s("no clone") }),
-            "done, merge unverified: no clone (r)",
-        ),
         (json!(Readiness::Archived), "archived"),
         (json!(ThreadReadiness::Missing), "missing"),
         (json!(ThreadReadiness::Ready { items: vec![s("a"), s("b")] }), "ready: a, b"),

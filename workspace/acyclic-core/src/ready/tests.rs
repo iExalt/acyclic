@@ -1,36 +1,14 @@
 use hegel::TestCase;
 use hegel::generators as gs;
-use std::cell::Cell;
 
 use super::*;
-use crate::model::{self, By, ProgressState, add_item, item_key, link, set, set_parent, set_state};
+use crate::model::{
+    self, By, Evidence, ProgressState, add_item, item_key, link, set, set_parent, set_state,
+};
 use crate::schema::{item as field, kind, repository, thread as thread_field};
 use crate::state::{Key, Replica, ReplicaId};
 
 const NOW: Millis = 1_000;
-
-/// Ancestry from a table of commits, counting the checks it answers.
-#[derive(Default)]
-struct Fake {
-    commits: BTreeMap<String, Result<bool, String>>,
-    calls: Cell<usize>,
-}
-
-impl Fake {
-    fn with(commits: &[(&str, Result<bool, String>)]) -> Self {
-        Self {
-            commits: commits.iter().map(|(c, r)| ((*c).to_owned(), r.clone())).collect(),
-            calls: Cell::new(0),
-        }
-    }
-}
-
-impl Ancestry for Fake {
-    fn merged(&self, _: &Repository, commit: &str) -> Result<bool, String> {
-        self.calls.set(self.calls.get() + 1);
-        self.commits.get(commit).cloned().unwrap_or_else(|| Err("unknown commit".to_owned()))
-    }
-}
 
 fn by(at: Millis) -> By<'static> {
     By { actor: "actor/user", at }
@@ -67,9 +45,9 @@ fn thread(r: &mut Replica, id: &str, thread: &str) {
     model::put(r, &item_key(id).unwrap(), field::THREAD, Some(&thread), by(2)).unwrap();
 }
 
-fn status(r: &Replica, ancestry: &dyn Ancestry, id: &str) -> Readiness {
+fn status(r: &Replica, id: &str) -> Readiness {
     let model = Model::read(&r.state).unwrap();
-    ReadinessEvaluator::new(&r.state, &model, NOW, ancestry).of(id).unwrap().unwrap()
+    ReadinessEvaluator::new(&r.state, &model, NOW).of(id).unwrap().unwrap()
 }
 
 /// The ready items, thread by thread, in the order `ready` lists them.
@@ -88,15 +66,14 @@ fn a_hard_dependency_blocks_until_done() {
     let mut r = replica("a");
     items(&mut r, &["dep", "x"]);
     link(&mut r, "x", "dep", by(2)).unwrap();
-    let none = Fake::default();
-    assert_eq!(status(&r, &none, "x"), blocked(&[("dep", Wait::Open)]));
+    assert_eq!(status(&r, "x"), blocked(&[("dep", Wait::Open)]));
     // Work with no repository is met when done.
     done_with(&mut r, "dep", None);
-    assert_eq!(status(&r, &none, "x"), Readiness::Ready);
+    assert_eq!(status(&r, "x"), Readiness::Ready);
 }
 
 #[test]
-fn done_inside_a_thread_merged_across() {
+fn a_done_dependency_is_met_in_any_thread() {
     let mut r = replica("a");
     items(&mut r, &["dep", "same", "other", "loose"]);
     for id in ["same", "other", "loose"] {
@@ -107,43 +84,24 @@ fn done_inside_a_thread_merged_across() {
     thread(&mut r, "same", "t1");
     thread(&mut r, "other", "t2");
     model::put(&mut r, &item_key("loose").unwrap(), field::THREAD, None::<&String>, by(2)).unwrap();
-    let unmerged = Fake::with(&[("c1", Ok(false))]);
-    assert_eq!(status(&r, &unmerged, "same"), Readiness::Ready);
-    assert_eq!(status(&r, &unmerged, "other"), blocked(&[("dep", Wait::InReview)]));
-    // An item in no thread needs the merge too.
-    assert_eq!(status(&r, &unmerged, "loose"), blocked(&[("dep", Wait::InReview)]));
-    assert_eq!(status(&r, &unmerged, "dep"), Readiness::InReview);
-    let merged = Fake::with(&[("c1", Ok(true))]);
-    assert_eq!(status(&r, &merged, "other"), Readiness::Ready);
-    assert_eq!(status(&r, &merged, "dep"), Readiness::Done);
+    // No git runs: a done dependency is met wherever its dependent is, and the commit was checked when written.
+    assert_eq!(status(&r, "same"), Readiness::Ready);
+    assert_eq!(status(&r, "other"), Readiness::Ready);
+    assert_eq!(status(&r, "loose"), Readiness::Unthreaded);
+    assert_eq!(status(&r, "dep"), Readiness::Done);
 }
 
 #[test]
-fn an_unverifiable_merge_says_why() {
+fn evidence_naming_no_repository_record_still_meets_its_dependents() {
     let mut r = replica("a");
-    items(&mut r, &["dep", "x", "dep2", "y"]);
-    link(&mut r, "x", "dep", by(2)).unwrap();
-    done_with(&mut r, "dep", Some("c1"));
-    // Across threads, so the merge matters.
-    for id in ["dep", "dep2"] {
-        thread(&mut r, id, "deps");
-    }
-    let broken = Fake::with(&[("c1", Err("no clone of the repository is mapped".to_owned()))]);
-    let unverified = Wait::Unverified {
-        repository: "code".to_owned(),
-        reason: "no clone of the repository is mapped".to_owned(),
-    };
-    assert_eq!(status(&r, &broken, "x"), blocked(&[("dep", unverified)]));
-    // Evidence naming a repository with no record.
-    link(&mut r, "y", "dep2", by(2)).unwrap();
-    set_state(&mut r, "dep2", ItemState::Done, by(3)).unwrap();
+    items(&mut r, &["dep", "y"]);
+    link(&mut r, "y", "dep", by(2)).unwrap();
+    set_state(&mut r, "dep", ItemState::Done, by(3)).unwrap();
     let evidence =
         Evidence { repository: Some("gone".into()), commit: Some("c2".into()), text: None };
-    set(&mut r, &item_key("dep2").unwrap(), field::EVIDENCE, Some(&evidence), by(3)).unwrap();
-    assert!(matches!(
-        status(&r, &broken, "y"),
-        Readiness::Blocked { waiting } if matches!(&waiting["dep2"], Wait::Unverified { repository, .. } if repository == "gone")
-    ));
+    set(&mut r, &item_key("dep").unwrap(), field::EVIDENCE, Some(&evidence), by(3)).unwrap();
+    assert_eq!(status(&r, "y"), Readiness::Ready);
+    assert_eq!(status(&r, "dep"), Readiness::Done);
 }
 
 #[test]
@@ -154,9 +112,8 @@ fn an_archived_dependency_is_met() {
     link(&mut r, "x", "dep", by(2)).unwrap();
     done_with(&mut r, "dep", Some("c1"));
     model::put(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
-    let unmerged = Fake::with(&[("c1", Ok(false))]);
-    assert_eq!(status(&r, &unmerged, "x"), Readiness::Ready);
-    assert_eq!(status(&r, &unmerged, "dep"), Readiness::Archived);
+    assert_eq!(status(&r, "x"), Readiness::Ready);
+    assert_eq!(status(&r, "dep"), Readiness::Archived);
 }
 
 #[test]
@@ -166,14 +123,13 @@ fn a_parents_dependencies_hold_back_its_children_and_a_parent_done_by_hand_is_me
     set_parent(&mut r, "child", Some("goal"), by(2)).unwrap();
     link(&mut r, "goal", "dep", by(2)).unwrap();
     link(&mut r, "after-goal", "goal", by(2)).unwrap();
-    let none = Fake::default();
-    assert_eq!(status(&r, &none, "child"), blocked(&[("dep", Wait::Open)]));
-    assert_eq!(status(&r, &none, "goal"), Readiness::Parent);
-    assert_eq!(status(&r, &none, "after-goal"), blocked(&[("goal", Wait::Open)]));
+    assert_eq!(status(&r, "child"), blocked(&[("dep", Wait::Open)]));
+    assert_eq!(status(&r, "goal"), Readiness::Parent);
+    assert_eq!(status(&r, "after-goal"), blocked(&[("goal", Wait::Open)]));
     // Finishing the parent waits on its child, and on its own dependency once the child is done.
     let unfinished = |r: &Replica| {
         let model = Model::read(&r.state).unwrap();
-        ReadinessEvaluator::new(&r.state, &model, 5, &none).unfinished("goal")
+        ReadinessEvaluator::new(&r.state, &model, 5).unfinished("goal")
     };
     assert_eq!(unfinished(&r), (vec!["child".to_owned()], Some(blocked(&[("dep", Wait::Open)]))));
     done_with(&mut r, "child", None);
@@ -184,7 +140,7 @@ fn a_parents_dependencies_hold_back_its_children_and_a_parent_done_by_hand_is_me
     assert_eq!(unfinished(&r).1, Some(Readiness::Parked));
     set_state(&mut r, "goal", ItemState::Backlog, by(4)).unwrap();
     done_with(&mut r, "goal", None);
-    assert_eq!(status(&r, &none, "after-goal"), Readiness::Ready);
+    assert_eq!(status(&r, "after-goal"), Readiness::Ready);
 }
 
 #[test]
@@ -201,12 +157,11 @@ fn cycles_conflicts_and_parked_items_are_not_ready() {
     thread(&mut b, "p", "t2");
     a.join(&b.state).unwrap();
     set_state(&mut a, "p", ItemState::Parked, by(3)).unwrap();
-    let none = Fake::default();
-    assert_eq!(status(&a, &none, "x"), Readiness::InCycle);
-    assert_eq!(status(&a, &none, "c"), Readiness::Conflicted { fields: vec!["state".into()] });
-    assert_eq!(status(&a, &none, "p"), Readiness::Conflicted { fields: vec!["thread".into()] });
+    assert_eq!(status(&a, "x"), Readiness::InCycle);
+    assert_eq!(status(&a, "c"), Readiness::Conflicted { fields: vec!["state".into()] });
+    assert_eq!(status(&a, "p"), Readiness::Conflicted { fields: vec!["thread".into()] });
     thread(&mut a, "p", "t1");
-    assert_eq!(status(&a, &none, "p"), Readiness::Parked);
+    assert_eq!(status(&a, "p"), Readiness::Parked);
 }
 
 #[test]
@@ -215,13 +170,12 @@ fn a_threads_claim_shows_on_its_members_and_a_contest_names_its_winner_first() {
     items(&mut a, &["x"]);
     let mut b = replica("b");
     b.join(&a.state).unwrap();
-    claim::claim(&mut a, "main", "session/one", 900, (500, 1_000), None).unwrap();
-    let none = Fake::default();
-    assert_eq!(status(&a, &none, "x"), Readiness::Claimed { holder: "session/one".into() });
-    claim::claim(&mut b, "main", "session/two", 950, (500, 1_000), None).unwrap();
+    claim::claim(&mut a, "main", "session/one", 900, (500, 1_000), false).unwrap();
+    assert_eq!(status(&a, "x"), Readiness::Claimed { holder: "session/one".into() });
+    claim::claim(&mut b, "main", "session/two", 950, (500, 1_000), false).unwrap();
     a.join(&b.state).unwrap();
     assert_eq!(
-        status(&a, &none, "x"),
+        status(&a, "x"),
         Readiness::Contested { holders: vec!["session/one".into(), "session/two".into()] }
     );
 }
@@ -236,13 +190,12 @@ fn an_unthreaded_leaf_is_never_ready_but_what_holds_it_back_shows_first() {
     model::put(&mut r, &item_key("ghostly").unwrap(), field::THREAD, Some(&"ghost"), by(2))
         .unwrap();
     link(&mut r, "waiting", "dep", by(2)).unwrap();
-    let none = Fake::default();
     for id in ["loose", "ghostly"] {
-        assert_eq!(status(&r, &none, id), Readiness::Unthreaded, "{id}");
+        assert_eq!(status(&r, id), Readiness::Unthreaded, "{id}");
     }
-    assert_eq!(status(&r, &none, "waiting"), blocked(&[("dep", Wait::Open)]));
+    assert_eq!(status(&r, "waiting"), blocked(&[("dep", Wait::Open)]));
     let model = Model::read(&r.state).unwrap();
-    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW, &none);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
     assert_eq!(readiness.ready(false, "session/s").unwrap(), []);
     assert_eq!(readiness.thread("ghost").unwrap(), ThreadReadiness::Missing);
 }
@@ -257,14 +210,13 @@ fn a_thread_is_claimable_by_anyone_while_ready_and_by_its_holder_while_held() {
         thread(&mut a, id, held);
     }
     set_state(&mut a, "idle", ItemState::Parked, by(2)).unwrap();
-    let none = Fake::default();
     let at = |r: &Replica, thread: &str| {
         let model = Model::read(&r.state).unwrap();
-        ReadinessEvaluator::new(&r.state, &model, NOW, &none).thread(thread).unwrap()
+        ReadinessEvaluator::new(&r.state, &model, NOW).thread(thread).unwrap()
     };
     let ready = |r: &Replica, actor: &str| {
         let model = Model::read(&r.state).unwrap();
-        flat(&ReadinessEvaluator::new(&r.state, &model, NOW, &none).ready(false, actor).unwrap())
+        flat(&ReadinessEvaluator::new(&r.state, &model, NOW).ready(false, actor).unwrap())
     };
     let workable = vec!["dep".to_owned(), "x".to_owned()];
     assert_eq!(at(&a, "main"), ThreadReadiness::Ready { items: workable.clone() });
@@ -272,7 +224,7 @@ fn a_thread_is_claimable_by_anyone_while_ready_and_by_its_holder_while_held() {
     assert!(!at(&a, "quiet").claimable_by("session/one"));
     assert_eq!(ready(&a, "session/one"), ["dep", "x", "y"]);
     let unclaimed = a.state.clone();
-    claim::claim(&mut a, "main", "session/one", 900, (500, 1_000), None).unwrap();
+    claim::claim(&mut a, "main", "session/one", 900, (500, 1_000), false).unwrap();
     // Its members stay workable for the holder alone.
     let held = at(&a, "main");
     assert_eq!(held, ThreadReadiness::Claimed { holder: "session/one".into(), items: workable });
@@ -284,7 +236,7 @@ fn a_thread_is_claimable_by_anyone_while_ready_and_by_its_holder_while_held() {
     // A contest's winner may go on; its loser may not.
     let mut c = replica("c");
     c.join(&unclaimed).unwrap();
-    claim::claim(&mut c, "main", "session/two", 950, (500, 1_000), None).unwrap();
+    claim::claim(&mut c, "main", "session/two", 950, (500, 1_000), false).unwrap();
     b.join(&c.state).unwrap();
     let contested = at(&b, "main");
     assert!(
@@ -305,28 +257,12 @@ fn ready_lists_leaves_by_id_and_checks_each_needed_commit_once() {
     done_with(&mut r, "unrelated", Some("c2"));
     set_parent(&mut r, "archived-leaf", Some("goal"), by(2)).unwrap();
     model::put(&mut r, &item_key("goal").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
-    let ancestry = Fake::with(&[("c1", Ok(true)), ("c2", Ok(true))]);
     let model = Model::read(&r.state).unwrap();
-    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW, &ancestry);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
     let ready = flat(&readiness.ready(false, "session/s").unwrap());
     assert_eq!(ready, ["x", "y", "z"]);
-    assert_eq!(
-        ancestry.calls.get(),
-        1,
-        "c1 once for two dependents, and never c2, which nothing needs"
-    );
     let with_archived = flat(&readiness.ready(true, "session/s").unwrap());
     assert!(with_archived.contains(&"archived-leaf".to_owned()));
-}
-
-#[test]
-fn git_ancestry_takes_only_commit_ids() {
-    let ancestry = GitAncestry::new(|_: &Repository| Some(PathBuf::from("/nonexistent")));
-    let model = Model::read(&replica("a").state).unwrap();
-    let record = &model.repositories["code"];
-    for bad in ["--foo", "abc", "zzzzzzz", &"a".repeat(65)] {
-        assert_eq!(ancestry.merged(record, bad), Err("not a commit id".to_owned()), "{bad}");
-    }
 }
 
 #[test]
@@ -340,10 +276,9 @@ fn two_threads_whose_items_once_named_one_resource_are_both_ready() {
         let gpu = Some(serde_json::json!(true));
         r.write(&item_key(id).unwrap(), "resource/gpu", "actor/user", 2, gpu).unwrap();
     }
-    claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), None).unwrap();
+    claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
     let model = Model::read(&r.state).unwrap();
-    let none = Fake::default();
-    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW, &none);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
     assert_eq!(readiness.of("y").unwrap(), Some(Readiness::Ready));
     assert_eq!(
         readiness.thread("other").unwrap(),
@@ -374,12 +309,10 @@ fn ready_lists_the_actors_thread_first_then_the_rest_by_natural_title_and_leaves
         add_item(&mut r, item, title, by(1)).unwrap();
         thread(&mut r, item, "d");
     }
-    claim::claim(&mut r, "d", "session/me", 900, (500, 1_000), None).unwrap();
-    claim::claim(&mut r, "e", "session/other", 900, (500, 1_000), None).unwrap();
+    claim::claim(&mut r, "d", "session/me", 900, (500, 1_000), false).unwrap();
+    claim::claim(&mut r, "e", "session/other", 900, (500, 1_000), false).unwrap();
     let model = Model::read(&r.state).unwrap();
-    let ready = ReadinessEvaluator::new(&r.state, &model, NOW, &Fake::default())
-        .ready(false, "session/me")
-        .unwrap();
+    let ready = ReadinessEvaluator::new(&r.state, &model, NOW).ready(false, "session/me").unwrap();
     let order: Vec<(&str, Vec<&str>)> = ready
         .iter()
         .map(|t| (t.thread.as_str(), t.items.iter().map(String::as_str).collect()))
@@ -413,22 +346,19 @@ fn a_dependency_on_a_parent_waits_on_each_leaf_under_it_as_its_own_dependency() 
     // An archived leaf is met already; an open one, however deep, holds the dependency.
     model::put(&mut r, &item_key("old").unwrap(), field::ARCHIVED, Some(&true), by(2)).unwrap();
     done_with(&mut r, "b", Some("c1"));
-    let unmerged = Fake::with(&[("c1", Ok(false)), ("c2", Ok(false))]);
-    assert_eq!(status(&r, &unmerged, "same"), blocked(&[("goal", Wait::Open)]));
-    // Done in the leaves' thread is enough there; across threads each leaf's commit must be merged.
+    assert_eq!(status(&r, "same"), blocked(&[("goal", Wait::Open)]));
+    // Done is enough, in the leaves' thread or another.
     done_with(&mut r, "a", Some("c2"));
-    assert_eq!(status(&r, &unmerged, "same"), Readiness::Ready);
-    assert_eq!(status(&r, &unmerged, "other"), blocked(&[("goal", Wait::InReview)]));
-    let merged = Fake::with(&[("c1", Ok(true)), ("c2", Ok(true))]);
-    assert_eq!(status(&r, &merged, "other"), Readiness::Ready);
+    assert_eq!(status(&r, "same"), Readiness::Ready);
+    assert_eq!(status(&r, "other"), Readiness::Ready);
     // A part closed by hand counts as closed, whatever is open under it.
     set_state(&mut r, "a", ItemState::Backlog, by(3)).unwrap();
-    assert_eq!(status(&r, &merged, "same"), blocked(&[("goal", Wait::Open)]));
+    assert_eq!(status(&r, "same"), blocked(&[("goal", Wait::Open)]));
     set_state(&mut r, "mid", ItemState::Done, by(3)).unwrap();
-    assert_eq!(status(&r, &merged, "same"), Readiness::Ready);
+    assert_eq!(status(&r, "same"), Readiness::Ready);
     // A parked parent meets nothing, whatever its leaves.
     set_state(&mut r, "goal", ItemState::Parked, by(4)).unwrap();
-    assert_eq!(status(&r, &merged, "other"), blocked(&[("goal", Wait::Open)]));
+    assert_eq!(status(&r, "other"), blocked(&[("goal", Wait::Open)]));
 }
 
 #[test]
@@ -439,10 +369,9 @@ fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_
         set_parent(&mut r, leaf, Some("goal"), by(2)).unwrap();
     }
     thread(&mut r, "y", "other");
-    let none = Fake::default();
     let state = |r: &Replica, now: Millis| {
         let model = Model::read(&r.state).unwrap();
-        ReadinessEvaluator::new(&r.state, &model, now, &none)
+        ReadinessEvaluator::new(&r.state, &model, now)
             .progress("goal")
             .unwrap()
             .unwrap()
@@ -451,7 +380,7 @@ fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_
     };
     assert_eq!(state(&r, NOW), ProgressState::Backlog);
     // A claim lasts its lease: the parent reads in progress while it lives, and backlog once it lapses.
-    claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), None).unwrap();
+    claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
     assert_eq!(state(&r, NOW), ProgressState::InProgress);
     assert_eq!(state(&r, 2_000), ProgressState::Backlog);
     // Parked work isn't being worked, though its thread is claimed.
@@ -464,12 +393,12 @@ fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_
 
 fn stage(r: &Replica, id: &str) -> Option<Stage> {
     let model = Model::read(&r.state).unwrap();
-    ReadinessEvaluator::new(&r.state, &model, NOW, &Fake::default()).stage(id).unwrap()
+    ReadinessEvaluator::new(&r.state, &model, NOW).stage(id).unwrap()
 }
 
 fn rollup(r: &Replica, id: &str) -> Rollup {
     let model = Model::read(&r.state).unwrap();
-    ReadinessEvaluator::new(&r.state, &model, NOW, &Fake::default()).progress(id).unwrap().unwrap()
+    ReadinessEvaluator::new(&r.state, &model, NOW).progress(id).unwrap().unwrap()
 }
 
 #[test]
@@ -481,13 +410,13 @@ fn a_leaf_in_a_claimed_thread_reads_in_progress_unless_it_waits() {
     assert_eq!(stage(&r, "parent"), None);
     // A backlog leaf in a claimed thread is in progress; one that waits is still blocked.
     link(&mut r, "y", "dep", by(4)).unwrap();
-    claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), None).unwrap();
+    claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
     assert_eq!(stage(&r, "dep"), Some(Stage::InProgress));
     assert_eq!(stage(&r, "y"), Some(Stage::Blocked));
     set_state(&mut r, "y", ItemState::Parked, by(5)).unwrap();
     assert_eq!(stage(&r, "y"), Some(Stage::Parked));
     done_with(&mut r, "dep", Some("c1"));
-    assert_eq!(stage(&r, "dep"), Some(Stage::InReview));
+    assert_eq!(stage(&r, "dep"), Some(Stage::Done));
     // Work in no thread is unthreaded.
     add_item(&mut r, "loose", "loose", by(6)).unwrap();
     assert_eq!(stage(&r, "loose"), Some(Stage::Unthreaded));
@@ -550,10 +479,7 @@ fn done_work_counts_done_though_two_clones_put_it_in_different_threads() {
     thread(&mut a, "d", "t1");
     thread(&mut b, "d", "t2");
     a.join(&b.state).unwrap();
-    assert_eq!(
-        status(&a, &Fake::default(), "d"),
-        Readiness::Conflicted { fields: vec!["thread".into()] }
-    );
+    assert_eq!(status(&a, "d"), Readiness::Conflicted { fields: vec!["thread".into()] });
     assert_eq!(stage(&a, "d"), Some(Stage::Done));
     let rolled = rollup(&a, "goal");
     assert_eq!(rolled.stages, Stages { done: 1, ..Stages::default() });
@@ -568,7 +494,7 @@ fn a_parent_reads_in_progress_while_its_threads_claim_holds_even_blocked_leaves(
         link(&mut r, leaf, "first", by(2)).unwrap();
     }
     assert_eq!(rollup(&r, "box").progress.state, ProgressState::Backlog);
-    claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), None).unwrap();
+    claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
     let rolled = rollup(&r, "box");
     assert_eq!(rolled.progress.state, ProgressState::InProgress);
     assert_eq!(rolled.stages, Stages { blocked: 2, ..Stages::default() }, "the counts stay honest");
@@ -606,20 +532,19 @@ fn random_plan(tc: &TestCase, claims: bool, parks: bool) -> Replica {
         }
     }
     if claims && below(2) == 0 && Model::read(&r.state).unwrap().threads.contains_key("t0") {
-        claim::claim(&mut r, "t0", "session/one", 900, (500, 1_000), None).unwrap();
+        claim::claim(&mut r, "t0", "session/one", 900, (500, 1_000), false).unwrap();
     }
     r
 }
 
-/// A parent's leaves by stage add up to its leaves, the done and in-review ones to its done, and its done and leaves
+/// A parent's leaves by stage add up to its leaves, the done ones to its done, and its done and leaves
 /// are the model's own; with no claims and no parked parts, its state is the model's too.
 #[hegel::test]
 fn stages_partition_a_parents_leaves_as_the_model_counts_them(tc: TestCase) {
     let (claims, parks) = (tc.draw(gs::booleans()), tc.draw(gs::booleans()));
     let r = random_plan(&tc, claims, parks);
     let model = Model::read(&r.state).unwrap();
-    let ancestry = Fake::with(&[("merged", Ok(true)), ("open", Ok(false))]);
-    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW, &ancestry);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
     for id in model.items.keys() {
         let (Some(rolled), Some(counted)) = (readiness.progress(id).unwrap(), model.progress(id))
         else {
@@ -628,7 +553,7 @@ fn stages_partition_a_parents_leaves_as_the_model_counts_them(tc: TestCase) {
         };
         let stages = rolled.stages;
         assert_eq!(stages.total(), counted.total, "{id}: {stages:?}");
-        assert_eq!(stages.done + stages.in_review, counted.done, "{id}: {stages:?}");
+        assert_eq!(stages.done, counted.done, "{id}: {stages:?}");
         assert_eq!((rolled.progress.done, rolled.progress.total), (counted.done, counted.total));
         if !claims && !parks {
             assert_eq!(rolled.progress.state, counted.state, "{id}: {stages:?}");
@@ -636,9 +561,9 @@ fn stages_partition_a_parents_leaves_as_the_model_counts_them(tc: TestCase) {
     }
 }
 
-fn waves(r: &Replica, ancestry: &dyn Ancestry) -> Waves {
+fn waves(r: &Replica) -> Waves {
     let model = Model::read(&r.state).unwrap();
-    ReadinessEvaluator::new(&r.state, &model, NOW, ancestry).waves().unwrap()
+    ReadinessEvaluator::new(&r.state, &model, NOW).waves().unwrap()
 }
 
 fn ids(lists: &[&[&str]]) -> Vec<Vec<String>> {
@@ -665,7 +590,7 @@ fn threads_come_in_waves_after_the_threads_they_wait_on() {
     waits(&mut r, ("d", "t3"), ("e", "t10"));
     items(&mut r, &["lone"]);
     thread(&mut r, "lone", "t1");
-    let found = waves(&r, &Fake::default());
+    let found = waves(&r);
     assert_eq!(
         found.waves,
         ids(&[&["t9", "t10"], &["t2"], &["t3"]]),
@@ -677,46 +602,39 @@ fn threads_come_in_waves_after_the_threads_they_wait_on() {
     // A thread whose work is all done is in none, and waits on and holds back nothing.
     done_with(&mut r, "lone", None);
     done_with(&mut r, "a", None);
-    let found = waves(&r, &Fake::default());
+    let found = waves(&r);
     assert_eq!(found.waves, ids(&[&["t2", "t10"], &["t3"]]));
     assert!(found.anytime.is_empty() && !found.waits_for.contains_key("t1"));
 }
 
 #[test]
-fn work_in_review_holds_its_waiters_back_and_a_cycle_shares_a_wave() {
+fn finished_work_frees_its_waiters_and_a_cycle_shares_a_wave() {
     let mut r = replica("a");
     waits(&mut r, ("b", "t2"), ("a", "t1"));
-    done_with(&mut r, "a", Some("open"));
-    let review = Fake::with(&[("open", Ok(false))]);
-    assert_eq!(status(&r, &review, "b"), blocked(&[("a", Wait::InReview)]));
-    assert_eq!(waves(&r, &review).waves, ids(&[&["t1"], &["t2"]]), "as its leaf reads blocked");
-    let merged = Fake::with(&[("open", Ok(true))]);
-    assert_eq!(waves(&r, &merged).anytime, ["t2"], "merged, t1 is finished and t2 is free");
+    assert_eq!(waves(&r).waves, ids(&[&["t1"], &["t2"]]), "as its leaf reads blocked");
+    done_with(&mut r, "a", Some("c1"));
+    assert_eq!(status(&r, "b"), Readiness::Ready);
+    assert_eq!(waves(&r).anytime, ["t2"], "done, t1 is finished and t2 is free");
     let mut r = replica("a");
     waits(&mut r, ("x", "t1"), ("y", "t2"));
     waits(&mut r, ("y2", "t2"), ("x2", "t1"));
     waits(&mut r, ("z", "t3"), ("y", "t2"));
-    assert_eq!(waves(&r, &Fake::default()).waves, ids(&[&["t1", "t2"], &["t3"]]));
+    assert_eq!(waves(&r).waves, ids(&[&["t1", "t2"], &["t3"]]));
 }
 
 #[test]
-fn threads_wait_on_each_other_in_a_cycle_while_work_in_review_holds_one_back() {
+fn threads_wait_on_each_other_in_a_cycle_until_the_work_holding_one_back_is_done() {
     let mut r = replica("a");
     waits(&mut r, ("x", "t1"), ("y", "t2"));
     waits(&mut r, ("y2", "t2"), ("x2", "t1"));
-    let cycles = |r: &Replica, ancestry: &dyn Ancestry| {
+    let cycles = |r: &Replica| {
         let model = Model::read(&r.state).unwrap();
-        ReadinessEvaluator::new(&r.state, &model, NOW, ancestry).thread_cycles().unwrap()
+        ReadinessEvaluator::new(&r.state, &model, NOW).thread_cycles().unwrap()
     };
     let both = vec![BTreeSet::from(["t1".to_owned(), "t2".to_owned()])];
-    assert_eq!(cycles(&r, &Fake::default()), both);
-    done_with(&mut r, "x2", Some("open"));
-    assert_eq!(
-        cycles(&r, &Fake::with(&[("open", Ok(false))])),
-        both,
-        "unmerged, x2 still holds y2 back"
-    );
-    assert!(cycles(&r, &Fake::with(&[("open", Ok(true))])).is_empty(), "merged, it holds nothing");
+    assert_eq!(cycles(&r), both);
+    done_with(&mut r, "x2", Some("c1"));
+    assert!(cycles(&r).is_empty(), "done, x2 holds nothing");
     let mut r = replica("a");
     items(&mut r, &["x", "x2", "z", "z2"]);
     thread(&mut r, "x", "t1");
@@ -726,7 +644,7 @@ fn threads_wait_on_each_other_in_a_cycle_while_work_in_review_holds_one_back() {
     }
     link(&mut r, "x", "z", by(3)).unwrap();
     link(&mut r, "z2", "x2", by(3)).unwrap();
-    assert!(cycles(&r, &Fake::default()).is_empty(), "a thread with no record is in no cycle");
+    assert!(cycles(&r).is_empty(), "a thread with no record is in no cycle");
 }
 
 #[test]
@@ -734,14 +652,10 @@ fn parked_work_holds_its_waiters_back_but_waits_on_nothing() {
     let mut r = replica("a");
     waits(&mut r, ("b", "t2"), ("a", "t1"));
     set_state(&mut r, "b", ItemState::Parked, by(3)).unwrap();
-    let found = waves(&r, &Fake::default());
+    let found = waves(&r);
     assert_eq!(found.anytime, ["t1", "t2"], "a parked leaf orders nothing");
     waits(&mut r, ("c", "t3"), ("b", "t2"));
-    assert_eq!(
-        waves(&r, &Fake::default()).waits_for["t3"],
-        ["t2"],
-        "but holds back what waits on it"
-    );
+    assert_eq!(waves(&r).waits_for["t3"], ["t2"], "but holds back what waits on it");
 }
 
 #[test]
@@ -754,10 +668,10 @@ fn a_link_on_a_group_counts_its_open_work_and_archived_work_holds_nothing_back()
         set_parent(&mut r, leaf, Some("box"), by(2)).unwrap();
     }
     waits(&mut r, ("w", "t3"), ("box", "main"));
-    let found = waves(&r, &Fake::default());
+    let found = waves(&r);
     assert_eq!(found.waits_for["t3"], ["t1", "t2"]);
     model::put(&mut r, &item_key("in2").unwrap(), field::ARCHIVED, Some(&true), by(3)).unwrap();
-    let found = waves(&r, &Fake::default());
+    let found = waves(&r);
     assert_eq!(found.waits_for["t3"], ["t1"]);
     assert!(!found.waits_for.contains_key("t2"), "archived work leaves its thread nothing to do");
 }
@@ -769,8 +683,7 @@ fn a_link_on_a_group_counts_its_open_work_and_archived_work_holds_nothing_back()
 fn waves_order_threads_as_their_leaves_wait(tc: TestCase) {
     let r = random_plan(&tc, tc.draw(gs::booleans()), tc.draw(gs::booleans()));
     let model = Model::read(&r.state).unwrap();
-    let ancestry = Fake::with(&[("merged", Ok(true)), ("open", Ok(false))]);
-    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW, &ancestry);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
     let found = readiness.waves().unwrap();
     let wave: BTreeMap<&str, usize> = found
         .waves
@@ -845,66 +758,6 @@ fn waves_order_threads_as_their_leaves_wait(tc: TestCase) {
     }
 }
 
-/// Git in `dir` with no user or system settings and a fixed identity.
-fn git(dir: &std::path::Path, args: &[&str]) -> String {
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "t")
-        .env("GIT_AUTHOR_EMAIL", "t@example.test")
-        .env("GIT_COMMITTER_NAME", "t")
-        .env("GIT_COMMITTER_EMAIL", "t@example.test")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
-    String::from_utf8_lossy(&output.stdout).trim().to_owned()
-}
-
-#[test]
-fn git_finds_a_commit_on_the_default_branch_of_a_clone_or_its_remote() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let code = dir.path().join("code");
-    git(dir.path(), &["init", "-q", "-b", "main", code.to_str().unwrap()]);
-    git(&code, &["commit", "-q", "--allow-empty", "-m", "base"]);
-    let base = git(&code, &["rev-parse", "HEAD"]);
-    git(&code, &["switch", "-q", "-c", "feature"]);
-    git(&code, &["commit", "-q", "--allow-empty", "-m", "the work"]);
-    let work = git(&code, &["rev-parse", "HEAD"]);
-    git(&code, &["switch", "-q", "main"]);
-    let record = |branch: &str| Repository {
-        id: "code".to_owned(),
-        owner: Value::None,
-        name: Value::None,
-        default_branch: Value::One(branch.to_owned()),
-        installation: Value::None,
-    };
-    let main = record("main");
-    // Each check looks the branch up afresh, as each command does.
-    let merged = |clone: &std::path::Path, commit: &str| {
-        GitAncestry::new(|_: &Repository| Some(clone.to_owned())).merged(&main, commit)
-    };
-    assert_eq!(merged(&code, &base[..7].to_uppercase()), Ok(true), "a prefix, in either case");
-    assert_eq!(merged(&code, &work), Ok(false), "on another branch");
-    assert!(merged(&code, &"ab".repeat(20)).is_err(), "a commit git doesn't know");
-    let ancestry = GitAncestry::new(|_: &Repository| Some(code.clone()));
-    assert_eq!(
-        ancestry.merged(&record("trunk"), &base),
-        Err("the clone has no trunk branch".to_owned())
-    );
-
-    git(&code, &["merge", "-q", "--ff-only", "feature"]);
-    assert_eq!(merged(&code, &work), Ok(true), "once merged");
-    // A clone reads the default branch from its remote-tracking ref, here with no local branch to read instead.
-    let clone = dir.path().join("clone");
-    git(dir.path(), &["clone", "-q", "--bare", code.to_str().unwrap(), clone.to_str().unwrap()]);
-    git(&clone, &["update-ref", "refs/remotes/origin/main", "refs/heads/main"]);
-    git(&clone, &["update-ref", "-d", "refs/heads/main"]);
-    assert_eq!(merged(&clone, &work), Ok(true));
-}
-
 #[test]
 fn an_actor_may_finish_what_is_ready_its_own_or_done_already() {
     let me = "session/mac";
@@ -912,7 +765,6 @@ fn an_actor_may_finish_what_is_ready_its_own_or_done_already() {
     let contested = |first: &str, second: &str| Readiness::Contested {
         holders: vec![first.into(), second.into()],
     };
-    let unverified = Readiness::Unverified { repository: "r".into(), reason: "no clone".into() };
     for (status, may) in [
         (Readiness::Ready, true),
         (claimed(me), true),
@@ -921,8 +773,6 @@ fn an_actor_may_finish_what_is_ready_its_own_or_done_already() {
         (contested("session/r1", me), false),
         // Finishing again changes nothing, so it needs no claim.
         (Readiness::Done, true),
-        (Readiness::InReview, true),
-        (unverified, true),
         (Readiness::Parent, false),
         (blocked(&[]), false),
         (Readiness::Unthreaded, false),
@@ -934,9 +784,8 @@ fn an_actor_may_finish_what_is_ready_its_own_or_done_already() {
 #[test]
 fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what_is_left_is_parked()
 {
-    let of = |done, in_review, in_progress, ready, blocked, parked, unthreaded| Stages {
+    let of = |done, in_progress, ready, blocked, parked, unthreaded| Stages {
         done,
-        in_review,
         in_progress,
         ready,
         blocked,
@@ -944,20 +793,18 @@ fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what
         unthreaded,
     };
     for (stages, claimed, stage) in [
-        (of(0, 0, 0, 0, 0, 0, 0), false, None),
-        (of(3, 0, 0, 0, 0, 0, 0), false, Some(Stage::Done)),
-        (of(2, 1, 0, 0, 0, 0, 0), false, Some(Stage::InReview)),
-        // Started wins over what is still ready, even beside work in review.
-        (of(1, 0, 0, 2, 0, 0, 0), false, Some(Stage::InProgress)),
-        (of(0, 1, 0, 2, 0, 0, 0), false, Some(Stage::InProgress)),
-        (of(0, 0, 1, 0, 3, 0, 0), false, Some(Stage::InProgress)),
+        (of(0, 0, 0, 0, 0, 0), false, None),
+        (of(3, 0, 0, 0, 0, 0), false, Some(Stage::Done)),
+        // Started wins over what is still ready.
+        (of(1, 0, 2, 0, 0, 0), false, Some(Stage::InProgress)),
+        (of(0, 1, 0, 3, 0, 0), false, Some(Stage::InProgress)),
         // A live claim below starts it, even with only blocked work.
-        (of(0, 0, 0, 0, 2, 0, 0), true, Some(Stage::InProgress)),
-        (of(0, 0, 0, 2, 1, 1, 1), false, Some(Stage::Ready)),
-        (of(0, 0, 0, 0, 1, 1, 1), false, Some(Stage::Blocked)),
+        (of(0, 0, 0, 2, 0, 0), true, Some(Stage::InProgress)),
+        (of(0, 0, 2, 1, 1, 1), false, Some(Stage::Ready)),
+        (of(0, 0, 0, 1, 1, 1), false, Some(Stage::Blocked)),
         // What is left all parked, by hand or under a parked part, reads parked however much is done.
-        (of(2, 1, 0, 0, 0, 3, 0), false, Some(Stage::Parked)),
-        (of(0, 0, 0, 0, 0, 0, 2), false, Some(Stage::Unthreaded)),
+        (of(2, 0, 0, 0, 3, 0), false, Some(Stage::Parked)),
+        (of(0, 0, 0, 0, 0, 2), false, Some(Stage::Unthreaded)),
     ] {
         assert_eq!(stages.rolled_up(claimed), stage, "{stages:?} claimed {claimed}");
     }

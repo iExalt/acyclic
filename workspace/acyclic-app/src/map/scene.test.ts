@@ -151,7 +151,7 @@ describe("scene", () => {
 
 describe("buildModel", () => {
   it("takes a parent's progress from its item, and none when every leaf under it is archived", () => {
-    const none = { in_review: 0, in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
+    const none = { in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
     const progress = (done: number, leaves: number) => ({ state: "done", counts: { ...none, done, leaves } });
     const model = buildModel([
       item("p", null, [], { progress: progress(2, 2) }),
@@ -166,7 +166,7 @@ describe("a box's stage", () => {
   it("is the stage core gives its row, a collapsed one's too, and none without one, as with no leaves to count", () => {
     const rows = [
       item("p", null, [], { stage: "in-progress" }),
-      item("p1", "p", [], { stage: "in-review" }),
+      item("p1", "p", [], { stage: "done" }),
       item("p2", "p", [], { stage: "ready" }),
       item("q", null, [], { stage: "blocked" }),
       item("q1", "q", [], { stage: "blocked" }),

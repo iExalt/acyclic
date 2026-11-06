@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::claim;
 use crate::model::{self, Model, Value};
-use crate::ready::{Readiness, ReadinessEvaluator, Wait};
+use crate::ready::ReadinessEvaluator;
 use crate::schema::kind;
 use crate::state::{Error, Millis, State};
 
@@ -97,15 +97,6 @@ pub enum Entry {
         #[serde(skip_serializing_if = "Option::is_none")]
         fix: Option<String>,
     },
-    /// A dependency's merge can't be checked.
-    Unverified {
-        /// The dependency.
-        item: String,
-        /// Its repository record.
-        repository: String,
-        /// Why not.
-        reason: String,
-    },
 }
 
 impl Entry {
@@ -133,9 +124,6 @@ impl Entry {
             Self::DoneEarly { item, open: _ } => vec!["done-early", item],
             Self::Dangling { kind, id, field, target, fix: _ } => {
                 vec!["dangling", kind, id, field, target]
-            },
-            Self::Unverified { item, repository, reason: _ } => {
-                vec!["unverified", item, repository]
             },
         };
         parts.join(":")
@@ -168,8 +156,7 @@ impl Entry {
             Self::Unpushed { .. }
             | Self::ClockAhead { .. }
             | Self::Unthreaded { .. }
-            | Self::Dangling { .. }
-            | Self::Unverified { .. } => false,
+            | Self::Dangling { .. } => false,
         }
     }
 }
@@ -210,13 +197,6 @@ pub fn needs_you(
             continue;
         }
         unthreaded(model, item, &mut entries);
-        if let Some(Readiness::Blocked { waiting }) = readiness.of(id)? {
-            for (dependency, wait) in waiting {
-                if let Wait::Unverified { repository, reason } = wait {
-                    entries.insert(Entry::Unverified { item: dependency, repository, reason });
-                }
-            }
-        }
     }
     Ok(entries.into_iter().collect())
 }

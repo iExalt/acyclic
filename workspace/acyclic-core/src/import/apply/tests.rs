@@ -4,8 +4,7 @@ use super::*;
 use crate::archive::{ArchiveError, Reason};
 use crate::import::State as Planned;
 use crate::import::tests::{id, item, valid};
-use crate::model::{self, ItemState, Repository, Value};
-use crate::ready::Ancestry;
+use crate::model::{self, ItemState, Value};
 use crate::schema::item as field;
 use crate::scope::ScopeEdit;
 use crate::scope::USER;
@@ -19,24 +18,8 @@ fn by(actor: &str, at: Millis) -> By<'_> {
     By { actor, at }
 }
 
-struct Merged;
-
-impl Ancestry for Merged {
-    fn merged(&self, _: &Repository, _: &str) -> Result<bool, String> {
-        Ok(true)
-    }
-}
-
-struct Unmerged;
-
-impl Ancestry for Unmerged {
-    fn merged(&self, _: &Repository, _: &str) -> Result<bool, String> {
-        Ok(false)
-    }
-}
-
 fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, ApplyError> {
-    super::apply(doc, replica, by, &Merged)
+    super::apply(doc, replica, by)
 }
 
 fn imported() -> Replica {
@@ -397,10 +380,10 @@ fn archive_import(clear_dependent: bool) -> Import {
 }
 
 #[test]
-fn import_archive_uses_the_shared_grace_merge_and_external_dependent_rules() {
+fn import_archive_uses_the_shared_grace_and_external_dependent_rules() {
     let mut r = imported();
     let doc = archive_import(true);
-    let preview = super::preview(&doc, &r, by(USER, 2), &Merged).unwrap_err();
+    let preview = super::preview(&doc, &r, by(USER, 2)).unwrap_err();
     let before = r.state.clone();
     let grace = apply(&doc, &mut r, by(USER, 2)).unwrap_err();
     assert_eq!(preview, grace);
@@ -413,13 +396,6 @@ fn import_archive_uses_the_shared_grace_merge_and_external_dependent_rules() {
         apply(&archive_import(false), &mut r, by(USER, 31 * 24 * 60 * 60 * 1000)).unwrap_err();
     assert!(matches!(dependent, ApplyError::Archive(ArchiveError::Ineligible { reasons, .. })
         if reasons.iter().any(|reason| matches!(reason, Reason::LiveDependent { .. }))));
-
-    let mut r = imported();
-    let doc = archive_import(true);
-    let unmerged =
-        super::apply(&doc, &mut r, by(USER, 31 * 24 * 60 * 60 * 1000), &Unmerged).unwrap_err();
-    assert!(matches!(unmerged, ApplyError::Archive(ArchiveError::Ineligible { reasons, .. })
-        if reasons.iter().any(|reason| matches!(reason, Reason::Unmerged { .. }))));
 }
 
 #[test]
@@ -449,13 +425,13 @@ fn imported_archive_candidates_are_order_independent_and_preview_matches_apply()
     let now = 31 * 24 * 60 * 60 * 1000;
     let mut forward = make_replica();
     let forward_doc = archived([13, 14]);
-    let preview = super::preview(&forward_doc, &forward, by(USER, now), &Merged).unwrap();
-    let applied = super::apply(&forward_doc, &mut forward, by(USER, now), &Merged).unwrap();
+    let preview = super::preview(&forward_doc, &forward, by(USER, now)).unwrap();
+    let applied = super::apply(&forward_doc, &mut forward, by(USER, now)).unwrap();
     assert_eq!(preview, applied);
 
     let mut reverse = make_replica();
-    super::preview(&archived([14, 13]), &reverse, by(USER, now), &Merged).unwrap();
-    super::apply(&archived([14, 13]), &mut reverse, by(USER, now), &Merged).unwrap();
+    super::preview(&archived([14, 13]), &reverse, by(USER, now)).unwrap();
+    super::apply(&archived([14, 13]), &mut reverse, by(USER, now)).unwrap();
     for id in [id(13), id(14)] {
         assert!(model(&forward).items[&id].is_archived_root());
         assert!(model(&reverse).items[&id].is_archived_root());
@@ -478,4 +454,39 @@ fn an_unmapped_refusal_is_internal_even_with_mapped_violations() {
     for violation in violations {
         assert!(error.to_string().contains(&violation.to_string()));
     }
+}
+
+#[test]
+fn evidence_names_its_repository_by_owner_and_name_or_by_id() {
+    let named = |commit: &str| {
+        let mut doc = valid();
+        doc.items[2].evidence =
+            Some(crate::import::Evidence { commit: Some(commit.to_owned()), text: None });
+        doc
+    };
+    let evidence = |r: &Replica| {
+        let found = model(r).items[&id(12)].evidence.one().cloned().unwrap();
+        (found.repository, found.commit)
+    };
+    // By the document's own repository, in any case.
+    let mut r = replica();
+    assert_eq!(named("Example/Code@abc1234").validate(), vec![]);
+    apply(&named("Example/Code@abc1234"), &mut r, by(USER, 1)).unwrap();
+    assert_eq!(evidence(&r), (Some(id(1)), Some("abc1234".into())));
+    // By the tracker's, once the document no longer lists it, and by id as before.
+    let mut later = named("example/code@def5678");
+    later.repositories.clear();
+    apply(&later, &mut r, by(USER, 2)).unwrap();
+    assert_eq!(evidence(&r), (Some(id(1)), Some("def5678".into())));
+    let mut r = replica();
+    apply(&named(&format!("{}@abc1234", id(1))), &mut r, by(USER, 1)).unwrap();
+    assert_eq!(evidence(&r), (Some(id(1)), Some("abc1234".into())));
+    // A name no repository has is an unknown reference.
+    let unknown = apply(&named("nobody/here@abc1234"), &mut replica(), by(USER, 1)).unwrap_err();
+    assert!(
+        matches!(&unknown, ApplyError::Invalid(errors)
+        if matches!(&errors[..], [ValidationError::UnknownReference { kind: KeyKind::Repository, id, .. }]
+            if id == "nobody/here")),
+        "{unknown:?}"
+    );
 }

@@ -3,21 +3,12 @@ use serde_json::json;
 
 use super::*;
 use crate::model::{By, ItemState, add_item, item_key, link, set_parent};
-use crate::ready::Ancestry;
 use crate::schema::{item as field, repository, thread};
 use crate::scope::{ScopeEdit, USER, edit};
 use crate::state::{CLOCK_SKEW_MS, Replica, ReplicaId};
 use serde_json::Value as Json;
 
 const NOW: Millis = 10_000;
-
-struct Unmapped;
-
-impl Ancestry for Unmapped {
-    fn merged(&self, _: &model::Repository, _: &str) -> Result<bool, String> {
-        Err("no clone".into())
-    }
-}
 
 fn user(at: Millis) -> By<'static> {
     By { actor: USER, at }
@@ -29,7 +20,7 @@ fn replica(name: &str) -> Replica {
 
 fn list(r: &Replica) -> Vec<Entry> {
     let model = Model::read(&r.state).unwrap();
-    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW, &Unmapped);
+    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
     needs_you(&r.state, &model, &readiness, NOW).unwrap()
 }
 
@@ -86,10 +77,10 @@ fn the_state_puts_its_problems_on_the_list() {
     model::set(&mut b, &item_key("x").unwrap(), field::TITLE, Some(&"two"), user(2)).unwrap();
     link(&mut a, "x", "y", user(2)).unwrap();
     link(&mut b, "y", "x", user(2)).unwrap();
-    claim::claim(&mut a, "tx", "session/a", 2, (NOW, NOW), None).unwrap();
-    claim::claim(&mut b, "tx", "session/b", 2, (NOW, NOW), None).unwrap();
+    claim::claim(&mut a, "tx", "session/a", 2, (NOW, NOW), false).unwrap();
+    claim::claim(&mut b, "tx", "session/b", 2, (NOW, NOW), false).unwrap();
     // A claim from a clock running ahead of the reader's by more than the skew.
-    claim::claim(&mut b, "tk", "session/b", NOW + CLOCK_SKEW_MS + 1, (NOW, NOW), None).unwrap();
+    claim::claim(&mut b, "tk", "session/b", NOW + CLOCK_SKEW_MS + 1, (NOW, NOW), false).unwrap();
     a.join(&b.state).unwrap();
 
     let entries = list(&a);
@@ -116,7 +107,6 @@ fn the_state_puts_its_problems_on_the_list() {
         target: "nowhere".into(),
         fix: None,
     });
-    assert!(entries.iter().any(|e| matches!(e, Entry::Unverified { item, repository, .. } if item == "dep" && repository == "nowhere")));
 }
 
 #[test]
@@ -258,8 +248,7 @@ fn apart(r: &mut Replica, key: &Key, field: &str, mine: &Json, theirs: &Json) {
 
 fn kept(r: &Replica, entity: &str, id: &str, field: &str) -> Vec<(Json, Keep)> {
     let model = Model::read(&r.state).unwrap();
-    let readiness = ReadinessEvaluator::new(&r.state, &model, NOW, &Unmapped);
-    keeps(&r.state, &model, &readiness, (entity, id, field), user(NOW))
+    keeps(&r.state, &model, (entity, id, field), user(NOW))
         .unwrap()
         .into_iter()
         .map(|kept| (kept.value, kept.keep))

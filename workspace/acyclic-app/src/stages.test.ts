@@ -8,11 +8,10 @@ describe("a state in words", () => {
 });
 
 describe("stageCounts", () => {
-  it("counts done apart from in review, in the order work moves, leaving out stages with none", () => {
+  it("counts each stage in the order work moves, leaving out stages with none", () => {
     const counts = {
-      done: 9,
-      leaves: 14,
-      in_review: 2,
+      done: 7,
+      leaves: 12,
       in_progress: 1,
       ready: 3,
       blocked: 0,
@@ -21,7 +20,6 @@ describe("stageCounts", () => {
     };
     expect(stageCounts(counts)).toEqual([
       { stage: "done", count: 7 },
-      { stage: "in-review", count: 2 },
       { stage: "in-progress", count: 1 },
       { stage: "ready", count: 3 },
       { stage: "unthreaded", count: 1 },
@@ -35,6 +33,6 @@ describe("stageCountWords", () => {
       "1 needs a thread",
       "3 need a thread",
     ]);
-    expect(stageCountWords("in-review", 2)).toBe("in review");
+    expect(stageCountWords("in-progress", 2)).toBe("in progress");
   });
 });

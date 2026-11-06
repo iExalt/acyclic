@@ -16,7 +16,7 @@ use crate::model::{
     WriteError,
 };
 use crate::place::{Inherited, passed_down};
-use crate::ready::{Ancestry, Readiness, ReadinessEvaluator, Stage};
+use crate::ready::{Readiness, ReadinessEvaluator, Stage};
 use crate::schema::{item as field, kind, link, repository, set, thread};
 use crate::state::{Error as StateError, Key, Millis, Replica, State};
 
@@ -177,8 +177,7 @@ pub struct Mismatch {
 
 /// Checks the small set of app Undo conditions against one locked state snapshot.
 ///
-/// Started counts treat every completed leaf as started whether its evidence is merged or not; ancestry can change
-/// `done` to `in-review`, but cannot change the count used by Undo.
+/// Started counts treat every completed leaf as started.
 ///
 /// # Errors
 ///
@@ -193,8 +192,7 @@ pub fn check_expected(
     expected: &[Expectation],
     now: Millis,
 ) -> Result<Vec<Mismatch>, StateError> {
-    let ancestry = AssumeUnmerged;
-    let readiness = ReadinessEvaluator::new(state, model, now, &ancestry);
+    let readiness = ReadinessEvaluator::new(state, model, now);
     let mut mismatches = Vec::new();
     for expectation in expected {
         if let Expectation::WaitersStartedAtMost { item, baselines } = expectation {
@@ -288,14 +286,6 @@ pub fn check_expected(
     Ok(mismatches)
 }
 
-struct AssumeUnmerged;
-
-impl Ancestry for AssumeUnmerged {
-    fn merged(&self, _: &Repository, _: &str) -> Result<bool, String> {
-        Ok(false)
-    }
-}
-
 fn started_count(
     readiness: &ReadinessEvaluator<'_>,
     model: &Model,
@@ -307,12 +297,14 @@ fn started_count(
     if model.children(item).is_empty() {
         Ok(Some(usize::from(matches!(
             readiness.stage(item)?,
-            Some(Stage::InProgress | Stage::InReview | Stage::Done)
+            Some(Stage::InProgress | Stage::Done)
         ))))
     } else {
-        Ok(Some(readiness.progress(item)?.map_or(0, |rollup| {
-            rollup.stages.in_progress + rollup.stages.in_review + rollup.stages.done
-        })))
+        Ok(Some(
+            readiness
+                .progress(item)?
+                .map_or(0, |rollup| rollup.stages.in_progress + rollup.stages.done),
+        ))
     }
 }
 
@@ -820,7 +812,7 @@ impl<E> From<WriteError> for CommitError<E> {
 
 /// Reads the model once, asks `build` what to change in it, judges that, and writes it when accepted. Run it inside a
 /// store batch, after anything else the batch writes, so the model judged is the one the writes land on. Finishing
-/// work is judged by its readiness, which checks merges through `ancestry`; without it, only a forced finish passes.
+/// work is judged by its readiness when `judge_finishing`; without it, only a forced finish passes.
 ///
 /// # Errors
 ///
@@ -828,15 +820,15 @@ impl<E> From<WriteError> for CommitError<E> {
 pub fn commit<E>(
     replica: &mut Replica,
     by: By<'_>,
-    ancestry: Option<&dyn Ancestry>,
+    judge_finishing: bool,
     build: impl FnOnce(&Model) -> Result<ChangeSet, E>,
 ) -> Result<Outcome, CommitError<E>> {
     let before = Model::read(&replica.state).map_err(WriteError::from)?;
     crate::probe::mark("write: model read");
     let changes = build(&before).map_err(CommitError::Build)?;
     let judged = {
-        let readiness = ancestry
-            .map(|ancestry| ReadinessEvaluator::new(&replica.state, &before, by.at, ancestry));
+        let readiness =
+            judge_finishing.then(|| ReadinessEvaluator::new(&replica.state, &before, by.at));
         judge(&before, &changes, by, readiness.as_ref())
     };
     let outcome =

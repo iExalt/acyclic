@@ -46,7 +46,7 @@ fn add_item(
     fields: &ItemFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, None, None, |_| Ok(item_changes(id, fields, Adding::Given)))
+    commit(r, by, None, false, |_| Ok(item_changes(id, fields, Adding::Given)))
 }
 
 fn edit_item(
@@ -55,7 +55,7 @@ fn edit_item(
     fields: &ItemFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, None, None, |_| Ok(item_changes(id, fields, Adding::No)))
+    commit(r, by, None, false, |_| Ok(item_changes(id, fields, Adding::No)))
 }
 
 fn add_thread(
@@ -64,7 +64,7 @@ fn add_thread(
     fields: &ThreadFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, None, None, |_| Ok(thread_changes(id, fields, Adding::Given)))
+    commit(r, by, None, false, |_| Ok(thread_changes(id, fields, Adding::Given)))
 }
 
 fn edit_thread(
@@ -73,7 +73,7 @@ fn edit_thread(
     fields: &ThreadFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, None, None, |_| Ok(thread_changes(id, fields, Adding::No)))
+    commit(r, by, None, false, |_| Ok(thread_changes(id, fields, Adding::No)))
 }
 
 fn add_repository(
@@ -82,7 +82,7 @@ fn add_repository(
     fields: &RepositoryFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, fields.name.as_deref(), None, |_| repository_changes(id, fields, Adding::Given))
+    commit(r, by, fields.name.as_deref(), false, |_| repository_changes(id, fields, Adding::Given))
 }
 
 fn edit_repository(
@@ -91,7 +91,7 @@ fn edit_repository(
     fields: &RepositoryFields,
     by: By<'_>,
 ) -> Result<Outcome, CliError> {
-    commit(r, by, fields.name.as_deref(), None, |_| repository_changes(id, fields, Adding::No))
+    commit(r, by, fields.name.as_deref(), false, |_| repository_changes(id, fields, Adding::No))
 }
 
 fn item(replica: &Replica, id: &str) -> acyclic_core::model::Item {
@@ -273,16 +273,10 @@ fn an_explicit_repository_add_reasserts_while_clearing_a_thread_remains_a_noop()
 #[test]
 fn a_waits_for_on_an_item_deleted_elsewhere_is_listed_and_let_go_of_by_its_id() {
     use acyclic_core::needs::{Entry, needs_you};
-    use acyclic_core::ready::{Ancestry, ReadinessEvaluator};
-    struct NoClones;
-    impl Ancestry for NoClones {
-        fn merged(&self, _: &model::Repository, _: &str) -> Result<bool, String> {
-            Err("no clone".into())
-        }
-    }
+    use acyclic_core::ready::ReadinessEvaluator;
     let dangling = |r: &Replica| -> Vec<Entry> {
         let model = Model::read(r.state()).unwrap();
-        let readiness = ReadinessEvaluator::new(r.state(), &model, 3, &NoClones);
+        let readiness = ReadinessEvaluator::new(r.state(), &model, 3);
         let needs = needs_you(r.state(), &model, &readiness, 3).unwrap();
         needs.into_iter().filter(|entry| matches!(entry, Entry::Dangling { .. })).collect()
     };
@@ -446,7 +440,7 @@ fn a_minted_add_whose_title_open_work_has_is_refused_naming_it() {
         } else {
             item_changes(id, &titled(title), Adding::Minted)
         };
-        commit(r, USER_BY, None, None, |_| Ok(changes)).map_err(|err| (err.code, err.details))
+        commit(r, USER_BY, None, false, |_| Ok(changes)).map_err(|err| (err.code, err.details))
     };
     minted(&mut r, kind::ITEM, "a", "Sow").unwrap();
     // A retry with a new id is refused, naming the item the first made; one with the same id is a repeat.
@@ -477,7 +471,7 @@ fn a_retry_ignores_done_archived_and_deleted_items() {
     acyclic_core::delete::delete_item(&mut r, "b", USER_BY).unwrap();
     for (n, title) in ["Weed", "Sow", "Rows"].into_iter().enumerate() {
         let changes = item_changes(&format!("n{n}"), &titled(title), Adding::Minted);
-        assert!(commit(&mut r, USER_BY, None, None, |_| Ok(changes)).is_ok(), "{title}");
+        assert!(commit(&mut r, USER_BY, None, false, |_| Ok(changes)).is_ok(), "{title}");
     }
 }
 
@@ -620,12 +614,6 @@ fn work_moved_or_added_under_an_archived_root_is_refused() {
 #[test]
 fn a_finish_refused_for_its_evidence_reads_as_the_cli_has_always_told_it() {
     use acyclic_core::model::Evidence;
-    struct NoClones;
-    impl Ancestry for NoClones {
-        fn merged(&self, _: &model::Repository, _: &str) -> Result<bool, String> {
-            Err("no clone".into())
-        }
-    }
     let mut r = replica();
     let fields = RepositoryFields { name: Some("o/n".into()), ..RepositoryFields::default() };
     add_repository(&mut r, "r", &fields, USER_BY).unwrap();
@@ -634,7 +622,7 @@ fn a_finish_refused_for_its_evidence_reads_as_the_cli_has_always_told_it() {
         let evidence =
             Evidence { repository: Some("r".into()), commit: Some(commit.into()), text: None };
         let change = WriteChange::Finish { item: "a".into(), evidence: Some(evidence), force };
-        super::commit(r, USER_BY, None, Some(&NoClones), |_| Ok(ChangeSet(vec![change])))
+        super::commit(r, USER_BY, None, true, |_| Ok(ChangeSet(vec![change])))
             .map_err(|err| (err.code, err.message, err.details))
     };
     assert_eq!(

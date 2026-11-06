@@ -903,11 +903,11 @@ def deep_link_journey(context, origin, view, plan, name, failures):
             page.wait_for_function("() => location.search === ''", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from a thread opened on the Overview landed on {page.url}")
-    # A parent's status is its stage, not its stored progress state: finished work may still be in review, and
-    # unstarted work says whether it is ready or blocked. Reuse the fixture and the page already open for links.
+    # A parent's status is its stage, not its stored progress state: finished work reads done, and unstarted work
+    # says whether it is ready or blocked. Reuse the fixture and the page already open for links.
     parents = [row for row in plan.items.values() if row.get("progress") and not row["archived"]]
     cases = {
-        "in-review": next((row for row in parents if row.get("stage") == "in-review"), None),
+        "done": next((row for row in parents if row.get("stage") == "done"), None),
         "unstarted": next((row for row in parents if row["progress"]["state"] == "backlog" and row.get("stage")), None),
     }
     for case, parent in cases.items():
@@ -929,7 +929,6 @@ def deep_link_journey(context, origin, view, plan, name, failures):
         )
         counts = parent["progress"]["counts"]
         expected = {stage.replace("_", "-"): count for stage, count in counts.items() if stage != "leaves"}
-        expected["done"] -= counts["in_review"]
         expected = {stage: count for stage, count in expected.items() if count}
         if shown != {"stage": parent["stage"], "counts": expected}:
             failures.append(f"{name}: parent {parent['id']} Status {shown} disagrees with {parent['stage']}, {expected}")
@@ -3263,7 +3262,7 @@ def needs_journey(page, env, plan, thread, name, failures):
             failures.append(f"{name}: an item picked from Needs you didn't open, or its ✕ didn't come back to the list")
     else:
         failures.append(f"{name}: no needs-you entry selects an item, so coming back from one went unchecked")
-    # The queue has the name its push notification gives it, apart from the in-review stage.
+    # The queue has the name its push notification gives it.
     named = (page.locator("[data-view=needs]").get_attribute("aria-label"), page.locator(".bar h1").inner_text())
     if not named[0].startswith("Needs you:") or named[1] != "Needs you":
         failures.append(f"{name}: the queue's tab and title read {named}, not Needs you")

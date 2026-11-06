@@ -69,13 +69,10 @@ _Avoid_: closed, deleted
 An item or thread removed for good: gone from every view and every reader, and its id never used again.
 _Avoid_: archived (that only hides), closed
 
-**In review**:
-The state of finished code work whose commit is not yet on its repository's default branch.
-
 **Needs-you list**:
 Everything waiting on the user: conflicts nobody resolved, cycles of items, parents or threads, reopened work,
-claims two holders clash over, references to what doesn't exist, merges that can't be confirmed, and items in no
-thread. The app calls it Needs you, and shows it as a view of its own.
+claims two holders clash over, references to what doesn't exist, and items in no thread. The app calls it Needs you,
+and shows it as a view of its own.
 _Avoid_: inbox, notifications
 
 ## The app
@@ -120,11 +117,10 @@ readiness and stage are computed on read. A parent's progress also derives from 
 The stored value `backlog` is not the app's Up next list.
 
 **Stage**:
-Where an item's work stands, said one way everywhere with its icon: in progress, in review, done, ready, blocked,
-parked, or needs a thread. A parent's comes from its leaves: once every leaf is finished, in review while any still is,
-else done; before that, in progress once any work below has started and some of what is left isn't parked; otherwise
-ready, blocked, parked or needs a thread by its leaves. The code word for needs a thread is `unthreaded`; the app
-shows a stage as an item's Status.
+Where an item's work stands, said one way everywhere with its icon: in progress, done, ready, blocked, parked, or
+needs a thread. A parent's comes from its leaves: done once every leaf is; before that, in progress once any work below
+has started and some of what is left isn't parked; otherwise ready, blocked, parked or needs a thread by its leaves.
+The code word for needs a thread is `unthreaded`; the app shows a stage as an item's Status.
 _Avoid_: phase, step
 
 **Status**:

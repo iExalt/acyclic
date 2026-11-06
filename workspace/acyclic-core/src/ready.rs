@@ -1,7 +1,5 @@
-//! Readiness, computed on read: done inside a thread, merged across. A dependency in the same thread
-//! is met when it is done; one in another thread, or for an item in no thread, is met once its evidence commit is on
-//! its repository's default branch, and is "in review" until then. Work with no repository is met when done, and an
-//! archived dependency always is.
+//! Readiness, computed on read from the state alone: a dependency is met once it is done, and an archived dependency
+//! always is. Reads never run git: commit evidence is checked when it is written.
 //!
 //! Only leaves are claimed or ready. A dependency on a parent is met when the parent was marked done by hand, and
 //! otherwise once everything under it meets it, each child judged as a dependency of its own, so a part closed by hand
@@ -10,109 +8,16 @@
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::claim;
-use crate::model::{Evidence, Item, ItemState, Model, Progress, ProgressState, Repository, Value};
+use crate::model::{Item, ItemState, Model, Progress, ProgressState, Value};
 use crate::natural;
 use crate::state::{Error, Millis, State};
-use crate::store::Git;
 
 mod waves;
 pub use waves::Waves;
-
-/// Whether a commit is on a repository's default branch.
-pub trait Ancestry {
-    /// `Ok(true)` when `commit` is on `repository`'s default branch, `Ok(false)` when it isn't yet, and `Err` with
-    /// the reason when that can't be checked.
-    ///
-    /// # Errors
-    ///
-    /// Fails when the repository has no clone or default branch, or git fails.
-    fn merged(&self, repository: &Repository, commit: &str) -> Result<bool, String>;
-}
-
-/// Checks ancestry in local code clones, as they were last fetched. Each clone's default branch is looked up once,
-/// with its latest commits, and abbreviated ids are named in full by one git process kept open, so a read with many
-/// done dependencies starts a few git processes rather than two for each. Make one for each read: it doesn't see a
-/// branch move after its first look.
-pub struct GitAncestry<F> {
-    clone_of: F,
-    branches: RefCell<BTreeMap<(PathBuf, String), Result<Branch, String>>>,
-}
-
-/// A clone's default branch: the ref it is read from, and its latest commits, sorted.
-struct Branch {
-    target: String,
-    commits: Vec<String>,
-    git: Git,
-}
-
-/// The most of a branch's commits looked up at once; an older commit takes a git process of its own.
-const LATEST: usize = 100_000;
-
-impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
-    /// Checks in the clone `clone_of` names for each repository record.
-    pub fn new(clone_of: F) -> Self {
-        Self { clone_of, branches: RefCell::default() }
-    }
-}
-
-impl Branch {
-    /// The ref `clone` reads `branch` from, and its latest commits.
-    fn of(clone: &Path, branch: &str) -> Result<Self, String> {
-        let git = Git::new(clone);
-        let target = [format!("refs/remotes/origin/{branch}"), format!("refs/heads/{branch}")]
-            .into_iter()
-            .find_map(|candidate| git.resolve(&candidate).ok().flatten())
-            .ok_or_else(|| format!("the clone has no {branch} branch"))?;
-        // Without them, every commit is checked on its own, which is slower but no less right.
-        let mut commits = git.recent_commits(&target, LATEST).unwrap_or_default();
-        commits.sort_unstable();
-        Ok(Self { target, commits, git })
-    }
-
-    /// Whether `commit` is among the latest. An abbreviated id is named in full first, as git names it: one that
-    /// names no commit, or several, isn't.
-    fn has(&self, commit: &str) -> bool {
-        let full = if matches!(commit.len(), 40 | 64) {
-            Some(commit.to_ascii_lowercase())
-        } else {
-            self.git.full_commit(commit)
-        };
-        full.is_some_and(|full| self.commits.binary_search(&full).is_ok())
-    }
-}
-
-impl<F: Fn(&Repository) -> Option<PathBuf>> Ancestry for GitAncestry<F> {
-    fn merged(&self, repository: &Repository, commit: &str) -> Result<bool, String> {
-        // Evidence is written by agents and synced, so it never reaches git as anything but a commit id.
-        if !(7..=64).contains(&commit.len()) || !commit.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err("not a commit id".to_owned());
-        }
-        let clone = (self.clone_of)(repository).ok_or("no clone of the repository is mapped")?;
-        let branch =
-            repository.default_branch.one().ok_or("the repository has no single default branch")?;
-        let mut branches = self.branches.borrow_mut();
-        let found = branches
-            .entry((clone.clone(), branch.to_owned()))
-            .or_insert_with(|| Branch::of(&clone, branch))
-            .as_mut()
-            .map_err(|reason| reason.clone())?;
-        if found.has(commit) {
-            return Ok(true);
-        }
-        // Not among the latest: not merged, older than they go, or no commit git knows, which git tells apart.
-        let full = found
-            .git
-            .full_commit(commit)
-            .or_else(|| (matches!(commit.len(), 40 | 64)).then(|| commit.to_ascii_lowercase()))
-            .ok_or_else(|| format!("Not a valid object name {commit}"))?;
-        found.git.is_ancestor_checked(&full, &found.target).map_err(|e| e.to_string())
-    }
-}
 
 /// Why a dependency isn't met yet.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -120,15 +25,6 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> Ancestry for GitAncestry<F> {
 pub enum Wait {
     /// It isn't done.
     Open,
-    /// It is done, but its commit isn't on the default branch yet.
-    InReview,
-    /// It is done, but whether its commit is merged can't be checked.
-    Unverified {
-        /// The repository record.
-        repository: String,
-        /// Why not.
-        reason: String,
-    },
 }
 
 /// An item's readiness.
@@ -140,6 +36,10 @@ pub enum Readiness {
     /// Waiting on waits-for targets, by item id.
     Blocked {
         /// What each unmet dependency waits for.
+        #[allow(
+            clippy::zero_sized_map_values,
+            reason = "each wait says why in the JSON, as `{\"why\": …}`"
+        )]
         waiting: BTreeMap<String, Wait>,
     },
     /// In no thread, or in one with no record, so never ready: threads are the unit of work.
@@ -165,17 +65,8 @@ pub enum Readiness {
     Parent,
     /// Set aside on purpose.
     Parked,
-    /// Done, and merged where that matters.
+    /// Done.
     Done,
-    /// Done, but its commit isn't on the default branch yet.
-    InReview,
-    /// Done, but whether its commit is merged can't be checked.
-    Unverified {
-        /// The repository record.
-        repository: String,
-        /// Why not.
-        reason: String,
-    },
     /// It or an ancestor is archived.
     Archived,
 }
@@ -187,7 +78,7 @@ impl Readiness {
     #[must_use]
     pub fn finishable_by(&self, actor: &str) -> bool {
         match self {
-            Self::Ready | Self::Done | Self::InReview | Self::Unverified { .. } => true,
+            Self::Ready | Self::Done => true,
             Self::Claimed { holder } => holder == actor,
             Self::Contested { holders } => holders.first().is_some_and(|h| h == actor),
             _ => false,
@@ -257,15 +148,13 @@ pub struct ReadyThread {
     pub items: Vec<String>,
 }
 
-/// Where a leaf stands, in seven words that tell all of them apart: what the app draws on each item and counts under
+/// Where a leaf stands, in six words that tell all of them apart: what the app draws on each item and counts under
 /// each parent. In progress means ready in a thread someone holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Stage {
-    /// Done, and merged where that matters.
+    /// Done.
     Done,
-    /// Done, but its commit isn't on the default branch yet, or that can't be checked.
-    InReview,
     /// Ready in a claimed thread.
     InProgress,
     /// Ready to start.
@@ -283,7 +172,6 @@ pub enum Stage {
 #[allow(missing_docs)]
 pub struct Stages {
     pub done: usize,
-    pub in_review: usize,
     pub in_progress: usize,
     pub ready: usize,
     pub blocked: usize,
@@ -295,7 +183,6 @@ impl Stages {
     fn add(&mut self, stage: Stage, count: usize) {
         let slot = match stage {
             Stage::Done => &mut self.done,
-            Stage::InReview => &mut self.in_review,
             Stage::InProgress => &mut self.in_progress,
             Stage::Ready => &mut self.ready,
             Stage::Blocked => &mut self.blocked,
@@ -306,17 +193,17 @@ impl Stages {
     }
 
     /// The stage of a parent with these leaves, `claimed` when a live claim holds the thread of an open leaf under it:
-    /// once every leaf is finished, in review while any still is, else done; before that, in progress once any work
+    /// done once every leaf is; before that, in progress once any work
     /// below has started and some of what is left isn't parked; otherwise ready, blocked, parked or needs a thread by
     /// its leaves, in that order. `None` with no leaf to count.
     #[must_use]
     pub fn rolled_up(&self, claimed: bool) -> Option<Stage> {
-        let finished = self.done + self.in_review;
+        let finished = self.done;
         if self.total() == 0 {
             return None;
         }
         if finished == self.total() {
-            return Some(if self.in_review > 0 { Stage::InReview } else { Stage::Done });
+            return Some(Stage::Done);
         }
         let open = self.in_progress + self.ready + self.blocked + self.unthreaded;
         if open > 0 && (self.in_progress > 0 || finished > 0 || claimed) {
@@ -353,13 +240,7 @@ impl Stages {
     /// The leaves counted, every stage together.
     #[must_use]
     pub fn total(&self) -> usize {
-        self.done
-            + self.in_review
-            + self.in_progress
-            + self.ready
-            + self.blocked
-            + self.parked
-            + self.unthreaded
+        self.done + self.in_progress + self.ready + self.blocked + self.parked + self.unthreaded
     }
 }
 
@@ -368,19 +249,17 @@ impl Stages {
 pub struct Rollup {
     /// Its state, and its leaves done and in all, as the model counts them.
     pub progress: Progress,
-    /// The same leaves by stage: the done and in-review ones together are the model's done.
+    /// The same leaves by stage: the done ones are the model's done.
     pub stages: Stages,
     /// Its stage, from its leaves; `None` with no leaf to count.
     pub stage: Option<Stage>,
 }
 
-/// Computes readiness over one state, with ancestry checks cached by repository and commit.
+/// Computes readiness over one state.
 pub struct ReadinessEvaluator<'a> {
     state: &'a State,
     model: &'a Model,
     now: Millis,
-    ancestry: &'a dyn Ancestry,
-    merged: RefCell<BTreeMap<(String, String), Result<bool, String>>>,
     cyclic: BTreeSet<String>,
     /// Waits-for links' targets by the item they start from.
     links_from: BTreeMap<String, Vec<String>>,
@@ -396,12 +275,7 @@ pub struct ReadinessEvaluator<'a> {
 impl<'a> ReadinessEvaluator<'a> {
     /// Evaluates readiness at `now`.
     #[must_use]
-    pub fn new(
-        state: &'a State,
-        model: &'a Model,
-        now: Millis,
-        ancestry: &'a dyn Ancestry,
-    ) -> Self {
+    pub fn new(state: &'a State, model: &'a Model, now: Millis) -> Self {
         let cyclic =
             model.link_cycles().into_iter().chain(model.parent_cycles()).flatten().collect();
         let mut links_from: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -412,8 +286,6 @@ impl<'a> ReadinessEvaluator<'a> {
             state,
             model,
             now,
-            ancestry,
-            merged: RefCell::default(),
             cyclic,
             links_from,
             archived: RefCell::default(),
@@ -456,13 +328,7 @@ impl<'a> ReadinessEvaluator<'a> {
             return Some(Readiness::Conflicted { fields });
         }
         if item.is_done() {
-            return Some(match self.own_wait(item) {
-                None => Readiness::Done,
-                Some(Wait::InReview | Wait::Open) => Readiness::InReview,
-                Some(Wait::Unverified { repository, reason }) => {
-                    Readiness::Unverified { repository, reason }
-                },
-            });
+            return Some(Readiness::Done);
         }
         if !self.model.children(id).is_empty() {
             return Some(Readiness::Parent);
@@ -505,7 +371,7 @@ impl<'a> ReadinessEvaluator<'a> {
             .into_iter()
             .flatten()
             .copied()
-            // Finished work is skipped before its merge is checked.
+            // Finished work is skipped.
             .filter(|id| !self.model.items[*id].is_done())
             .filter(|id| self.unclaimed(id, &self.model.items[*id]).is_none())
             .map(str::to_owned)
@@ -538,7 +404,7 @@ impl<'a> ReadinessEvaluator<'a> {
             for item in model.items.values_mut() {
                 item.archived = Value::None;
             }
-            let unarchived = ReadinessEvaluator::new(self.state, &model, self.now, self.ancestry);
+            let unarchived = ReadinessEvaluator::new(self.state, &model, self.now);
             return unarchived.ready(false, actor);
         }
         let title =
@@ -583,12 +449,11 @@ impl<'a> ReadinessEvaluator<'a> {
         let finished =
             item.is_done() && self.model.children(id).is_empty() && !self.is_archived(id);
         let stage = if finished {
-            Some(if self.own_wait(item).is_none() { Stage::Done } else { Stage::InReview })
+            Some(Stage::Done)
         } else {
             self.of(id)?.and_then(|status| match status {
                 Readiness::Archived | Readiness::Parent => None,
                 Readiness::Done => Some(Stage::Done),
-                Readiness::InReview | Readiness::Unverified { .. } => Some(Stage::InReview),
                 Readiness::Parked => Some(Stage::Parked),
                 Readiness::Claimed { .. } | Readiness::Contested { .. } => Some(Stage::InProgress),
                 Readiness::Ready => Some(Stage::Ready),
@@ -644,7 +509,7 @@ impl<'a> ReadinessEvaluator<'a> {
             let Some(item) = self.model.items.get(child) else { continue };
             if self.model.children(child).is_empty() {
                 let stage = self.stage(child)?.unwrap_or(Stage::Blocked);
-                let open = !matches!(stage, Stage::Done | Stage::InReview);
+                let open = stage != Stage::Done;
                 stages.add(if parked && open { Stage::Parked } else { stage }, 1);
             } else if item.is_done() {
                 let mut closed = Stages::default();
@@ -712,6 +577,10 @@ impl<'a> ReadinessEvaluator<'a> {
         (open, held)
     }
 
+    #[allow(
+        clippy::zero_sized_map_values,
+        reason = "each wait says why in the JSON, as `{\"why\": …}`"
+    )]
     fn waiting(&self, id: &str) -> BTreeMap<String, Wait> {
         let mut waiting = BTreeMap::new();
         for to in self.linked_from(id) {
@@ -769,62 +638,22 @@ impl<'a> ReadinessEvaluator<'a> {
             }
             return self.leaves_wait(dependent, dependency);
         }
-        let same_thread = self
-            .model
-            .thread_of(dependent)
-            .is_some_and(|thread| self.model.thread_of(dependency) == Some(thread));
-        if same_thread { None } else { self.own_wait(item) }
+        None
     }
 
     /// Why the work under a parent doesn't yet satisfy `dependent`, or `None` when all of it does: each child judged
     /// as a dependency of its own, so a leaf by its state, a parent under it done or parked by hand by that, and any
-    /// other by what is under it in turn. The first wait wins, one still open before one in review. A leaf waiting on
+    /// other by what is under it in turn. A leaf waiting on
     /// its own ancestor is among what it waits on, so only closing the ancestor by hand meets it.
     fn leaves_wait(&self, dependent: &str, parent: &str) -> Option<Wait> {
         // A parent in a cycle meets nothing until the cycle is fixed: a cycle of parents has no bottom to reach.
         if self.cyclic.contains(parent) {
             return Some(Wait::Open);
         }
-        let mut found = None;
-        for child in self.model.children(parent) {
-            match self.dependency_wait(dependent, child) {
-                Some(Wait::Open) => return Some(Wait::Open),
-                Some(wait) => found = found.or(Some(wait)),
-                None => {},
-            }
-        }
-        found
-    }
-
-    /// Whether a done item's own commits are merged: `None` when every one is, or it has none.
-    fn own_wait(&self, item: &Item) -> Option<Wait> {
-        for evidence in item.evidence.all() {
-            let Evidence { repository: Some(repository), commit: Some(commit), .. } = evidence
-            else {
-                continue;
-            };
-            let Some(record) = self.model.repositories.get(repository) else {
-                return Some(Wait::Unverified {
-                    repository: repository.clone(),
-                    reason: "no such repository record".to_owned(),
-                });
-            };
-            let key = (repository.clone(), commit.clone());
-            let merged = self
-                .merged
-                .borrow_mut()
-                .entry(key)
-                .or_insert_with(|| self.ancestry.merged(record, commit))
-                .clone();
-            match merged {
-                Ok(true) => {},
-                Ok(false) => return Some(Wait::InReview),
-                Err(reason) => {
-                    return Some(Wait::Unverified { repository: repository.clone(), reason });
-                },
-            }
-        }
-        None
+        self.model
+            .children(parent)
+            .into_iter()
+            .find_map(|child| self.dependency_wait(dependent, child))
     }
 }
 

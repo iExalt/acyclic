@@ -9,7 +9,6 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 
 use crate::model::{self, By, ItemState, Model, Reopened, Value, WriteError};
-use crate::ready::{Ancestry, Readiness, ReadinessEvaluator};
 use crate::schema::item as field;
 use crate::state::{Error, Millis, Replica};
 
@@ -24,11 +23,6 @@ pub enum Reason {
     Archived,
     /// An item in the subtree isn't done.
     Open {
-        /// The item.
-        item: String,
-    },
-    /// An item's commit isn't merged, or can't be checked.
-    Unmerged {
         /// The item.
         item: String,
     },
@@ -52,9 +46,6 @@ impl std::fmt::Display for Reason {
         match self {
             Self::Archived => write!(f, "it is archived already"),
             Self::Open { item } => write!(f, "{item} isn't done"),
-            Self::Unmerged { item } => {
-                write!(f, "{item}'s commit isn't merged, or can't be checked")
-            },
             Self::LiveDependent { from, to } => write!(f, "{from}, still open, depends on {to}"),
             Self::Waiting { .. } => {
                 write!(f, "its last item was done less than 30 days ago")
@@ -64,16 +55,8 @@ impl std::fmt::Display for Reason {
 }
 
 /// Why `root` can't be archived at `now`; empty when it can.
-///
-/// # Errors
-///
-/// Fails when a claim can't be read.
-pub fn eligibility(
-    readiness: &ReadinessEvaluator<'_>,
-    model: &Model,
-    root: &str,
-    now: Millis,
-) -> Result<Vec<Reason>, Error> {
+#[must_use]
+pub fn eligibility(model: &Model, root: &str, now: Millis) -> Vec<Reason> {
     let mut reasons = BTreeSet::new();
     if model.is_archived(root) {
         reasons.insert(Reason::Archived);
@@ -86,14 +69,11 @@ pub fn eligibility(
             reasons.insert(Reason::Open { item: (*id).to_owned() });
             continue;
         }
-        // A parent done by its leaves has no commit of its own: they are checked, and their times count.
+        // A parent done by its leaves has no time of its own: theirs count.
         if !model.children(id).is_empty() && !item.is_done() {
             continue;
         }
         last_done = last_done.max(item.done_at.unwrap_or(Millis::MIN));
-        if !matches!(readiness.of(id)?, Some(Readiness::Done | Readiness::Archived)) {
-            reasons.insert(Reason::Unmerged { item: (*id).to_owned() });
-        }
     }
     for link in &model.links {
         let open = model.items.contains_key(&link.from)
@@ -106,7 +86,7 @@ pub fn eligibility(
     if reasons.is_empty() && now < last_done.saturating_add(ARCHIVE_GRACE) {
         reasons.insert(Reason::Waiting { until: last_done.saturating_add(ARCHIVE_GRACE) });
     }
-    Ok(reasons.into_iter().collect())
+    reasons.into_iter().collect()
 }
 
 /// A refused archive or reopen.
@@ -165,18 +145,10 @@ impl From<Error> for ArchiveError {
 /// # Errors
 ///
 /// Fails when it isn't eligible, a value can't be read, or the write is refused.
-pub fn archive(
-    replica: &mut Replica,
-    ancestry: &dyn Ancestry,
-    root: &str,
-    by: By<'_>,
-) -> Result<(), ArchiveError> {
+pub fn archive(replica: &mut Replica, root: &str, by: By<'_>) -> Result<(), ArchiveError> {
     model::existing(&replica.state, root)?;
     let model = Model::read(&replica.state)?;
-    let reasons = {
-        let readiness = ReadinessEvaluator::new(&replica.state, &model, by.at, ancestry);
-        eligibility(&readiness, &model, root, by.at)?
-    };
+    let reasons = eligibility(&model, root, by.at);
     if !reasons.is_empty() {
         return Err(ArchiveError::Ineligible { item: root.to_owned(), reasons });
     }

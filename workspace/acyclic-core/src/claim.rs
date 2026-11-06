@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::model::Model;
-use crate::ready::{Ancestry, ReadinessEvaluator, ThreadReadiness};
+use crate::ready::{ReadinessEvaluator, ThreadReadiness};
 use crate::schema::kind;
 use crate::state::{CLOCK_SKEW_MS, Dot, Error, Key, Millis, Replica, State};
 
@@ -138,15 +138,14 @@ pub fn claim(
     holder: &str,
     at: Millis,
     (lease, max_lease): (Millis, Millis),
-    ready: Option<&dyn Ancestry>,
+    check_ready: bool,
 ) -> Result<Dot, ClaimError> {
     let model = Model::read(&replica.state)?;
     if !model.threads.contains_key(thread) {
         return Err(Error::NoThread(thread.to_owned()).into());
     }
-    if let Some(ancestry) = ready {
-        let status =
-            ReadinessEvaluator::new(&replica.state, &model, at, ancestry).thread(thread)?;
+    if check_ready {
+        let status = ReadinessEvaluator::new(&replica.state, &model, at).thread(thread)?;
         if !status.claimable_by(holder) {
             return Err(ClaimError::NotReady(status));
         }

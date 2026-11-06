@@ -1,5 +1,5 @@
 use super::*;
-use crate::model::{Evidence, Repository, add_item, item_key, link, set_parent};
+use crate::model::{Evidence, add_item, item_key, link, set_parent};
 use crate::needs::{self, Entry};
 use crate::ready::Wait;
 use crate::schema::{kind, repository};
@@ -7,20 +7,11 @@ use crate::state::{Key, ReplicaId, State};
 
 const DAY: Millis = 24 * 60 * 60 * 1000;
 
-/// Commits named `merged…` are on the default branch; any other isn't.
-struct ByName;
-
-impl Ancestry for ByName {
-    fn merged(&self, _: &Repository, commit: &str) -> Result<bool, String> {
-        Ok(commit.starts_with("aaaa"))
-    }
-}
-
 fn user(at: Millis) -> By<'static> {
     By { actor: "actor/user", at }
 }
 
-/// A group `g` with done leaves `a` (merged) and `b` (no repository), both done on day 1.
+/// A group `g` with done leaves `a` (with a commit) and `b` (no repository), both done on day 1.
 fn setup() -> Replica {
     let mut r = Replica::open(ReplicaId::new("a").unwrap(), State::new());
     let code = Key::new(kind::REPOSITORY, "code").unwrap();
@@ -53,9 +44,7 @@ fn done(r: &mut Replica, id: &str, commit: Option<&str>, at: Millis) {
 }
 
 fn reasons(r: &Replica, root: &str, now: Millis) -> Vec<Reason> {
-    let model = Model::read(&r.state).unwrap();
-    let readiness = ReadinessEvaluator::new(&r.state, &model, now, &ByName);
-    eligibility(&readiness, &model, root, now).unwrap()
+    eligibility(&Model::read(&r.state).unwrap(), root, now)
 }
 
 #[test]
@@ -79,12 +68,10 @@ fn a_root_with_a_gate_older_versions_stored_waits_the_same_grace() {
 }
 
 #[test]
-fn a_parent_done_by_its_leaves_archives_on_their_merges_and_times() {
+fn a_parent_done_by_its_leaves_archives_on_their_times() {
     let mut r = setup();
     model::set_state(&mut r, "g", ItemState::Backlog, user(2 * DAY)).unwrap();
     assert_eq!(reasons(&r, "g", 4 * DAY), vec![Reason::Waiting { until: DAY + ARCHIVE_GRACE }]);
-    done(&mut r, "a", Some("bbbb222"), 4 * DAY);
-    assert_eq!(reasons(&r, "g", 5 * DAY), vec![Reason::Unmerged { item: "a".into() }]);
     done(&mut r, "a", Some("aaaa111"), 4 * DAY);
     model::set_state(&mut r, "b", ItemState::Backlog, user(4 * DAY)).unwrap();
     assert_eq!(
@@ -94,17 +81,15 @@ fn a_parent_done_by_its_leaves_archives_on_their_merges_and_times() {
 }
 
 #[test]
-fn open_unmerged_and_depended_on_subtrees_say_why() {
+fn open_and_depended_on_subtrees_say_why() {
     let mut r = setup();
     add_item(&mut r, "c", "c", user(2)).unwrap();
     set_parent(&mut r, "c", Some("g"), user(2)).unwrap();
-    done(&mut r, "a", Some("bbbb222"), 2 * DAY);
     link(&mut r, "outside", "b", user(2)).unwrap();
     assert_eq!(
         reasons(&r, "g", 3 * DAY),
         vec![
             Reason::Open { item: "c".into() },
-            Reason::Unmerged { item: "a".into() },
             Reason::LiveDependent { from: "outside".into(), to: "b".into() },
         ]
     );
@@ -113,7 +98,7 @@ fn open_unmerged_and_depended_on_subtrees_say_why() {
 #[test]
 fn archiving_refuses_until_eligible_and_then_hides_the_subtree() {
     let mut r = setup();
-    let refused = archive(&mut r, &ByName, "g", user(2 * DAY)).unwrap_err();
+    let refused = archive(&mut r, "g", user(2 * DAY)).unwrap_err();
     assert!(matches!(refused, ArchiveError::Ineligible { .. }));
     // One line, with the date the wait ends.
     assert_eq!(
@@ -122,7 +107,7 @@ fn archiving_refuses_until_eligible_and_then_hides_the_subtree() {
     );
     let now = DAY + ARCHIVE_GRACE;
     // An agent archives as the user does.
-    archive(&mut r, &ByName, "g", By { actor: "session/x", at: now }).unwrap();
+    archive(&mut r, "g", By { actor: "session/x", at: now }).unwrap();
     let model = Model::read(&r.state).unwrap();
     assert!(model.is_archived("a"));
     assert_eq!(reasons(&r, "g", now), vec![Reason::Archived]);
@@ -130,13 +115,13 @@ fn archiving_refuses_until_eligible_and_then_hides_the_subtree() {
 
 fn needs(r: &Replica, now: Millis) -> Vec<Entry> {
     let model = Model::read(&r.state).unwrap();
-    let readiness = ReadinessEvaluator::new(&r.state, &model, now, &ByName);
+    let readiness = crate::ready::ReadinessEvaluator::new(&r.state, &model, now);
     needs::needs_you(&r.state, &model, &readiness, now).unwrap()
 }
 
-fn status(r: &Replica, id: &str, now: Millis) -> Readiness {
+fn status(r: &Replica, id: &str, now: Millis) -> crate::ready::Readiness {
     let model = Model::read(&r.state).unwrap();
-    ReadinessEvaluator::new(&r.state, &model, now, &ByName).of(id).unwrap().unwrap()
+    crate::ready::ReadinessEvaluator::new(&r.state, &model, now).of(id).unwrap().unwrap()
 }
 
 #[test]
@@ -148,7 +133,7 @@ fn reopening_archived_work_flags_its_dependents_without_blocking_them() {
     reopen(&mut r, "a", user(now)).unwrap();
     let model = Model::read(&r.state).unwrap();
     assert!(!model.is_archived("a"), "the archived root above it is cleared");
-    assert_eq!(status(&r, "outside", now), Readiness::Ready);
+    assert_eq!(status(&r, "outside", now), crate::ready::Readiness::Ready);
     assert!(
         needs(&r, now)
             .contains(&Entry::Reopened { item: "a".into(), dependents: vec!["outside".into()] })
@@ -162,13 +147,13 @@ fn reopening_archived_work_flags_its_dependents_without_blocking_them() {
 fn reopening_live_work_blocks_its_dependents_again_and_flags_them() {
     let mut r = setup();
     link(&mut r, "outside", "b", user(2)).unwrap();
-    assert_eq!(status(&r, "outside", 2 * DAY), Readiness::Ready);
+    assert_eq!(status(&r, "outside", 2 * DAY), crate::ready::Readiness::Ready);
     // Any actor may reopen: an agent may find a defect in finished work.
     reopen(&mut r, "b", By { actor: "session/worker", at: 2 * DAY }).unwrap();
     let model = Model::read(&r.state).unwrap();
     assert_eq!(model.items["b"].state, Value::One(ItemState::Backlog), "reopen sets backlog");
     assert!(
-        matches!(status(&r, "outside", 2 * DAY), Readiness::Blocked { waiting } if waiting["b"] == Wait::Open)
+        matches!(status(&r, "outside", 2 * DAY), crate::ready::Readiness::Blocked { waiting } if waiting["b"] == Wait::Open)
     );
     assert!(
         needs(&r, 2 * DAY)
@@ -187,7 +172,7 @@ fn reopening_an_archived_rolled_up_parent_keeps_its_descendants_and_evidence() {
     assert_eq!(reopen(&mut r, "g", user(3 * DAY)), Err(ArchiveError::NotDone("g".into())));
 
     let now = DAY + ARCHIVE_GRACE;
-    archive(&mut r, &ByName, "g", user(now)).unwrap();
+    archive(&mut r, "g", user(now)).unwrap();
     let before = Model::read(&r.state).unwrap();
     let descendants = ["a", "b"]
         .map(|id| (id, before.items[id].state.clone(), before.items[id].evidence.clone()));

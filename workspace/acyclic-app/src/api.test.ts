@@ -87,7 +87,7 @@ describe("items", () => {
   });
 
   it("keeps the stage core gives a parent from its leaves, beside its progress", async () => {
-    const counts = { ...NO_COUNTS, leaves: 2, done: 1, in_review: 1, ready: 1 };
+    const counts = { ...NO_COUNTS, leaves: 2, done: 1, ready: 1 };
     const parent = { ...raw(ID.a), stage: "in-progress", progress: { state: "in-progress", counts } };
     const { fetcher } = server({
       "item list": { ok: true, data: { items: [{ id: ID.a }] } },
@@ -108,7 +108,7 @@ describe("threads", () => {
               id: "t",
               title: "T",
               waits_for: [],
-              progress: { counts: { ...NO_COUNTS, leaves: 3, done: 2, in_review: 1, ready: 1 } },
+              progress: { counts: { ...NO_COUNTS, leaves: 3, done: 2, ready: 1 } },
             },
             { id: "u", title: { conflict: [null, "V"] }, waits_for: ["t"] },
           ],
@@ -119,7 +119,7 @@ describe("threads", () => {
     });
     await expect(threads(fetcher)).resolves.toEqual({
       threads: [
-        { id: "t", title: "T", waitsFor: [], counts: { ...NO_COUNTS, leaves: 3, done: 2, in_review: 1, ready: 1 } },
+        { id: "t", title: "T", waitsFor: [], counts: { ...NO_COUNTS, leaves: 3, done: 2, ready: 1 } },
         // Counts from a server that sends none: no leaves.
         { id: "u", title: "V", waitsFor: ["t"], counts: NO_COUNTS },
       ],
@@ -213,11 +213,11 @@ describe("failure", () => {
 });
 
 describe("countsText", () => {
-  const none = { done: 0, leaves: 0, in_review: 0, in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
+  const none = { done: 0, leaves: 0, in_progress: 0, ready: 0, blocked: 0, parked: 0, unthreaded: 0 };
 
-  it("names every stage, done ones apart from those in review, and leaves out stages with none", () => {
-    const all = { done: 3, leaves: 9, in_review: 1, in_progress: 1, ready: 1, blocked: 1, parked: 1, unthreaded: 1 };
-    expect(countsText(all)).toBe("2 done, 1 in review, 1 in progress, 1 ready, 1 blocked, 1 parked, 1 needs a thread");
+  it("names every stage and leaves out stages with none", () => {
+    const all = { done: 3, leaves: 8, in_progress: 1, ready: 1, blocked: 1, parked: 1, unthreaded: 1 };
+    expect(countsText(all)).toBe("3 done, 1 in progress, 1 ready, 1 blocked, 1 parked, 1 needs a thread");
     expect(countsText({ ...none, leaves: 2, blocked: 2 })).toBe("2 blocked");
   });
 });

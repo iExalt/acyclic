@@ -16,7 +16,6 @@ use super::{Import, KeyKind, ValidationError, owner_name};
 use crate::archive::{self, ArchiveError};
 use crate::model::{By, Evidence, Model, Size, Value, WriteError};
 use crate::place::Inherited;
-use crate::ready::{Ancestry, ReadinessEvaluator};
 use crate::schema::kind;
 use crate::state::{Error, Replica};
 use crate::write::{
@@ -164,19 +163,15 @@ impl From<Error> for ApplyError {
 /// # Errors
 ///
 /// Fails when the document is invalid, would close a cycle, archives an ineligible subtree, or a write is refused.
-pub fn apply(
-    doc: &Import,
-    replica: &mut Replica,
-    by: By<'_>,
-    ancestry: &dyn Ancestry,
-) -> Result<Report, ApplyError> {
+pub fn apply(doc: &Import, replica: &mut Replica, by: By<'_>) -> Result<Report, ApplyError> {
     let errors = doc.validate();
     if !errors.is_empty() {
         return Err(ApplyError::Invalid(errors));
     }
     let before = Model::read(replica.state())?;
+    let doc = &named_commits(doc, &before)?;
     let outcome = judged(doc, &before, by)?;
-    archive_eligibility(&before, &outcome.after, replica.state(), by, ancestry)?;
+    archive_eligibility(&before, &outcome.after, by)?;
     write::write(replica, &outcome, by)?;
     Ok(report(&before, &outcome))
 }
@@ -186,29 +181,62 @@ pub fn apply(
 /// # Errors
 ///
 /// Fails as [`apply`] would.
-pub fn preview(
-    doc: &Import,
-    replica: &Replica,
-    by: By<'_>,
-    ancestry: &dyn Ancestry,
-) -> Result<Report, ApplyError> {
+pub fn preview(doc: &Import, replica: &Replica, by: By<'_>) -> Result<Report, ApplyError> {
     let errors = doc.validate();
     if !errors.is_empty() {
         return Err(ApplyError::Invalid(errors));
     }
     let before = Model::read(replica.state())?;
+    let doc = &named_commits(doc, &before)?;
     let outcome = judged(doc, &before, by)?;
-    archive_eligibility(&before, &outcome.after, replica.state(), by, ancestry)?;
+    archive_eligibility(&before, &outcome.after, by)?;
     Ok(report(&before, &outcome))
 }
 
-fn archive_eligibility(
-    before: &Model,
-    after: &Model,
-    state: &crate::state::State,
-    by: By<'_>,
-    ancestry: &dyn Ancestry,
-) -> Result<(), ApplyError> {
+/// The document with each evidence commit named `<owner>/<name>@<sha>` given its repository's id instead: the
+/// document's repository of that name, else the tracker's, in any case.
+fn named_commits(doc: &Import, before: &Model) -> Result<Import, ApplyError> {
+    let mut doc = doc.clone();
+    let mut unknown = Vec::new();
+    for item in &mut doc.items {
+        let Some(commit) = item.evidence.as_mut().and_then(|e| e.commit.as_mut()) else {
+            continue;
+        };
+        let Some((named, sha)) = commit.rsplit_once('@') else { continue };
+        let Some((owner, name)) = owner_name(named) else { continue };
+        let same = |o: &str, n: &str| o.eq_ignore_ascii_case(owner) && n.eq_ignore_ascii_case(name);
+        let in_doc = doc_repository(&doc.repositories, &same);
+        let in_tracker = || {
+            before.repositories.values().find_map(|record| {
+                let (Some(o), Some(n)) = (record.owner.one(), record.name.one()) else {
+                    return None;
+                };
+                same(o, n).then(|| record.id.clone())
+            })
+        };
+        match in_doc.or_else(in_tracker) {
+            Some(id) => *commit = format!("{id}@{sha}"),
+            None => unknown.push(ValidationError::UnknownReference {
+                at: format!("item {}, evidence", item.id),
+                kind: KeyKind::Repository,
+                id: named.to_owned(),
+            }),
+        }
+    }
+    if unknown.is_empty() { Ok(doc) } else { Err(ApplyError::Invalid(unknown)) }
+}
+
+fn doc_repository(
+    repositories: &[super::Repository],
+    same: &impl Fn(&str, &str) -> bool,
+) -> Option<String> {
+    repositories.iter().find_map(|record| {
+        let (o, n) = owner_name(&record.name)?;
+        same(o, n).then(|| record.id.clone())
+    })
+}
+
+fn archive_eligibility(before: &Model, after: &Model, by: By<'_>) -> Result<(), ApplyError> {
     let roots: Vec<&str> = after
         .items
         .iter()
@@ -221,14 +249,13 @@ fn archive_eligibility(
     if roots.is_empty() {
         return Ok(());
     }
-    // Clear them together so one candidate cannot hide another's merge or dependent checks.
+    // Clear them together so one candidate cannot hide another's dependent checks.
     let mut candidate = after.clone();
     for root in &roots {
         candidate.items.get_mut(*root).expect("candidate root exists").archived = Value::None;
     }
-    let readiness = ReadinessEvaluator::new(state, &candidate, by.at, ancestry);
     for root in roots {
-        let reasons = archive::eligibility(&readiness, &candidate, root, by.at)?;
+        let reasons = archive::eligibility(&candidate, root, by.at);
         if !reasons.is_empty() {
             return Err(ArchiveError::Ineligible { item: root.to_owned(), reasons }.into());
         }

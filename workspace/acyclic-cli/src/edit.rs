@@ -9,7 +9,7 @@
 use acyclic_core::ids;
 use acyclic_core::import::owner_name;
 use acyclic_core::model::{By, ItemState, Model, Size, WriteError};
-use acyclic_core::ready::{Ancestry, Readiness};
+use acyclic_core::ready::Readiness;
 use acyclic_core::state::Replica;
 use acyclic_core::write::{
     self, Assign, Change as WriteChange, ChangeSet, CommitError, FieldName, ItemAssign, Outcome,
@@ -252,15 +252,15 @@ pub(crate) fn new_repository_id(given: Option<&str>) -> Result<String, CliError>
 }
 
 /// Judges and writes the change set `build` makes from the tracker's model, read once, telling a refusal as the CLI
-/// does. `name` is the `owner/name` a repository write gave; `ancestry` checks merges when finishing work.
+/// does. `name` is the `owner/name` a repository write gave; `judge_finishing` judges finishing work by its readiness.
 pub(crate) fn commit(
     replica: &mut Replica,
     by: By<'_>,
     name: Option<&str>,
-    ancestry: Option<&dyn Ancestry>,
+    judge_finishing: bool,
     build: impl FnOnce(&Model) -> Result<ChangeSet, CliError>,
 ) -> Result<Outcome, CliError> {
-    write::commit(replica, by, ancestry, build).map_err(|error| match error {
+    write::commit(replica, by, judge_finishing, build).map_err(|error| match error {
         CommitError::Build(error) => error,
         CommitError::Refused(violations, before) => refusal(&violations, name, &before),
         CommitError::Write(error) => error.into(),

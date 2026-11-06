@@ -109,8 +109,7 @@ waits-for and thread it belongs with.
 1. `acyclic thread ready` lists the threads you may work: yours first, then those nobody holds, by title. Each row is
    the thread's summary with its ready `items`. An item in no thread is never ready, and `acyclic needs` lists it as
    `unthreaded`. `acyclic item list` lists every item. `acyclic item show <item>...` explains items, as an array in the
-   order given: their readiness, children and their thread's claims. See "Details" for work that waits as `in-review` or
-   `unverified`.
+   order given: their readiness, children and their thread's claims.
 2. `acyclic thread claim <thread>` before starting. A claim holds a time lease (60 minutes by default,
    `--lease <minutes>` up to 480). Your claim lapses after its lease unless you keep writing to the tracker: any
    write through this clone's CLI renews a claim of this clone's with less than half of 60 minutes left, if its holder
@@ -120,11 +119,11 @@ waits-for and thread it belongs with.
    thread, or `thread ready` stops listing a thread you hold, stop and run `acyclic thread release <thread>`: it drops
    only your claim. A lapsed lease frees your thread, so after a pause check that `acyclic thread show <thread>` still
    names you as holder.
-3. `acyclic item done <item> --commit <owner/name>@<sha>` when an item is finished, or `--evidence` when the
-   result isn't a commit. It finishes only what your thread holds, or what is ready, and a parent once its children are
-   done; don't use `--force` to finish someone else's work. A parent needs no `item done`: its `progress` reads done
-   once every leaf under it is, and work waiting on it waits on those leaves.
-   `acyclic thread release <thread>` once none of its items is left ready.
+3. `acyclic item done <item> --commit <owner/name>@<sha>` once its pull request has merged, naming the commit that
+   landed on the default branch (the squash commit), or `--evidence` when the result isn't a commit. See "Details". It
+   finishes only what your thread holds, or what is ready, and a parent once its children are done; don't use `--force`
+   to finish someone else's work. A parent needs no `item done`: its `progress` reads done once every leaf under it is,
+   and work waiting on it waits on those leaves. `acyclic thread release <thread>` once none of its items is left ready.
 4. `acyclic thread` and `acyclic repository` keep threads and repository records; an item's thread and repositories are
    set with `acyclic item edit --thread` and `--repository`. `acyclic thread list` lists the threads with their counts,
    and `acyclic thread show <thread>` lists each member with its state and readiness. Both list a thread's `heads`: its
@@ -145,9 +144,10 @@ waits-for and thread it belongs with.
 
 ## Details
 
-A done item counts for what waits on it from another thread, or outside any thread, only once each commit in its
-evidence is on that repository's default branch, as last fetched in your clone (named in
-`~/.config/acyclic/clones.toml`, by the repository's `owner/name`). Until then they wait on it as `in-review`; run
-`git fetch` there before `acyclic thread ready`. They wait as `unverified`, with a reason, when the commit can't be
-checked, such as with no clone mapped: fix the mapping, since fetching won't help. Work finished without a commit counts
-at once.
+Done means merged: work waiting on a done item may start at once. So a commit is checked when it is written, by
+`item done --commit`, `import` and any other write that records one: it must be on the repository's default branch in
+this machine's clone of it (named in `~/.config/acyclic/clones.toml`, by the repository's `owner/name`). One not there
+yet is fetched first, so a pull request merged a moment ago passes; a branch's commit, or one no clone knows, is refused
+as `unmerged`, `--force` or not, and nothing is written. With no clone mapped, the write goes through and its result
+lists the commit under `unchecked_commits`; `acyclic doctor` later checks every recorded commit, as last fetched, on a
+machine that has the clones.

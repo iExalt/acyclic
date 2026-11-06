@@ -5,7 +5,6 @@ use serde_json::Value as Json;
 
 use crate::archive::{self, Reason};
 use crate::model::{By, Evidence, Item, ItemState, Model, Reopened, Size, Value};
-use crate::ready::ReadinessEvaluator;
 use crate::schema::{item as field, kind, link, repository, thread};
 use crate::state::{Error, Key, State};
 use crate::write::{
@@ -62,11 +61,10 @@ pub enum Unkept {
 ///
 /// # Errors
 ///
-/// Fails on an invalid key, or when a claim can't be read for an archive's eligibility.
+/// Fails on an invalid key.
 pub fn keeps(
     state: &State,
     model: &Model,
-    readiness: &ReadinessEvaluator<'_>,
     (entity, id, name): (&str, &str, &str),
     by: By<'_>,
 ) -> Result<Vec<Kept>, Error> {
@@ -83,7 +81,7 @@ pub fn keeps(
             let keep = match keep(state, model, (entity, id, name), value) {
                 Keep::Write(changes) => verify(model, (entity, id, name), changes, by),
                 Keep::Archive(item) => {
-                    let reasons = archive::eligibility(readiness, model, &item, by.at)?;
+                    let reasons = archive::eligibility(model, &item, by.at);
                     if reasons.is_empty() {
                         Keep::Archive(item)
                     } else {
