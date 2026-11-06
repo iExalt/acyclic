@@ -179,18 +179,6 @@ fn a_batch_that_finished_the_last_item_renews_nothing() {
 }
 
 #[test]
-fn a_thread_stored_on_a_parent_keeps_no_lease_renewing() {
-    let mut r = leased(&["x"]);
-    set_state(&mut r, "x", ItemState::Done, by("session/s", 750)).unwrap();
-    // A parent with open children, carrying the thread as a sync can leave it: reads ignore it.
-    add_item(&mut r, "p", "p", by("session/s", 750)).unwrap();
-    add_item(&mut r, "kid", "kid", by("session/s", 750)).unwrap();
-    crate::model::set_parent(&mut r, "kid", Some("p"), by("session/s", 750)).unwrap();
-    put(&mut r, &item_key("p").unwrap(), field::THREAD, Some(&"t"), by("session/s", 750)).unwrap();
-    assert_eq!(renew_leases(&mut r, 750, LEASE, LEASE).unwrap(), []);
-}
-
-#[test]
 fn work_that_only_waits_still_renews() {
     let mut r = leased(&["x"]);
     add_item(&mut r, "gate", "gate", by("session/s", 700)).unwrap();

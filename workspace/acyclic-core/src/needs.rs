@@ -245,9 +245,9 @@ impl Entry {
     }
 
     /// Whether the user's devices are told when it first appears. Standing or housekeeping states (a clone with
-    /// writes to push, a clock that ran ahead, a thread that stalled, which a busy agent can seem to, a reference to nothing, a merge that can't be checked), items in no
-    /// thread, which agents leave routinely, and threads with no item, which they leave between writes, stay on the
-    /// list without a notification. With no catch-all arm, a new kind fails to compile until it is placed here.
+    /// writes to push, a clock that ran ahead, a thread that stalled, which a busy agent can seem to, a reference to
+    /// nothing, a merge that can't be checked), items in no thread, which agents leave routinely, and threads with no
+    /// item, which they leave between writes, stay on the list without a notification. With no catch-all arm, a new kind fails to compile until it is placed here.
     #[must_use]
     pub const fn notifies(&self) -> bool {
         match self {
