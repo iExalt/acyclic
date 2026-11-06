@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.1](https://github.com/iExalt/acyclic/compare/v0.7.0...v0.7.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **app:** align Map state icons on the right ([#209](https://github.com/iExalt/acyclic/issues/209)) ([9944ed6](https://github.com/iExalt/acyclic/commit/9944ed64784027b1dd6a63c8325b6f425bf0a876))
+* **app:** anchor epic resize animation and remove content fades ([#215](https://github.com/iExalt/acyclic/issues/215)) ([dc103f9](https://github.com/iExalt/acyclic/commit/dc103f9d23de189a08b62be8a5d3c69797ca681d))
+* **app:** fold completed items in unfinished threads ([#210](https://github.com/iExalt/acyclic/issues/210)) ([c2fba27](https://github.com/iExalt/acyclic/commit/c2fba27b2768ce23b77f5a00c73000d03cecbd7b))
+* **app:** keep connections steady over disconnected Map items ([#207](https://github.com/iExalt/acyclic/issues/207)) ([af1094e](https://github.com/iExalt/acyclic/commit/af1094e3b5b1cbd98b99254510f22b8db0dcdf53))
+* **app:** standardize Map item sizes and truncate long titles ([#211](https://github.com/iExalt/acyclic/issues/211)) ([8b6de40](https://github.com/iExalt/acyclic/commit/8b6de4037d2f9bdddb2b131e405694fa43bf66cf))
+
+
+### Performance Improvements
+
+* build releases without LTO, keeping one codegen unit ([#214](https://github.com/iExalt/acyclic/issues/214)) ([1ed625e](https://github.com/iExalt/acyclic/commit/1ed625e0b0c6f8a19e33186ff1e340a3b5ced8e7))
+
 ## [0.7.0](https://github.com/iExalt/acyclic/compare/v0.6.0...v0.7.0) (2026-11-06)
 
 
