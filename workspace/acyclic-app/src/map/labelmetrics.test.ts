@@ -5,33 +5,32 @@ const fonts = { regular: (text: string) => [...text].length * 8, bold: (text: st
 const normalized = (text: string) => text.replace(/`([^`]+)`/g, "$1").replace(/\s/g, "");
 
 describe("map label metrics", () => {
-  it("keeps an ordinary title at the existing tile size and adds its stage as words", () => {
+  it("keeps an ordinary title at the existing tile size without repeating its stage", () => {
     const measured = metricsOf(
       { title: "Fix the map", kind: "leaf", hidden: 0, stage: "ready", progress: null },
       fonts,
     );
-    expect(measured).toMatchObject({ width: 200, height: 86, lines: ["Fix the map", "Ready"] });
+    expect(measured).toMatchObject({ width: 200, height: 86, lines: ["Fix the map"] });
   });
 
-  it("keeps short, long, multiline and stubbed items the same size, with stage and ellipsis", () => {
+  it("keeps short, long, multiline and stubbed items the same size, with room for titles and ellipsis", () => {
     const leaf = { kind: "leaf", hidden: 0, stage: "ready", progress: null } as const;
     for (const title of [
       "Short",
       "A long title that needs many lines ".repeat(8),
       "supercalifragilisticexpialidocious".repeat(3),
-      "First\nSecond\nThird\nFourth",
+      "First\nSecond\nThird\nFourth\nFifth",
       "🧑🏽‍🚀".repeat(30),
       "가".repeat(50),
     ]) {
       for (const outside of [[], [{ id: "g", title: "Gate", initiative: "Lab" }]]) {
         const measured = metricsOf({ ...leaf, title, outside }, fonts);
         expect(measured).toMatchObject({ width: 200, height: 86 });
-        expect(measured.lines.at(-1)).toBe("Ready");
-        const limit = outside.length ? 1 : 3;
-        expect(measured.lines.length).toBeLessThanOrEqual(limit + 1);
-        if (title !== "Short") expect(measured.lines.at(-2)?.endsWith("…")).toBe(true);
+        const limit = outside.length ? 2 : 4;
+        expect(measured.lines.length).toBeLessThanOrEqual(limit);
+        if (title !== "Short") expect(measured.lines.at(-1)?.endsWith("…")).toBe(true);
         expect(measured.lines.every((line) => fonts.regular(line.trimEnd()) <= measured.textWidth)).toBe(true);
-        const last = measured.lines.at(-2)?.replace(/…$/, "") ?? "";
+        const last = measured.lines.at(-1)?.replace(/…$/, "") ?? "";
         if (title.startsWith("가")) expect(last.length % 2).toBe(0);
         expect(measured.lines.join("")).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u);
       }
@@ -42,7 +41,7 @@ describe("map label metrics", () => {
   it("removes whole graphemes to leave room for the ellipsis", () => {
     const measured = metricsOf(
       {
-        title: "a" + "가".repeat(50),
+        title: `a${"가".repeat(50)}`,
         kind: "leaf",
         hidden: 0,
         stage: "ready",
@@ -51,11 +50,12 @@ describe("map label metrics", () => {
       },
       fonts,
     );
-    expect(measured.lines[0]).toMatch(/^a(?:가)+…$/u);
+    expect(measured.lines[0]).toMatch(/^a(?:가)+$/u);
+    expect(measured.lines[1]).toMatch(/^(?:가)+…$/u);
     expect(fonts.regular(measured.lines[0] ?? "")).toBeLessThanOrEqual(measured.textWidth);
   });
 
-  it("retains box stage, leaf counts and the collapsed hidden count", () => {
+  it("retains leaf counts and the collapsed hidden count without repeating the stage", () => {
     const progress = {
       done: 1,
       leaves: 4,
@@ -71,7 +71,7 @@ describe("map label metrics", () => {
       fonts,
     );
     expect(normalized(measured.lines.join(""))).toContain(normalized("Release (+18)"));
-    expect(measured.lines).toContain("In progress");
+    expect(measured.lines).not.toContain("In progress");
     expect(normalized(measured.lines.join(""))).toContain(normalized("1 done, 1 in progress, 1 ready, 1 waiting"));
     expect(measured.lines.every((line) => fonts.bold(line.trimEnd()) <= measured.textWidth)).toBe(true);
   });
@@ -90,12 +90,12 @@ describe("map label metrics", () => {
       fonts,
     );
     expect(normalized(measured.lines.join(""))).toContain(normalized("A finished thread with a long name"));
-    expect(measured.lines).toContain("Done");
+    expect(measured.lines).not.toContain("Done");
     expect(normalized(measured.lines.join(""))).toContain(normalized("12 done"));
     expect(measured.lines.every((line) => fonts.bold(line.trimEnd()) <= measured.textWidth)).toBe(true);
   });
 
-  it("keeps a short box header and grows it to fit every title and status line", () => {
+  it("keeps a short box header and grows it to fit every title line", () => {
     const short = metricsOf({ title: "Box", kind: "box", hidden: 0, stage: null, progress: null }, fonts);
     const long = metricsOf(
       {
@@ -108,8 +108,8 @@ describe("map label metrics", () => {
       fonts,
     );
     expect(short.header).toBe(52);
-    expect(long.header).toBe(81);
-    expect(long.height).toBe(85);
+    expect(long.header).toBe(65);
+    expect(long.height).toBe(69);
     expect(long.lines.every((line) => fonts.bold(line.trimEnd()) <= long.textWidth)).toBe(true);
   });
 });
