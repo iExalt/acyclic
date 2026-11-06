@@ -118,6 +118,130 @@ describe("hold", () => {
   });
 });
 
+describe("hold, closing a box", () => {
+  // a over b in one column, c beside a, d under c and beside a too, e far on the right, level with a.
+  const was = {
+    children: [box("a", 200, 300), box("b", 200, 100), box("c", 100, 100), box("d", 100, 100), box("e", 100, 100)],
+    layout: {
+      width: 0,
+      height: 0,
+      at: {
+        a: { x: 12, y: 12 },
+        b: { x: 12, y: 336 },
+        c: { x: 236, y: 12 },
+        d: { x: 236, y: 136 },
+        e: { x: 600, y: 12 },
+      },
+    },
+  };
+  const shrunk = (id: string, width: number, height: number, waits = new Map<string, string[]>()) =>
+    hold(
+      was,
+      was.children.map((kid) => (kid.id === id ? box(id, width, height) : kid)),
+      waits,
+    )?.at ?? {};
+
+  it("moves the box under a closed one up into the room it gave up, and leaves the others", () => {
+    // a gives up 200 of height: b, under it, follows to a's new bottom plus the gap.
+    expect(shrunk("a", 200, 100)).toEqual({ ...was.layout.at, b: { x: 12, y: 136 } });
+    // Never by more than it gave up.
+    expect(shrunk("a", 200, 270).b).toEqual({ x: 12, y: 306 });
+    // A sliver, under the gap, is no slide at all.
+    expect(shrunk("a", 200, 280).b).toEqual(was.layout.at.b);
+  });
+
+  it("moves a box beside a closed one left into the width it gave up, not past what stands before it", () => {
+    // c, d and e all stand level with a's old footprint, right of it: each follows a's right edge in, by 100.
+    expect(shrunk("a", 100, 300)).toEqual({
+      ...was.layout.at,
+      c: { x: 136, y: 12 },
+      d: { x: 136, y: 136 },
+      e: { x: 500, y: 12 },
+    });
+    // d, under c, rises when c closes.
+    expect(shrunk("c", 100, 40).d).toEqual({ x: 236, y: 76 });
+  });
+
+  it("keeps a box after what it waits on while it moves up", () => {
+    // b waits on a, which it stood below: it comes up to a's new bottom and no further.
+    expect(shrunk("a", 200, 100, new Map([["b", ["a"]]])).b).toEqual({ x: 12, y: 136 });
+    // b waits on d, which stands beside it and lower: b stays after d, below it or level with it on its right.
+    const late = shrunk("a", 200, 100, new Map([["b", ["d"]]])).b ?? { x: NaN, y: NaN };
+    expect(late.y).toBeGreaterThanOrEqual(136);
+    expect(late.x >= 236 + 100 + 24 || late.y >= 136 + 100 + 24).toBe(true);
+  });
+
+  it("returns to the packing when the box is its packed size again", () => {
+    expect(shrunk("a", 200, 300)).toEqual(was.layout.at);
+  });
+
+  const random = (seed: number) => () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+
+  it("slides only the boxes under or beside what shrank, by no more than it gave up, and never into each other", () => {
+    let slid = 0;
+    for (let seed = 1; seed <= 300; seed++) {
+      const next = random(seed);
+      const size = () => 50 + Math.floor(next() * 400);
+      const kids = Array.from({ length: 4 + Math.floor(next() * 9) }, (_, n) => box(`k${n}`, size(), size()));
+      const waits = new Map(
+        kids.map((kid, n) => [kid.id, kids.filter((_, m) => m < n && next() < 0.2).map((k) => k.id)]),
+      );
+      const packed = pack(kids, waits, 1);
+      const shut = kids[Math.floor(next() * kids.length)] ?? box("none", 0, 0);
+      const now = kids.map((kid) =>
+        kid.id === shut.id ? box(kid.id, Math.ceil(kid.width / 2), Math.ceil(kid.height / 3)) : kid,
+      );
+      const held = hold({ children: kids, layout: packed }, now, waits);
+      if (held === undefined) continue;
+      const at = (layout: typeof packed, id: string) => layout.at[id] ?? { x: NaN, y: NaN };
+      const [from, to] = [at(packed, shut.id), at(held, shut.id)];
+      expect(to, `seed ${seed}: the closed box stays`).toEqual(from);
+      const [gaveW, gaveH] = [shut.width - Math.ceil(shut.width / 2), shut.height - Math.ceil(shut.height / 3)];
+      for (const [n, a] of now.entries())
+        for (const b of now.slice(n + 1))
+          expect(
+            crowd(
+              { ...at(held, a.id), width: a.width, height: a.height },
+              { ...at(held, b.id), width: b.width, height: b.height },
+            ),
+            `seed ${seed}: ${a.id}, ${b.id}`,
+          ).toBe(false);
+      for (const kid of kids) {
+        if (kid.id === shut.id) continue;
+        const [was, is] = [at(packed, kid.id), at(held, kid.id)];
+        const under = was.y >= from.y + shut.height && was.x < from.x + shut.width && from.x < was.x + kid.width;
+        const aside = was.x >= from.x + shut.width && was.y < from.y + shut.height && from.y < was.y + kid.height;
+        if (!under) expect(is.y, `seed ${seed}: ${kid.id} not under`).toBeGreaterThanOrEqual(was.y);
+        if (!aside) expect(is.x, `seed ${seed}: ${kid.id} not beside`).toBeGreaterThanOrEqual(was.x);
+        expect(was.y - is.y, `seed ${seed}: ${kid.id} up`).toBeLessThanOrEqual(gaveH);
+        expect(was.x - is.x, `seed ${seed}: ${kid.id} left`).toBeLessThanOrEqual(gaveW);
+        if (is.x !== was.x || is.y !== was.y) slid++;
+        for (const first of waits.get(kid.id) ?? []) {
+          const [a, b] = [at(packed, first), was];
+          const wasAfter =
+            b.y >= a.y + (kids.find((k) => k.id === first)?.height ?? 0) + 24 ||
+            (b.y >= a.y && b.x >= a.x + (kids.find((k) => k.id === first)?.width ?? 0) + 24);
+          if (!wasAfter) continue;
+          const firstNow = now.find((k) => k.id === first) ?? box(first, 0, 0);
+          const [fa, me] = [at(held, first), is];
+          expect(
+            me.y >= fa.y + firstNow.height + 24 || (me.y >= fa.y && me.x >= fa.x + firstNow.width + 24),
+            `seed ${seed}: ${kid.id} after ${first}`,
+          ).toBe(true);
+        }
+      }
+      // Grown back, every box is where it was packed.
+      expect(hold({ children: kids, layout: packed }, kids, waits)?.at, `seed ${seed}: reopened`).toEqual(
+        packed.at,
+      );
+    }
+    expect(slid).toBeGreaterThan(50);
+  });
+});
+
 describe("hold, over random packings", () => {
   /** A small seeded generator, so a failure replays. */
   const random = (seed: number) => () => {
