@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
 use crate::graph;
-use crate::schema::{RETIRED, item as field, kind, link, repository, set, thread};
+use crate::schema::{RETIRED, RETIRED_SETS, item as field, kind, link, repository, set, thread};
 use crate::state::{Error, Key, Millis, Replica, State};
 
 /// The longest item id: a link's id holds two, and ids are file names.
@@ -320,6 +320,7 @@ impl Model {
             if name == crate::claim::FIELD
                 || name.starts_with(set::REPOSITORY)
                 || RETIRED.contains(&(key.kind.as_str(), name.as_str()))
+                || RETIRED_SETS.iter().any(|prefix| name.starts_with(prefix))
             {
                 continue;
             }

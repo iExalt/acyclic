@@ -39,7 +39,12 @@ pub const RETIRED: &[(&str, &str)] = &[
     (kind::ITEM, "archived"),
     (kind::ITEM, "reopened"),
     (kind::REPOSITORY, repository::INSTALLATION),
+    (kind::ITEM, "gate"),
 ];
+
+/// Prefixes of the sets older versions wrote and no command writes now, on any kind, whose elements lie dormant as
+/// [`RETIRED`] fields do.
+pub const RETIRED_SETS: &[&str] = &["area/", "resource/"];
 
 /// Link fields. A link's id derives from its kind and ends, so two replicas adding one link make one entity.
 pub mod link {

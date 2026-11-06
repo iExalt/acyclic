@@ -217,6 +217,9 @@ fn kinds_and_fields_no_reader_knows_are_skipped() {
         (x.clone(), "repository/r", json!(true), json!(false)),
         (Key::new(kind::THREAD, "t").unwrap(), "repository/r", json!(true), json!(false)),
         (repo.clone(), repository::INSTALLATION, json!("1"), json!("2")),
+        (x.clone(), "gate", json!("review"), json!("ship")),
+        (x.clone(), "area/app", json!(true), json!(false)),
+        (x.clone(), "resource/gpu", json!(true), json!(false)),
     ];
     for (key, name, mine, theirs) in &retired {
         apart(&mut r, key, name, mine, theirs);
