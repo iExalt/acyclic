@@ -10,25 +10,49 @@ describe("map label metrics", () => {
       { title: "Fix the map", kind: "leaf", hidden: 0, stage: "ready", progress: null },
       fonts,
     );
-    expect(measured).toMatchObject({ width: 200, height: 64, lines: ["Fix the map", "Ready"] });
+    expect(measured).toMatchObject({ width: 200, height: 86, lines: ["Fix the map", "Ready"] });
   });
 
-  it("wraps full titles, long unbroken tokens, multiline text and Unicode graphemes without truncating them", () => {
-    const token = "supercalifragilisticexpialidocious".repeat(2);
-    const title = `A long \`title\`\nwith 🧑🏽‍🚀 and ${token}`;
-    const measured = metricsOf({ title, kind: "leaf", hidden: 0, stage: null, progress: null }, fonts);
-    expect(normalized(measured.lines.join(""))).toBe(normalized(title));
-    expect(measured.lines.some((line) => line.includes("🧑🏽‍🚀"))).toBe(true);
-    expect(measured.textWidth).toBe(156);
-    expect(measured.height).toBeGreaterThan(64);
-    expect(measured.height).toBeGreaterThanOrEqual(Math.ceil(measured.lines.length * 16.25 + 20));
-    expect(measured.lines.every((line) => fonts.regular(line.trimEnd()) <= measured.textWidth)).toBe(true);
-    expect(
-      metricsOf(
-        { title: "Run `acyclic up` on the Mac", kind: "leaf", hidden: 0, stage: null, progress: null },
-        fonts,
-      ).lines.join(""),
-    ).toBe("Run acyclic up on the Mac");
+  it("keeps short, long, multiline and stubbed items the same size, with stage and ellipsis", () => {
+    const leaf = { kind: "leaf", hidden: 0, stage: "ready", progress: null } as const;
+    for (const title of [
+      "Short",
+      "A long title that needs many lines ".repeat(8),
+      "supercalifragilisticexpialidocious".repeat(3),
+      "First\nSecond\nThird\nFourth",
+      "🧑🏽‍🚀".repeat(30),
+      "가".repeat(50),
+    ]) {
+      for (const outside of [[], [{ id: "g", title: "Gate", initiative: "Lab" }]]) {
+        const measured = metricsOf({ ...leaf, title, outside }, fonts);
+        expect(measured).toMatchObject({ width: 200, height: 86 });
+        expect(measured.lines.at(-1)).toBe("Ready");
+        const limit = outside.length ? 1 : 3;
+        expect(measured.lines.length).toBeLessThanOrEqual(limit + 1);
+        if (title !== "Short") expect(measured.lines.at(-2)?.endsWith("…")).toBe(true);
+        expect(measured.lines.every((line) => fonts.regular(line.trimEnd()) <= measured.textWidth)).toBe(true);
+        const last = measured.lines.at(-2)?.replace(/…$/, "") ?? "";
+        if (title.startsWith("가")) expect(last.length % 2).toBe(0);
+        expect(measured.lines.join("")).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u);
+      }
+      expect(metricsOf({ ...leaf, title, stage: null }, fonts).height).toBe(86);
+    }
+  });
+
+  it("removes whole graphemes to leave room for the ellipsis", () => {
+    const measured = metricsOf(
+      {
+        title: "a" + "가".repeat(50),
+        kind: "leaf",
+        hidden: 0,
+        stage: "ready",
+        progress: null,
+        outside: [{ id: "g", title: "Gate", initiative: "Lab" }],
+      },
+      fonts,
+    );
+    expect(measured.lines[0]).toMatch(/^a(?:가)+…$/u);
+    expect(fonts.regular(measured.lines[0] ?? "")).toBeLessThanOrEqual(measured.textWidth);
   });
 
   it("retains box stage, leaf counts and the collapsed hidden count", () => {
@@ -98,7 +122,7 @@ describe("a stub for waits outside the plan", () => {
     expect(metricsOf(leaf, fonts).stub).toBeNull();
     expect(metricsOf(leaf, fonts).reserve).toBe(0);
     const stubbed = metricsOf({ ...leaf, outside: [gate] }, fonts);
-    expect(stubbed).toMatchObject({ reserve: STUB_ROOM, height: 64 + STUB_ROOM });
+    expect(stubbed).toMatchObject({ reserve: STUB_ROOM, height: 86 });
     expect(metricsOf({ ...leaf, kind: "collapsed", outside: [gate] }, fonts).reserve).toBe(STUB_ROOM);
     // An open box has no place for one in its title strip.
     expect(metricsOf({ ...leaf, kind: "box", outside: [gate] }, fonts)).toMatchObject({ reserve: 0, stub: null });

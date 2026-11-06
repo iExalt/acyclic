@@ -18,7 +18,7 @@ export interface Selection {
 }
 export interface SceneNode {
   id: string;
-  /** Its full label, wrapped at grapheme boundaries to fit `textWidth`. */
+  /** Its displayed label, with item titles clamped and wrapped to fit `textWidth`. */
   label: string;
   textWidth: number;
   header: number;
