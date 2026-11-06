@@ -60,6 +60,23 @@ export function threadInitiatives(model: Model): Map<string, Set<string | null>>
   return out;
 }
 
+/**
+ * What the Map and the Threads view draw: the items under the initiative in context, whose epics are the Map's roots.
+ * With no initiative in context, which is only so when there are none, every item.
+ */
+export function inContext<T extends { initiative: string | null }>(items: readonly T[], context: string | null): T[] {
+  return context === null ? [...items] : items.filter((item) => item.initiative === context);
+}
+
+/** The threads with a task in the initiative in context, in the order given; every thread with none in context. */
+export function threadsIn<T extends { id: string }>(
+  threads: readonly T[],
+  ofThread: ReadonlyMap<string, ReadonlySet<string | null>>,
+  context: string | null,
+): T[] {
+  return context === null ? [...threads] : threads.filter((one) => ofThread.get(one.id)?.has(context) === true);
+}
+
 /** What a list needs to put its rows under initiatives. */
 export interface ListScope {
   /** Every initiative's id in the switcher's order, and the one in context, which goes first. */

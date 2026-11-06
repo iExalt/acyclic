@@ -27,6 +27,9 @@ import {
 const world: World = {
   has: (id) => id !== "d",
   threadOf: (id) => (id === "a" || id === "b" ? "t" : null),
+  initiativeOf: () => null,
+  initiativesOf: () => [],
+  contextOf: (chosen) => chosen,
   wide: true,
   dirty: false,
 };
@@ -703,7 +706,7 @@ describe("Back and Forward", () => {
 });
 
 describe("the initiative in context", () => {
-  it("is chosen by the switcher and kept through every other move, which scopes nothing else", () => {
+  it("is chosen by the switcher and kept through every other move that stays inside it", () => {
     const chosen = go(onMap, { kind: "initiative", id: "i2" });
     expect(chosen).toEqual({ place: at({ view: "map", initiative: "i2" }), requests: {} });
     for (const intent of [
@@ -714,6 +717,69 @@ describe("the initiative in context", () => {
     ] satisfies Intent[])
       expect(go(chosen.place, intent).place.initiative).toBe("i2");
     expect(go(chosen.place, { kind: "initiative", id: null }).place.initiative).toBeNull();
+  });
+
+  // Items a and b are under i1, item e and thread u under i2, thread t under both; the first initiative is i1.
+  const homes: Partial<World> = {
+    initiativeOf: (id) => ({ a: "i1", b: "i1", c: "i1", e: "i2" })[id] ?? null,
+    initiativesOf: (thread) => (thread === "t" ? ["i1", "i2"] : thread === "u" ? ["i2"] : []),
+    contextOf: (chosen) => chosen ?? "i1",
+  };
+
+  it("follows an item opened from another initiative, from every way of opening one", () => {
+    const here = at({ view: "map", initiative: "i1" });
+    const lands = (intent: Intent, from: Place = here) => go(from, intent, homes).place.initiative;
+    expect(lands({ kind: "select", id: "e", pin: null })).toBe("i2");
+    expect(lands({ kind: "follow", id: "e", pin: null })).toBe("i2");
+    expect(lands({ kind: "link", wanted: parse("?item=e") })).toBe("i2");
+    expect(lands({ kind: "restore", place: at({ view: "map", item: "e" }) })).toBe("i2");
+    expect(lands({ kind: "wrote", select: "e", pin: null })).toBe("i2");
+    // Nothing chosen yet: the first initiative is in context, so an item of another one still switches.
+    expect(lands({ kind: "select", id: "e", pin: null }, overview)).toBe("i2");
+  });
+
+  it("stays put moving between items of one initiative, or to one with none known", () => {
+    const here = at({ view: "map", initiative: "i1", item: "a" });
+    expect(go(here, { kind: "select", id: "b", pin: null }, homes).place.initiative).toBe("i1");
+    expect(go(here, { kind: "tap", id: "c" }, homes).place.initiative).toBe("i1");
+    // The first initiative is in context when none was chosen, and the item is in it: nothing to record.
+    expect(go(overview, { kind: "select", id: "a", pin: null }, homes).place.initiative).toBeNull();
+    expect(go(here, { kind: "select", id: "d", pin: null }, homes).place.initiative).toBe("i1");
+  });
+
+  it("follows a thread with no task in the initiative in context, and not one with a task there", () => {
+    const here = at({ view: "map", initiative: "i1" });
+    expect(go(here, { kind: "thread", id: "u" }, homes).place.initiative).toBe("i2");
+    expect(go(here, { kind: "thread", id: "t" }, homes).place.initiative).toBe("i1");
+  });
+
+  it("closes what is open that isn't in the initiative chosen, and keeps what is", () => {
+    const open = at({ view: "map", initiative: "i1", item: "a", thread: "t" });
+    expect(go(open, { kind: "initiative", id: "i2" }, homes).place).toMatchObject({
+      initiative: "i2",
+      item: null,
+      thread: "t",
+    });
+    expect(go(open, { kind: "initiative", id: "i1" }, homes).place).toMatchObject({ item: "a", thread: "t" });
+    expect(
+      go(at({ initiative: "i1", item: "e", thread: "t" }), { kind: "initiative", id: "i1" }, homes).place,
+    ).toMatchObject({
+      item: null,
+      thread: "t",
+    });
+  });
+
+  it("leaves a form holding typing alone: choosing another initiative that would close the item says so instead", () => {
+    const open = at({ view: "map", initiative: "i1", item: "a" });
+    expect(go(open, { kind: "initiative", id: "i2" }, { ...homes, dirty: true })).toEqual({
+      place: open,
+      requests: { unsaved: true },
+    });
+    // Nothing closes, so the form stays and the choice goes through.
+    expect(go(open, { kind: "initiative", id: "i1" }, { ...homes, dirty: true }).place.initiative).toBe("i1");
+    expect(
+      go(at({ initiative: "i1" }), { kind: "initiative", id: "i2" }, { ...homes, dirty: true }).place.initiative,
+    ).toBe("i2");
   });
 
   it("survives a reload: it is in the address, read back, and an address without it leaves the one in context", () => {

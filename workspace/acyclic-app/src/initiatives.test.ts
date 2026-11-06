@@ -5,6 +5,7 @@ import {
   fitsFirstView,
   groupRows,
   groupTitle,
+  inContext,
   needInitiatives,
   newParent,
   rowLabel,
@@ -12,13 +13,15 @@ import {
   startProject,
   switcherRows,
   threadInitiatives,
+  threadsIn,
 } from "./initiatives";
 import { item } from "./map/fixture";
 import { buildModel } from "./map/model";
 import type { Need } from "./needs";
+import { outlineOf } from "./outline";
 
 // Two initiatives, "big" with three open leaves, a done one and a canceled one, "small" with one, and a project in none.
-const model = buildModel([
+const plan = [
   item("e1", "big", [], { initiative: "big" }),
   item("a", "e1", [], { initiative: "big", thread: "t1", stage: "ready" }),
   item("b", "e1", [], { initiative: "big", thread: "t1", stage: "in-progress" }),
@@ -29,7 +32,8 @@ const model = buildModel([
   item("s", "e2", [], { initiative: "small", thread: "t2", stage: "ready" }),
   item("lost", null),
   item("l", "lost", [], { thread: "t2", stage: "ready" }),
-]);
+];
+const model = buildModel(plan);
 const initiatives = [
   { id: "small", title: "Small", items: 1 },
   { id: "big", title: "Big", items: 1 },
@@ -254,5 +258,45 @@ describe("what a thread and an entry are in", () => {
     expect(needInitiatives({ kind: "x" }, model, of)).toEqual(new Set([null]));
     expect(needInitiatives({ kind: "x", thread: { id: "empty" } }, model, of)).toEqual(new Set([null]));
     expect(needInitiatives({ kind: "x", item: { id: "ghost" } }, null, of)).toEqual(new Set([null]));
+  });
+});
+
+describe("what the Map and the Threads view draw", () => {
+  const items = plan;
+
+  it("draws the epics of the initiative in context as the roots, and nothing of the others", () => {
+    const big = buildModel(inContext(items, "big"));
+    expect(big.roots).toEqual(["e1"]);
+    expect([...big.items.keys()].sort()).toEqual(["a", "b", "c", "d", "e1", "x"]);
+    const small = buildModel(inContext(items, "small"));
+    expect(small.roots).toEqual(["e2"]);
+    expect([...small.items.keys()].sort()).toEqual(["e2", "s"]);
+  });
+
+  it("draws every item with no initiative in context, and items in none only then", () => {
+    expect(inContext(items, null)).toHaveLength(items.length);
+    expect(inContext(items, "big").some((one) => one.id === "lost")).toBe(false);
+  });
+
+  it("keeps the threads with a task in the initiative, one spanning two in each", () => {
+    const of = threadInitiatives(model);
+    const threads = ["t1", "t2", "empty"].map((id) => ({ id }));
+    expect(threadsIn(threads, of, "big").map((one) => one.id)).toEqual(["t1"]);
+    // t2 has a task in "small" and one in no initiative.
+    expect(threadsIn(threads, of, "small").map((one) => one.id)).toEqual(["t2"]);
+    const spanning = new Map<string, Set<string | null>>([["t", new Set(["big", "small"])]]);
+    expect(threadsIn([{ id: "t" }], spanning, "big")).toHaveLength(1);
+    expect(threadsIn([{ id: "t" }], spanning, "small")).toHaveLength(1);
+    expect(threadsIn(threads, of, null)).toHaveLength(3);
+  });
+
+  it("scopes the outline to the epics of the initiative, and the threads at work in them", () => {
+    const small = buildModel(inContext(items, "small"));
+    expect(outlineOf(small, ["t2"])).toEqual({
+      projects: [{ id: "e2", title: "E2", initiative: "small", threads: [{ id: "t2", also: [] }] }],
+      others: [],
+    });
+    const big = buildModel(inContext(items, "big"));
+    expect(outlineOf(big, ["t1"]).projects.map((one) => one.id)).toEqual(["e1"]);
   });
 });

@@ -21,7 +21,15 @@ const places: Place[] = [
   stored({ ...START, view: "map", thread: "thread-a", item: "item-c" }),
   stored({ ...START, view: "map", thread: "thread-b" }),
 ];
-const phone = { has: () => true, threadOf: () => null, dirty: false, wide: false };
+const phone = {
+  has: () => true,
+  threadOf: () => null,
+  initiativeOf: () => null,
+  initiativesOf: () => [],
+  contextOf: (chosen: string | null) => chosen,
+  dirty: false,
+  wide: false,
+};
 const desktop = { ...phone, wide: true };
 const directItemA = stored({ ...START, view: "map", item: "item-a", cameFrom: null });
 const portalItemA = stored({ ...directItemA, cameFrom: { view: "overview", by: "item" } });

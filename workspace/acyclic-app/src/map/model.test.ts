@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { item } from "./fixture";
-import { buildModel, collapsedWith, defaultView, impliedWithin, sourceKey, topOf, visible } from "./model";
+import {
+  buildModel,
+  collapsedWith,
+  defaultView,
+  finishedEpic,
+  impliedWithin,
+  sourceKey,
+  topOf,
+  visible,
+} from "./model";
 
 // garden
 //   beds: dig, edge
@@ -155,5 +164,41 @@ describe("topOf", () => {
   it("finds the top-level node a node is drawn in", () => {
     const view = visible(model, { collapsed: new Set() });
     expect([topOf(view, "sow"), topOf(view, "plant"), topOf(view, "tools")]).toEqual(["garden", "garden", "tools"]);
+  });
+});
+
+describe("finished epics", () => {
+  const counts = (over: object) => ({
+    progress: {
+      counts: { done: 0, leaves: 0, in_progress: 0, ready: 0, stalled: 0, waiting: 0, parked: 0, canceled: 0, ...over },
+    },
+  });
+  // Epics at the top, as the Map holds an initiative's: finished with a canceled leaf, finished all canceled, one
+  // with a ready leaf, and one box deeper in the first.
+  const epics = buildModel([
+    item("all", null, [], counts({ done: 2, leaves: 2, canceled: 1 })),
+    item("l1", "all"),
+    item("l2", "all"),
+    item("sub", "all", [], counts({ done: 1, leaves: 1 })),
+    item("l3", "sub"),
+    item("gone", null, [], counts({ canceled: 2 })),
+    item("g1", "gone"),
+    item("open", null, [], counts({ done: 1, leaves: 2, ready: 1 })),
+    item("o1", "open"),
+    item("task"),
+  ]);
+
+  it("is a box at the top with leaves, each done or canceled, and nothing else", () => {
+    expect(["all", "gone", "open", "task", "sub"].filter((id) => finishedEpic(epics, id))).toEqual(["all", "gone"]);
+  });
+
+  it("opens folded at once, and unfolds when the user opens it", () => {
+    expect([...defaultView(epics).collapsed].sort()).toEqual(["all", "gone", "sub"]);
+    const folded = visible(epics, defaultView(epics));
+    expect(folded.nodes.find((node) => node.id === "all")).toMatchObject({ kind: "collapsed", hidden: 4 });
+    expect(folded.nodes.find((node) => node.id === "open")?.kind).toBe("box");
+    const opened = collapsedWith(epics, new Map([["all", false]]));
+    expect(opened.has("all")).toBe(false);
+    expect(opened.has("gone")).toBe(true);
   });
 });
