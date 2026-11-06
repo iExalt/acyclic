@@ -23,7 +23,7 @@ export function item(id: string, parent: string | null = null, waitsFor: string[
     title: id.toUpperCase(),
     parent,
     thread: null,
-    state: "backlog",
+    state: "open",
     notes: null,
     links: { waits_for: waitsFor, waited_on_by: [] },
     conflicts: {},

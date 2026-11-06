@@ -313,7 +313,7 @@ impl<'a> CommandContext<'a> {
                     // The evidence it holds now, so a caller sees what was recorded.
                     let evidence =
                         view::evidence(&outcome.after, &outcome.after.items[&id].evidence);
-                    Ok(json!({"item": id, "state": ItemState::Done, "evidence": evidence}))
+                    Ok(json!({"item": id, "state": ItemState::Done.word(), "evidence": evidence}))
                 })
             },
             Command::Thread(ThreadCommand::Release { thread }) => self.write(|replica, by| {

@@ -43,14 +43,12 @@ describe("itemEdit", () => {
 });
 
 describe("stateHint", () => {
-  it("distinguishes backlog from a leaf's status, and says nothing for a parent or other states", () => {
-    expect(stateHint({ state: "backlog", thread: "thread-1" }, true)).toBe(
-      "Backlog is work still to do. Status also reflects its thread, waits and active claims",
+  it("distinguishes open from a leaf's status, and says nothing for a parent or other states", () => {
+    expect(stateHint({ state: "open", thread: "thread-1" }, true)).toBe(
+      "Open is work still to do. Status also reflects its thread, waits and active claims",
     );
-    expect(stateHint({ state: "backlog", thread: "" }, true)).toBe(
-      stateHint({ state: "backlog", thread: "thread-1" }, true),
-    );
-    expect(stateHint({ state: "backlog", thread: "thread-1" }, false)).toBeNull();
+    expect(stateHint({ state: "open", thread: "" }, true)).toBe(stateHint({ state: "open", thread: "thread-1" }, true));
+    expect(stateHint({ state: "open", thread: "thread-1" }, false)).toBeNull();
     expect(stateHint({ state: "parked", thread: "thread-1" }, true)).toBeNull();
   });
 });

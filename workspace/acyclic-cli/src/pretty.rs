@@ -374,7 +374,7 @@ fn empty(value: &Json) -> bool {
     }
 }
 
-/// A readiness, an item's or a thread's, as a phrase: `blocked by a (not done)`, `claimed by session/s`, and so on.
+/// A readiness, an item's or a thread's, as a phrase: `waiting for a (not done)`, `claimed by session/s`, and so on.
 /// `None` for a status this build doesn't know, which then prints field by field.
 fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
     let text = |key: &str| fields.get(key).map(compact).unwrap_or_default();
@@ -384,7 +384,7 @@ fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
         _ => String::new(),
     };
     let phrase = match fields.get("status")?.as_str()? {
-        "blocked" => {
+        "waiting" => {
             let waiting = fields.get("waiting")?.as_object()?;
             let each = waiting.iter().map(|(id, wait)| {
                 let why = match wait["why"].as_str() {
@@ -393,7 +393,7 @@ fn readiness(fields: &serde_json::Map<String, Json>) -> Option<String> {
                 };
                 format!("{id} ({why})")
             });
-            format!("blocked by {}", each.collect::<Vec<_>>().join(", "))
+            format!("waiting for {}", each.collect::<Vec<_>>().join(", "))
         },
         "ready" if ready.is_empty() => "ready".to_owned(),
         "ready" => format!("ready: {}", compact(&fields["items"])),

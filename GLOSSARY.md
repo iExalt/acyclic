@@ -108,16 +108,19 @@ columns. A thread is finished when every leaf it has is done.
 _Avoid_: pile, group, archive
 
 **State**:
-What is set by hand on an item: `backlog`, `parked` or `done`. An unset state reads as `backlog`. State is stored;
+What is set by hand on an item: `open`, `parked` or `done`. An unset state reads as `open`. State is stored;
 readiness and stage are computed on read. A parent's progress also derives from its leaves and may be in progress.
-The stored value `backlog` is not the app's Up next list.
+Stored data keeps the older value `backlog` for open, so replicas of older versions keep reading it; commands and
+imports still take `backlog` as open, and nothing shows it.
+_Avoid_: backlog (for open)
 
 **Stage**:
-Where an item's work stands, said one way everywhere with its icon: in progress, done, ready, blocked, parked, or
-needs a thread. A parent's comes from its leaves: done once every leaf is; before that, in progress once any work below
-has started and some of what is left isn't parked; otherwise ready, blocked, parked or needs a thread by its leaves.
-The code word for needs a thread is `unthreaded`; the app shows a stage as an item's Status.
-_Avoid_: phase, step
+Where an item's work stands, said one way everywhere with its icon: in progress, done, ready, waiting, parked, or
+needs a thread. Waiting covers what an item waits for, a cycle it is on and a conflict in its state or thread. A
+parent's comes from its leaves: done once every leaf is; before that, in progress once any work below has started and
+some of what is left isn't parked; otherwise ready, waiting, parked or needs a thread by its leaves. The code word for
+needs a thread is `unthreaded`; the app shows a stage as an item's Status.
+_Avoid_: phase, step, blocked (for waiting)
 
 **Status**:
 What a panel says of where something stands: an item's stage.

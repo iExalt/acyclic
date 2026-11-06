@@ -281,7 +281,7 @@ impl Generator {
                     item.state = Some(State::Done);
                 }
             } else if self.depth[index] >= 3 {
-                // A share between 0.04 and 0.05 once drew a stored in-progress state; it stays in the backlog.
+                // A share between 0.04 and 0.05 once drew a stored in-progress state; it stays open.
                 if self.rng.unit() < 0.04 {
                     item.state = Some(State::Parked);
                 }

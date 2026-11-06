@@ -63,7 +63,7 @@ export const BOX_TEXT_LEFT = TITLE - 4 + ICON + 6;
 
 /**
  * A box's marks: its chevron at the left of its title strip, then the icon of where its work stands as a whole, so a
- * done box is told from one in progress or blocked at a glance, leading its title as a status leads a project's name.
+ * done box is told from one in progress or waiting at a glance, leading its title as a status leads a project's name.
  * Drawn over the strip, or a collapsed box's whole height.
  */
 export function boxMarkSvg(

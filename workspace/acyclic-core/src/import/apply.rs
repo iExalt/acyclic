@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::{Value as Json, json};
 
 use super::{Import, KeyKind, ValidationError, owner_name};
-use crate::model::{By, Evidence, Model, WriteError};
+use crate::model::{By, Evidence, Model, WriteError, shown_state};
 use crate::place::Inherited;
 use crate::schema::kind;
 use crate::state::{Error, Replica};
@@ -291,7 +291,7 @@ fn changes(doc: &Import, before: &Model) -> ChangeSet {
 }
 
 /// An item's fields as the document gives them. One it leaves out keeps what it holds, finished work included; the
-/// judge starts a new item in the backlog.
+/// judge starts a new item open.
 fn item_fields(item: &super::Item) -> Vec<Assign> {
     let id = &item.id;
     let field = |assign| Assign::Item(id.clone(), assign);
@@ -478,7 +478,11 @@ fn report(before: &Model, outcome: &Outcome) -> Report {
                 let entity = at.record.kind();
                 let n = row(&mut report, entity, at.record.id());
                 let fields = &mut report.changes[n].fields;
-                let edit = Edit { from: held(before, &at), to: assign.value() };
+                let mut edit = Edit { from: held(before, &at), to: assign.value() };
+                if at.field == FieldName::State {
+                    // As reads show a state: open, not the `backlog` it is stored as.
+                    edit = Edit { from: shown_state(&edit.from), to: shown_state(&edit.to) };
+                }
                 fields.insert(at.field.name().replace('-', "_"), edit);
             },
             Written::Place(_) => {},

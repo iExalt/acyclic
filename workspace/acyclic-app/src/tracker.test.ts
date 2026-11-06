@@ -65,7 +65,7 @@ function server(titles: Record<string, string> = { a: "A" }) {
           title,
           parent: null,
           thread: null,
-          state: "backlog",
+          state: "open",
           notes: null,
           links: { waits_for: [], waited_on_by: [] },
         })),

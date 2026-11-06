@@ -4,11 +4,11 @@
 import type { Command, Item } from "./api";
 
 /** The states a command may set; `done` is set by `acyclic item done`, with evidence. */
-export const STATES = ["backlog", "parked"] as const;
-/** Explain stored backlog separately from the status computed for a leaf. */
+export const STATES = ["open", "parked"] as const;
+/** Explain an open state separately from the status computed for a leaf. */
 export function stateHint(draft: Pick<ItemDraft, "state" | "thread">, isLeaf: boolean): string | null {
-  if (!isLeaf || draft.state !== "backlog") return null;
-  return "Backlog is work still to do. Status also reflects its thread, waits and active claims";
+  if (!isLeaf || draft.state !== "open") return null;
+  return "Open is work still to do. Status also reflects its thread, waits and active claims";
 }
 
 /** The item's fields the editor changes; an empty string is a clear. */

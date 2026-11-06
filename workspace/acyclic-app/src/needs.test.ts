@@ -75,6 +75,12 @@ describe("needView", () => {
     expect(state.actions.map((one) => one.label)).toEqual(["Use parked"]);
     expect(state.note).toMatch(/done: Keep done in a terminal: run acyclic item done/);
     expect(isCollapsible(state)).toBe(false);
+    // A state stored as backlog reads, and is kept, as open.
+    const open = conflicts.find((need) => need.field === "state" && need !== field("state"));
+    expect(open === undefined ? [] : needView(open, none).actions.map((one) => one.label)).toEqual([
+      "Use open",
+      "Use parked",
+    ]);
     // Named, and its values too where they are ids, while the command keeps the id.
     const parent = field("parent");
     const titles = (id: string) => (id === parent.id ? "First" : "Parent");

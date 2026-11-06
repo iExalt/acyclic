@@ -32,7 +32,7 @@ pub enum Readiness {
     /// Ready to work on.
     Ready,
     /// Waiting on waits-for targets, by item id.
-    Blocked {
+    Waiting {
         /// What each unmet dependency waits for.
         #[allow(
             clippy::zero_sized_map_values,
@@ -156,7 +156,7 @@ pub enum Stage {
     /// Ready to start.
     Ready,
     /// Waiting on something: a dependency, a cycle or a conflict.
-    Blocked,
+    Waiting,
     /// Set aside on purpose, or under a part that is.
     Parked,
     /// In no thread, so never ready.
@@ -170,7 +170,7 @@ pub struct Stages {
     pub done: usize,
     pub in_progress: usize,
     pub ready: usize,
-    pub blocked: usize,
+    pub waiting: usize,
     pub parked: usize,
     pub unthreaded: usize,
 }
@@ -181,7 +181,7 @@ impl Stages {
             Stage::Done => &mut self.done,
             Stage::InProgress => &mut self.in_progress,
             Stage::Ready => &mut self.ready,
-            Stage::Blocked => &mut self.blocked,
+            Stage::Waiting => &mut self.waiting,
             Stage::Parked => &mut self.parked,
             Stage::Unthreaded => &mut self.unthreaded,
         };
@@ -190,7 +190,7 @@ impl Stages {
 
     /// The stage of a parent with these leaves, `claimed` when a live claim holds the thread of an open leaf under it:
     /// done once every leaf is; before that, in progress once any work
-    /// below has started and some of what is left isn't parked; otherwise ready, blocked, parked or needs a thread by
+    /// below has started and some of what is left isn't parked; otherwise ready, waiting, parked or needs a thread by
     /// its leaves, in that order. `None` with no leaf to count.
     #[must_use]
     pub fn rolled_up(&self, claimed: bool) -> Option<Stage> {
@@ -201,13 +201,13 @@ impl Stages {
         if finished == self.total() {
             return Some(Stage::Done);
         }
-        let open = self.in_progress + self.ready + self.blocked + self.unthreaded;
+        let open = self.in_progress + self.ready + self.waiting + self.unthreaded;
         if open > 0 && (self.in_progress > 0 || finished > 0 || claimed) {
             return Some(Stage::InProgress);
         }
         [
             (self.ready, Stage::Ready),
-            (self.blocked, Stage::Blocked),
+            (self.waiting, Stage::Waiting),
             (self.parked, Stage::Parked),
             (self.unthreaded, Stage::Unthreaded),
         ]
@@ -236,7 +236,7 @@ impl Stages {
     /// The leaves counted, every stage together.
     #[must_use]
     pub fn total(&self) -> usize {
-        self.done + self.in_progress + self.ready + self.blocked + self.parked + self.unthreaded
+        self.done + self.in_progress + self.ready + self.waiting + self.parked + self.unthreaded
     }
 }
 
@@ -333,7 +333,7 @@ impl<'a> ReadinessEvaluator<'a> {
         }
         let waiting = self.waiting(id);
         if !waiting.is_empty() {
-            return Some(Readiness::Blocked { waiting });
+            return Some(Readiness::Waiting { waiting });
         }
         let threaded =
             item.thread.one().is_some_and(|thread| self.model.threads.contains_key(thread));
@@ -440,8 +440,8 @@ impl<'a> ReadinessEvaluator<'a> {
                 Readiness::Claimed { .. } | Readiness::Contested { .. } => Some(Stage::InProgress),
                 Readiness::Ready => Some(Stage::Ready),
                 Readiness::Unthreaded => Some(Stage::Unthreaded),
-                Readiness::Blocked { .. } | Readiness::InCycle | Readiness::Conflicted { .. } => {
-                    Some(Stage::Blocked)
+                Readiness::Waiting { .. } | Readiness::InCycle | Readiness::Conflicted { .. } => {
+                    Some(Stage::Waiting)
                 },
             })
         };
@@ -449,8 +449,8 @@ impl<'a> ReadinessEvaluator<'a> {
         Ok(stage)
     }
 
-    /// A parent's progress as it reads now, with its leaves by stage. It reads in progress, rather than backlog, once
-    /// a leaf under it is, or while a live claim holds the thread of any open leaf under it, even one still blocked.
+    /// A parent's progress as it reads now, with its leaves by stage. It reads in progress, rather than open, once
+    /// a leaf under it is, or while a live claim holds the thread of any open leaf under it, even one still waiting.
     /// A claim names a thread, not an item, and expires, so this is how the parent reads now; nothing is waiting on
     /// it. Under a part parked by hand, this one included, open leaves count as parked and don't make it read in
     /// progress.
@@ -489,7 +489,7 @@ impl<'a> ReadinessEvaluator<'a> {
             }
             let Some(item) = self.model.items.get(child) else { continue };
             if self.model.children(child).is_empty() {
-                let stage = self.stage(child)?.unwrap_or(Stage::Blocked);
+                let stage = self.stage(child)?.unwrap_or(Stage::Waiting);
                 let open = stage != Stage::Done;
                 stages.add(if parked && open { Stage::Parked } else { stage }, 1);
             } else {

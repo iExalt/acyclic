@@ -132,7 +132,7 @@ describe("a write drawn before the server answers", () => {
   it("draws an added item where it goes, once, and says when the plan holds it", () => {
     const add = { kind: "add" as const, item: { id: "pond", title: "Pond", parent: "garden", thread: "t" } };
     const drawn = withPending(items, add);
-    expect(drawn.at(-1)).toMatchObject({ id: "pond", title: "Pond", parent: "garden", thread: "t", state: "backlog" });
+    expect(drawn.at(-1)).toMatchObject({ id: "pond", title: "Pond", parent: "garden", thread: "t", state: "open" });
     expect(landed(add, items)).toBe(false);
     // Read back from the server, it is drawn once, as the server has it.
     const read = [...items, item("pond", "garden")];

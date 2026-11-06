@@ -8,7 +8,8 @@ export const STAGE_ICONS: Record<Stage, string> = {
   done: '<path d="M3 8.5l3.2 3.2L13 5"/>',
   "in-progress": '<circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 0 0 12z" fill="currentColor"/>',
   ready: '<circle cx="8" cy="8" r="6"/>',
-  blocked: '<circle cx="8" cy="8" r="6"/><path d="M4.5 8h7"/>',
+  // A clock: it waits for something, rather than being barred.
+  waiting: '<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8h2.8"/>',
   parked: '<path d="M6 3.5v9M10 3.5v9"/>',
   // The dashed ring an item with no thread carries where its badge would be: one mark for one fact everywhere.
   unthreaded: '<circle cx="8" cy="8" r="6" stroke-dasharray="3 2.4"/>',
@@ -19,7 +20,7 @@ export const STAGE_WORDS: Record<Stage, string> = {
   done: "Done",
   "in-progress": "In progress",
   ready: "Ready",
-  blocked: "Blocked",
+  waiting: "Waiting",
   parked: "Parked",
   // A status, and what settles it: an item in no thread is never ready.
   unthreaded: "Needs a thread",
@@ -32,7 +33,7 @@ export function stageCountWords(stage: Stage, count: number): string {
 }
 
 /** The stages whose work is finished or set aside, drawn quieter. */
-export const QUIET: ReadonlySet<Stage> = new Set(["done", "blocked", "parked", "unthreaded"]);
+export const QUIET: ReadonlySet<Stage> = new Set(["done", "waiting", "parked", "unthreaded"]);
 
 /** A parent's leaves by stage, in the order work moves through them, leaving out stages with none. */
 export function stageCounts(counts: Counts): { stage: Stage; count: number }[] {
@@ -40,7 +41,7 @@ export function stageCounts(counts: Counts): { stage: Stage; count: number }[] {
     ["done", counts.done],
     ["in-progress", counts.in_progress],
     ["ready", counts.ready],
-    ["blocked", counts.blocked],
+    ["waiting", counts.waiting],
     ["parked", counts.parked],
     ["unthreaded", counts.unthreaded],
   ];

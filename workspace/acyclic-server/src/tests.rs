@@ -398,7 +398,7 @@ fn app_state_undo_guard_refuses_a_new_started_waiter_without_mutating_the_tracke
     };
     let before = snapshot();
     let stale = json!({
-        "command": {"item": {"edit": {"item": done, "state": "backlog"}}},
+        "command": {"item": {"edit": {"item": done, "state": "open"}}},
         "expect": [
             {"kind": "item-field", "item": done, "field": "state", "value": "done"},
             {"kind": "waiters-started-at-most", "item": done, "baselines": []}
@@ -413,7 +413,7 @@ fn app_state_undo_guard_refuses_a_new_started_waiter_without_mutating_the_tracke
     );
 
     let malformed = json!({
-        "command": {"item": {"edit": {"item": done, "state": "backlog"}}},
+        "command": {"item": {"edit": {"item": done, "state": "open"}}},
         "expect": [{"kind": "waiters-started-at-most", "item": done, "baselines": [
             {"item": waiter, "count": 0}, {"item": waiter, "count": 1}
         ]}]

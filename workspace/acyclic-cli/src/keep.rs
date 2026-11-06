@@ -147,7 +147,7 @@ fn item_edit(id: &str, assign: &ItemAssign) -> Command {
     };
     let flag = match assign {
         ItemAssign::Title(title) => ("title", Flag::Text(title.clone())),
-        ItemAssign::State(state) => ("state", Flag::Text(word(state))),
+        ItemAssign::State(state) => ("state", Flag::Text(state.word().to_owned())),
         ItemAssign::Notes(notes) => set("notes", notes),
         ItemAssign::Parent(parent) => set("parent", parent),
         ItemAssign::Thread(thread) => set("thread", thread),
@@ -168,11 +168,6 @@ fn thread_edit(id: &str, assign: &ThreadAssign) -> Command {
         ThreadAssign::Brief(None) => ("no-brief", Flag::On),
     };
     Command { words: ["thread", "edit"], subject: ("thread", id.to_owned()), flags: vec![flag] }
-}
-
-/// A value as the command line spells it, which is how it serializes.
-fn word<T: serde::Serialize>(value: &T) -> String {
-    serde_json::to_value(value).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
 }
 
 const fn clear(flag: &str) -> &'static str {

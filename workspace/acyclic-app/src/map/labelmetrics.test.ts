@@ -37,7 +37,7 @@ describe("map label metrics", () => {
       leaves: 4,
       in_progress: 1,
       ready: 1,
-      blocked: 1,
+      waiting: 1,
       parked: 0,
       unthreaded: 0,
     };
@@ -47,7 +47,7 @@ describe("map label metrics", () => {
     );
     expect(normalized(measured.lines.join(""))).toContain(normalized("Release (+18)"));
     expect(measured.lines).toContain("In progress");
-    expect(normalized(measured.lines.join(""))).toContain(normalized("1 done, 1 in progress, 1 ready, 1 blocked"));
+    expect(normalized(measured.lines.join(""))).toContain(normalized("1 done, 1 in progress, 1 ready, 1 waiting"));
     expect(measured.lines.every((line) => fonts.bold(line.trimEnd()) <= measured.textWidth)).toBe(true);
   });
 
@@ -86,7 +86,7 @@ describe("map label metrics", () => {
         title: "A box title that needs several lines",
         kind: "box",
         hidden: 0,
-        stage: "blocked",
+        stage: "waiting",
         progress: null,
       },
       fonts,

@@ -165,7 +165,7 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
       title,
       parent,
       thread,
-      state: "backlog",
+      state: "open",
       notes: null,
       links,
       conflicts: {},

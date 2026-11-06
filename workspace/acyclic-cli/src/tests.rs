@@ -234,10 +234,10 @@ fn usage_errors_and_help_are_text() {
     assert!(edit.stdout.contains("\nGlobal options:\n"), "{edit:?}");
     assert_eq!((item.code, item.stdout.starts_with("Adds, edits")), (exit::OK, true), "{item:?}");
     // An enum-valued input lists its values in help, and a wrong one names them.
-    assert!(edit.stdout.contains("[possible values: backlog, parked]"), "{edit:?}");
+    assert!(edit.stdout.contains("[possible values: open, parked]"), "{edit:?}");
     let wrong = run("acyclic item edit a --state huge");
     assert_eq!(wrong.code, exit::USAGE);
-    assert!(wrong.stderr.contains("[possible values: backlog, parked]"), "{wrong:?}");
+    assert!(wrong.stderr.contains("[possible values: open, parked]"), "{wrong:?}");
 }
 
 #[test]
@@ -392,7 +392,7 @@ fn deserialized_commands_are_checked_as_the_parser_checks_them() {
         assert_eq!(refused(json!({"id": {"count": count}})), Err("usage"), "{count}");
     }
     assert_eq!(refused(json!({"id": {}})), Ok(()));
-    for state in ["backlog", "parked"] {
+    for state in ["open", "backlog", "parked"] {
         assert!(
             serde_json::from_value::<args::Command>(json!({
                 "item": {"add": {"title": "T", "state": state}}

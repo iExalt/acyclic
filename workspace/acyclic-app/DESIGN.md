@@ -42,7 +42,7 @@ unless the menu's Theme picks one on the device (System, Light or Dark; System b
 two in step.
 
 - **Surfaces:** `ground` (the page and the Map), `chrome` (sidebar and bars), `sheet` (panels), `tile` and `box` (the
-  Map's items and boxes). A tile in progress takes a cooler tint, one done, blocked or parked a greyer one; one in
+  Map's items and boxes). A tile in progress takes a cooler tint, one done, waiting or parked a greyer one; one in
   review keeps the tile's, its icon saying so, after a tint read as a selection.
 - **Ink:** `ink` for text, `muted` for secondary text, `rule` between things, `edge` around controls, and `field`
   around a field, which only its edge marks out, so at 3:1 on what it sits on.
@@ -125,8 +125,8 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
 - **Up next** lists the threads that can start now: not at work, with an item ready; Any time first, then by wave. The
   Open Threads link opens Threads. Any time means no threads to wait for or hold up, covering incoming and outgoing
   waits.
-  A wave all blocked has nothing to start. (The next wave,
-  listed whole, showed only blocked threads while work elsewhere was ready; the user chose this.)
+  A wave all waiting has nothing to start. (The next wave,
+  listed whole, showed only waiting threads while work elsewhere was ready; the user chose this.)
 
 ## Shapes
 
@@ -142,8 +142,8 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   set apart by its icon rather than a comma, which only a screen reader reads; a Map box's line of counts, drawn as text
   on the canvas, which sets no icon inside a line, takes the commas. An item in no thread is never ready, so its stage
   reads "Needs a thread" ("3 need a thread"), its icon the dashed ring an item with no thread carries in its badge's
-  place; on the Map the ring says it once, with no icon at the end. The editor says a state in words ("Backlog", "In
-  progress"), Backlog with how it shows (ready or blocked, by its waits), and a finished item's state as the panel's
+  place; on the Map the ring says it once, with no icon at the end. The editor says a state in words ("Open", "In
+  progress"), Open with how it shows (ready or waiting, by its waits), and a finished item's state as the panel's
   stage, as text: finishing sets it, not the form.
 - **A thread's panel** shows its counts under the title, then its Items, in the order their work runs (each after
   what it waits for in the thread), isolated items first, each with its stage's icon, the first eight and then how many
@@ -342,12 +342,12 @@ before what went wrong.
 
 - **Top to bottom.** Inside a box, items run down in layers by their links; a long chain stays one column, never wraps.
 - **An item reads as a sidebar row does:** its thread's badge first, after the stripe, then its full title, then its
-  stage icon and word. Stage words use the canonical vocabulary: Done, In progress, Ready, Blocked, Parked and Needs a
+  stage icon and word. Stage words use the canonical vocabulary: Done, In progress, Ready, Waiting, Parked and Needs a
   thread.
 - **A project tells where it stands.** An open box's chevron and stage icon stay in the first 52 px strip; its full
   title, stage word, counts, hidden count and done-box note wrap below or beside them as needed. Its header grows to
   fit, and the child content starts below it. The stage is the work's whole stage, as core tells it (done once all of it
-  is; else in progress once work under it has started and some of what is left isn't parked; else ready, else blocked,
+  is; else in progress once work under it has started and some of what is left isn't parked; else ready, else waiting,
   else parked, else needs a thread), and its title is muted once done or held up, as an item's title is.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.

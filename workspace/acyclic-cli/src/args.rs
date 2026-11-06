@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use acyclic_core::model::ItemState;
 use std::fmt::Write as _;
 
-use clap::builder::{PossibleValuesParser, TypedValueParser};
+use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser};
 use clap::{CommandFactory, Parser, Subcommand};
 
 use serde::Deserialize;
@@ -90,24 +90,16 @@ pub fn command() -> clap::Command {
     command.mut_subcommands(|sub| sub.hide(true)).help_template(template)
 }
 
-/// The name serde gives a value of one of the model's enums: kebab-case.
-fn name<T: Serialize>(value: &T) -> String {
-    match serde_json::to_value(value) {
-        Ok(serde_json::Value::String(name)) => name,
-        other => unreachable!("an enum serializes as its name, not {other:?}"),
-    }
-}
-
-/// A parser for one of the model's enums that takes each of `all` by its kebab-case name, lists them in help, and
-/// names them when a value isn't one.
-fn values<T>(all: &'static [T]) -> impl TypedValueParser<Value = T>
-where
-    T: Serialize + Clone + Send + Sync + 'static,
-{
-    let names: Vec<String> = all.iter().map(name).collect();
-    PossibleValuesParser::new(names.clone()).map(move |chosen| {
-        let at = names.iter().position(|name| *name == chosen).expect("the parser checked it");
-        all[at].clone()
+/// The parser for `--state`: `open` or `parked`, listed in help and named when a value isn't one. `backlog`, the
+/// word older versions took, still reads as open but isn't listed.
+fn state_words() -> impl TypedValueParser<Value = StateWord> {
+    PossibleValuesParser::new([
+        PossibleValue::new(StateWord::OPEN.0.word()).alias("backlog"),
+        PossibleValue::new(StateWord::PARKED.0.word()),
+    ])
+    .map(|chosen| match chosen.as_str() {
+        "parked" => StateWord::PARKED,
+        _ => StateWord::OPEN,
     })
 }
 
@@ -390,10 +382,17 @@ fn overlaps(flag: &str, add: &[String], remove: &[String]) -> Result<(), CliErro
     }
 }
 
-/// A state a command may set: not `done`, which `acyclic item done` sets with its evidence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "ItemState", into = "ItemState")]
+/// A state a command may set: not `done`, which `acyclic item done` sets with its evidence. It is sent as its word,
+/// `open` or `parked`, and read from either or from `backlog`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "ItemState")]
 pub struct StateWord(ItemState);
+
+impl Serialize for StateWord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.0.word())
+    }
+}
 
 impl TryFrom<ItemState> for StateWord {
     type Error = &'static str;
@@ -413,7 +412,7 @@ impl From<StateWord> for ItemState {
 }
 
 impl StateWord {
-    const BACKLOG: Self = Self(ItemState::Backlog);
+    const OPEN: Self = Self(ItemState::Backlog);
     const PARKED: Self = Self(ItemState::Parked);
 
     /// The model's state for the word.
@@ -442,8 +441,8 @@ pub enum ItemCommand {
         /// Its thread.
         #[arg(long)]
         thread: Option<String>,
-        /// Its state; backlog by default.
-        #[arg(short = 's', long, value_parser = values(&[StateWord::BACKLOG, StateWord::PARKED]))]
+        /// Its state; open by default.
+        #[arg(short = 's', long, value_parser = state_words())]
         state: Option<StateWord>,
         /// Its notes.
         #[arg(long)]
@@ -517,7 +516,7 @@ pub struct ItemEdit {
     #[serde(default)]
     pub no_thread: bool,
     /// Set its state: not `done`, which `acyclic item done` sets.
-    #[arg(short = 's', long, value_parser = values(&[StateWord::BACKLOG, StateWord::PARKED]))]
+    #[arg(short = 's', long, value_parser = state_words())]
     pub state: Option<StateWord>,
     /// New notes.
     #[arg(long)]

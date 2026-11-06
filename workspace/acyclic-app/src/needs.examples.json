@@ -20,7 +20,7 @@
           ],
           "status": "conflicted"
         },
-        "stage": "blocked",
+        "stage": "waiting",
         "state": {
           "conflict": [
             "done",
@@ -90,7 +90,7 @@
           ],
           "status": "conflicted"
         },
-        "stage": "blocked",
+        "stage": "waiting",
         "state": {
           "conflict": [
             "done",
@@ -153,7 +153,7 @@
           ],
           "status": "conflicted"
         },
-        "stage": "blocked",
+        "stage": "waiting",
         "state": {
           "conflict": [
             "done",
@@ -202,6 +202,78 @@
       "values": [
         "One",
         "Two"
+      ]
+    },
+    {
+      "entity": "item",
+      "field": "state",
+      "id": "01900000-0000-7000-8000-0000000000b1",
+      "identity": "{\"choices\":[{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"state\":\"open\"}}},\"value\":\"open\"},{\"command\":{\"item\":{\"edit\":{\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"state\":\"parked\"}}},\"value\":\"parked\"}],\"entry\":{\"entry\":\"conflict\",\"field\":\"state\",\"id\":\"01900000-0000-7000-8000-0000000000b1\",\"kind\":\"item\"}}",
+      "item": {
+        "id": "01900000-0000-7000-8000-0000000000b1",
+        "parent": null,
+        "progress": {
+          "counts": {
+            "done": 0,
+            "in_progress": 0,
+            "leaves": 1,
+            "parked": 0,
+            "ready": 0,
+            "unthreaded": 0,
+            "waiting": 1
+          },
+          "state": "open"
+        },
+        "readiness": {
+          "fields": [
+            "state"
+          ],
+          "status": "conflicted"
+        },
+        "stage": "waiting",
+        "state": {
+          "conflict": [
+            "open",
+            "parked"
+          ]
+        },
+        "thread": "01900000-0000-7000-8000-0000000000f1",
+        "title": "Parent"
+      },
+      "keeps": [
+        {
+          "command": {
+            "item": {
+              "edit": {
+                "item": "01900000-0000-7000-8000-0000000000b1",
+                "state": "open"
+              }
+            }
+          },
+          "run": "acyclic item edit 01900000-0000-7000-8000-0000000000b1 --state open",
+          "value": "open",
+          "why": null
+        },
+        {
+          "command": {
+            "item": {
+              "edit": {
+                "item": "01900000-0000-7000-8000-0000000000b1",
+                "state": "parked"
+              }
+            }
+          },
+          "run": "acyclic item edit 01900000-0000-7000-8000-0000000000b1 --state parked",
+          "value": "parked",
+          "why": null
+        }
+      ],
+      "key": "conflict:item:01900000-0000-7000-8000-0000000000b1:state",
+      "kind": "conflict",
+      "notify": true,
+      "values": [
+        "open",
+        "parked"
       ]
     },
     {

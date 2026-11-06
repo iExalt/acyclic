@@ -363,7 +363,9 @@ fn names<T: Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debu
 #[test]
 fn every_variant_of_a_value_enum_round_trips() {
     let states = [ItemState::Backlog, ItemState::Parked, ItemState::Done];
+    // Stored as older versions read it, and shown as `open`.
     assert_eq!(names(&states), ["backlog", "parked", "done"]);
+    assert_eq!(states.map(ItemState::word), ["open", "parked", "done"]);
     let progress = [
         ProgressState::Backlog,
         ProgressState::Parked,
@@ -372,7 +374,7 @@ fn every_variant_of_a_value_enum_round_trips() {
     ];
     let progress: Vec<Json> =
         progress.iter().map(|state| serde_json::to_value(state).unwrap()).collect();
-    assert_eq!(progress, [json!("backlog"), json!("parked"), json!("in-progress"), json!("done")]);
+    assert_eq!(progress, [json!("open"), json!("parked"), json!("in-progress"), json!("done")]);
 }
 
 #[test]

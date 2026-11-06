@@ -55,8 +55,8 @@ fn flat(threads: &[ReadyThread]) -> Vec<String> {
     threads.iter().flat_map(|t| t.items.iter().cloned()).collect()
 }
 
-fn blocked(waits: &[(&str, Wait)]) -> Readiness {
-    Readiness::Blocked {
+fn waiting_on(waits: &[(&str, Wait)]) -> Readiness {
+    Readiness::Waiting {
         waiting: waits.iter().map(|(id, w)| ((*id).to_owned(), w.clone())).collect(),
     }
 }
@@ -66,7 +66,7 @@ fn a_hard_dependency_blocks_until_done() {
     let mut r = replica("a");
     items(&mut r, &["dep", "x"]);
     link(&mut r, "x", "dep", by(2)).unwrap();
-    assert_eq!(status(&r, "x"), blocked(&[("dep", Wait::Open)]));
+    assert_eq!(status(&r, "x"), waiting_on(&[("dep", Wait::Open)]));
     // Work with no repository is met when done.
     done_with(&mut r, "dep", None);
     assert_eq!(status(&r, "x"), Readiness::Ready);
@@ -111,19 +111,19 @@ fn a_parents_dependencies_hold_back_its_children_and_a_parent_is_met_by_its_leav
     set_parent(&mut r, "child", Some("goal"), by(2)).unwrap();
     link(&mut r, "goal", "dep", by(2)).unwrap();
     link(&mut r, "after-goal", "goal", by(2)).unwrap();
-    assert_eq!(status(&r, "child"), blocked(&[("dep", Wait::Open)]));
+    assert_eq!(status(&r, "child"), waiting_on(&[("dep", Wait::Open)]));
     assert_eq!(status(&r, "goal"), Readiness::Parent);
-    assert_eq!(status(&r, "after-goal"), blocked(&[("goal", Wait::Open)]));
+    assert_eq!(status(&r, "after-goal"), waiting_on(&[("goal", Wait::Open)]));
     // A done stored on the parent, as an older version wrote, is ignored: its leaves decide.
     done_with(&mut r, "goal", None);
     assert_eq!(status(&r, "goal"), Readiness::Parent);
-    assert_eq!(status(&r, "after-goal"), blocked(&[("goal", Wait::Open)]));
+    assert_eq!(status(&r, "after-goal"), waiting_on(&[("goal", Wait::Open)]));
     done_with(&mut r, "dep", None);
     done_with(&mut r, "child", None);
     assert_eq!(status(&r, "after-goal"), Readiness::Ready);
     // A parent parked by hand meets nothing.
     set_state(&mut r, "goal", ItemState::Parked, by(4)).unwrap();
-    assert_eq!(status(&r, "after-goal"), blocked(&[("goal", Wait::Open)]));
+    assert_eq!(status(&r, "after-goal"), waiting_on(&[("goal", Wait::Open)]));
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn an_unthreaded_leaf_is_never_ready_but_what_holds_it_back_shows_first() {
     for id in ["loose", "ghostly"] {
         assert_eq!(status(&r, id), Readiness::Unthreaded, "{id}");
     }
-    assert_eq!(status(&r, "waiting"), blocked(&[("dep", Wait::Open)]));
+    assert_eq!(status(&r, "waiting"), waiting_on(&[("dep", Wait::Open)]));
     let model = Model::read(&r.state).unwrap();
     let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
     assert_eq!(readiness.ready("session/s").unwrap(), []);
@@ -186,8 +186,8 @@ fn an_unthreaded_leaf_is_never_ready_but_what_holds_it_back_shows_first() {
 #[test]
 fn a_thread_is_claimable_by_anyone_while_ready_and_by_its_holder_while_held() {
     let mut a = replica("a");
-    items(&mut a, &["x", "blocked", "dep"]);
-    link(&mut a, "blocked", "dep", by(2)).unwrap();
+    items(&mut a, &["x", "waiter", "dep"]);
+    link(&mut a, "waiter", "dep", by(2)).unwrap();
     for (id, held) in [("y", "other"), ("idle", "quiet")] {
         add_item(&mut a, id, id, by(1)).unwrap();
         thread(&mut a, id, held);
@@ -325,7 +325,7 @@ fn a_dependency_on_a_parent_waits_on_each_leaf_under_it_as_its_own_dependency() 
     // A done leaf is met already; an open one, however deep, holds the dependency.
     done_with(&mut r, "old", None);
     done_with(&mut r, "b", Some("c1"));
-    assert_eq!(status(&r, "same"), blocked(&[("goal", Wait::Open)]));
+    assert_eq!(status(&r, "same"), waiting_on(&[("goal", Wait::Open)]));
     // Done is enough, in the leaves' thread or another.
     done_with(&mut r, "a", Some("c2"));
     assert_eq!(status(&r, "same"), Readiness::Ready);
@@ -333,10 +333,10 @@ fn a_dependency_on_a_parent_waits_on_each_leaf_under_it_as_its_own_dependency() 
     // A done stored on a part, as older versions wrote, counts for nothing: its open leaf holds the dependency.
     set_state(&mut r, "a", ItemState::Backlog, by(3)).unwrap();
     set_state(&mut r, "mid", ItemState::Done, by(3)).unwrap();
-    assert_eq!(status(&r, "same"), blocked(&[("goal", Wait::Open)]));
+    assert_eq!(status(&r, "same"), waiting_on(&[("goal", Wait::Open)]));
     // A parked parent meets nothing, whatever its leaves.
     set_state(&mut r, "goal", ItemState::Parked, by(4)).unwrap();
-    assert_eq!(status(&r, "other"), blocked(&[("goal", Wait::Open)]));
+    assert_eq!(status(&r, "other"), waiting_on(&[("goal", Wait::Open)]));
 }
 
 #[test]
@@ -357,7 +357,7 @@ fn a_parent_reads_in_progress_while_its_open_leaves_thread_is_claimed_and_never_
             .state
     };
     assert_eq!(state(&r, NOW), ProgressState::Backlog);
-    // A claim lasts its lease: the parent reads in progress while it lives, and backlog once it lapses.
+    // A claim lasts its lease: the parent reads in progress while it lives, and open once it lapses.
     claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
     assert_eq!(state(&r, NOW), ProgressState::InProgress);
     assert_eq!(state(&r, 2_000), ProgressState::Backlog);
@@ -375,7 +375,7 @@ fn a_done_stored_on_a_part_hides_none_of_its_claimed_work_from_above() {
     items(&mut r, &["first", "goal", "part", "x"]);
     set_parent(&mut r, "part", Some("goal"), by(2)).unwrap();
     set_parent(&mut r, "x", Some("part"), by(2)).unwrap();
-    // Blocked, so only the claim on its thread says it is under way.
+    // Waiting, so only the claim on its thread says it is under way.
     link(&mut r, "x", "first", by(2)).unwrap();
     claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
     // As an older version could write it.
@@ -404,11 +404,11 @@ fn a_leaf_in_a_claimed_thread_reads_in_progress_unless_it_waits() {
     set_parent(&mut r, "kid", Some("parent"), by(2)).unwrap();
     assert_eq!(stage(&r, "y"), Some(Stage::Ready));
     assert_eq!(stage(&r, "parent"), None);
-    // A backlog leaf in a claimed thread is in progress; one that waits is still blocked.
+    // An open leaf in a claimed thread is in progress; one that waits is still waiting.
     link(&mut r, "y", "dep", by(4)).unwrap();
     claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
     assert_eq!(stage(&r, "dep"), Some(Stage::InProgress));
-    assert_eq!(stage(&r, "y"), Some(Stage::Blocked));
+    assert_eq!(stage(&r, "y"), Some(Stage::Waiting));
     set_state(&mut r, "y", ItemState::Parked, by(5)).unwrap();
     assert_eq!(stage(&r, "y"), Some(Stage::Parked));
     done_with(&mut r, "dep", Some("c1"));
@@ -472,7 +472,7 @@ fn done_work_counts_done_though_two_clones_put_it_in_different_threads() {
 }
 
 #[test]
-fn a_parent_reads_in_progress_while_its_threads_claim_holds_even_blocked_leaves() {
+fn a_parent_reads_in_progress_while_its_threads_claim_holds_even_waiting_leaves() {
     let mut r = replica("a");
     items(&mut r, &["first", "box", "x", "y"]);
     for leaf in ["x", "y"] {
@@ -483,7 +483,7 @@ fn a_parent_reads_in_progress_while_its_threads_claim_holds_even_blocked_leaves(
     claim::claim(&mut r, "main", "session/one", 900, (500, 1_000), false).unwrap();
     let rolled = rollup(&r, "box");
     assert_eq!(rolled.progress.state, ProgressState::InProgress);
-    assert_eq!(rolled.stages, Stages { blocked: 2, ..Stages::default() }, "the counts stay honest");
+    assert_eq!(rolled.stages, Stages { waiting: 2, ..Stages::default() }, "the counts stay honest");
 }
 
 /// A random plan of up to eight items: parents, states, threads, blocks links, a claim and commits.
@@ -593,7 +593,7 @@ fn threads_come_in_waves_after_the_threads_they_wait_on() {
 fn finished_work_frees_its_waiters_and_a_cycle_shares_a_wave() {
     let mut r = replica("a");
     waits(&mut r, ("b", "t2"), ("a", "t1"));
-    assert_eq!(waves(&r).waves, ids(&[&["t1"], &["t2"]]), "as its leaf reads blocked");
+    assert_eq!(waves(&r).waves, ids(&[&["t1"], &["t2"]]), "as its leaf reads waiting");
     done_with(&mut r, "a", Some("c1"));
     assert_eq!(status(&r, "b"), Readiness::Ready);
     assert_eq!(waves(&r).anytime, ["t2"], "done, t1 is finished and t2 is free");
@@ -659,7 +659,7 @@ fn a_link_on_a_group_counts_its_open_work_and_done_work_holds_nothing_back() {
 }
 
 /// Every thread with a leaf left is in one wave or apart, and no other; each thread waited on comes in an earlier
-/// wave, or the same when they wait on each other; and a leaf blocked on work in another thread makes its thread wait
+/// wave, or the same when they wait on each other; and a leaf waiting on work in another thread makes its thread wait
 /// on that one.
 #[hegel::test]
 fn waves_order_threads_as_their_leaves_wait(tc: TestCase) {
@@ -711,7 +711,7 @@ fn waves_order_threads_as_their_leaves_wait(tc: TestCase) {
         }
     }
     for id in model.items.keys() {
-        let Some(Readiness::Blocked { waiting }) = readiness.of(id).unwrap() else { continue };
+        let Some(Readiness::Waiting { waiting }) = readiness.of(id).unwrap() else { continue };
         let Some(thread) = model.thread_of(id).filter(|t| model.threads.contains_key(*t)) else {
             continue;
         };
@@ -756,7 +756,7 @@ fn an_actor_may_finish_what_is_ready_its_own_or_done_already() {
         // Finishing again changes nothing, so it needs no claim.
         (Readiness::Done, true),
         (Readiness::Parent, false),
-        (blocked(&[]), false),
+        (waiting_on(&[]), false),
         (Readiness::Unthreaded, false),
     ] {
         assert_eq!(status.finishable_by(me), may, "{status:?}");
@@ -766,11 +766,11 @@ fn an_actor_may_finish_what_is_ready_its_own_or_done_already() {
 #[test]
 fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what_is_left_is_parked()
 {
-    let of = |done, in_progress, ready, blocked, parked, unthreaded| Stages {
+    let of = |done, in_progress, ready, waiting, parked, unthreaded| Stages {
         done,
         in_progress,
         ready,
-        blocked,
+        waiting,
         parked,
         unthreaded,
     };
@@ -780,10 +780,10 @@ fn a_parent_rolls_up_its_leaves_as_started_once_work_below_has_begun_unless_what
         // Started wins over what is still ready.
         (of(1, 0, 2, 0, 0, 0), false, Some(Stage::InProgress)),
         (of(0, 1, 0, 3, 0, 0), false, Some(Stage::InProgress)),
-        // A live claim below starts it, even with only blocked work.
+        // A live claim below starts it, even with only waiting work.
         (of(0, 0, 0, 2, 0, 0), true, Some(Stage::InProgress)),
         (of(0, 0, 2, 1, 1, 1), false, Some(Stage::Ready)),
-        (of(0, 0, 0, 1, 1, 1), false, Some(Stage::Blocked)),
+        (of(0, 0, 0, 1, 1, 1), false, Some(Stage::Waiting)),
         // What is left all parked, by hand or under a parked part, reads parked however much is done.
         (of(2, 0, 0, 0, 3, 0), false, Some(Stage::Parked)),
         (of(0, 0, 0, 0, 0, 2), false, Some(Stage::Unthreaded)),
