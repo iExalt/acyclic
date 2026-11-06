@@ -15,6 +15,7 @@ import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
 import { foldDone, isDoneBox } from "./fold";
+import { FRESH_WATCH, intentsPending, stepFrame } from "./framed";
 import { metricsOf, TILE_WIDTH } from "./labelmetrics";
 import type { Placed } from "./layout";
 import { buildModel, collapsedWith, type Model, sourceKey, topOf, type View, visible } from "./model";
@@ -176,6 +177,66 @@ export default function PlanMap({
   const anchorBeforeRender = anchor.current;
   const waitingFor = useRef(new WeakMap<Animation, RevealIntent>());
   const watchedAnimations = useRef(new WeakSet<Animation>());
+  /** The reveal last found unable to be satisfied, which no longer holds the camera as unframed (see `framed.ts`). */
+  const parked = useRef<RevealIntent | null>(null);
+  /** Taps whose late reveal has not yet run. */
+  const tapReveals = useRef(0);
+  const watching = useRef<number | null>(null);
+  /**
+   * The tile animations in flight, which keep the Map from settling. The one place the motion module plugs in: its
+   * running-tween count replaces the 0, and its subscription calls `kickFramed` when a tween starts.
+   */
+  const animating = (): number => 0;
+  const activeNow = useRef(active);
+  activeNow.current = active;
+  const threadNow = useRef(thread);
+  threadNow.current = thread;
+  /**
+   * Says on the host, in `data-settled`, whether the Map has settled, its camera framed and no tile animating: "true" once the plan is laid out and drawn, no
+   * camera intent can still move it (a reveal parked for want of an open part of the Map does not count), and the zoom
+   * and pan have held for two animation frames; "false" while a layout, an intent or a movement is in flight. Watched
+   * frame by frame from here until it is true, and begun again by anything that may move the camera.
+   */
+  function kickFramed() {
+    const element = host.current;
+    if (element === null) return;
+    element.dataset.settled = "false";
+    if (watching.current !== null) return;
+    let watch = FRESH_WATCH;
+    const frame = () => {
+      watching.current = null;
+      const core = cy.current;
+      const element = host.current;
+      if (core === null || element === null || !activeNow.current) return;
+      const laidOut = placedNow.current !== null || modelNow.current.items.size === 0;
+      const pan = core.pan();
+      const step = stepFrame(watch, {
+        busy:
+          !laidOut ||
+          element.dataset.state !== "drawn" ||
+          intentsPending({
+            shown: shown.current,
+            parked: parked.current,
+            anchor: anchor.current !== null,
+            toFrame: toFrame.current !== undefined && toFrame.current.thread === threadNow.current,
+            tapReveals: tapReveals.current,
+          }),
+        animating: animating(),
+        viewport: `${core.zoom()},${pan.x},${pan.y}`,
+      });
+      watch = step;
+      if (step.settled) element.dataset.settled = "true";
+      else watching.current = requestAnimationFrame(frame);
+    };
+    watching.current = requestAnimationFrame(frame);
+  }
+  useEffect(
+    () => () => {
+      if (watching.current !== null) cancelAnimationFrame(watching.current);
+      watching.current = null;
+    },
+    [],
+  );
   /** The elements the renderer holds, by id. */
   const held = useRef<ReadonlyMap<string, Drawn>>(new Map());
   /** The model last drawn, to tell whether a focus will be drawn afresh. */
@@ -286,11 +347,13 @@ export default function PlanMap({
       // Nothing will be drawn afresh, so it is shown now; left for a later draw, it would pan there out of the blue.
       anchor.current = null;
       shown.current = intent;
+      kickFramed();
       tryShow();
       return;
     }
     shown.current = intent;
     if (host.current !== null) host.current.dataset.state = "laying-out";
+    kickFramed();
     setToggles(next);
   }, [focus]);
 
@@ -545,7 +608,11 @@ export default function PlanMap({
       }
     }
     const revealed = revealIn(core, element, request.id, request.centered, request.picked);
-    if (revealed === null || revealed === undefined) return false;
+    if (revealed === null || revealed === undefined) {
+      parked.current = request;
+      kickFramed();
+      return false;
+    }
     if (shown.current === request) shown.current = null;
     return true;
   }
@@ -606,7 +673,11 @@ export default function PlanMap({
         setDrawnOnce(true);
       }),
     );
+    kickFramed();
   }, [drawn, placed, colour, lines, palette, model, view, aspect, source]);
+
+  // A change that will lay out or move the camera, noted before its layout is back, so the signal never reads a stale "true".
+  useEffect(kickFramed, [model, view, aspect, source, fontFamily, framed, thread, focus, selected]);
 
   // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens; one the
   // user came to the Map for is framed instead.
@@ -751,6 +822,7 @@ export default function PlanMap({
         const corner = core.getElementById(top).renderedBoundingBox({ includeLabels: false });
         anchor.current = { id: top, x: corner.x1, y: corner.y1 };
         if (host.current !== null) host.current.dataset.state = "laying-out";
+        kickFramed();
         setToggles((was) => new Map(was).set(id, kind === "box"));
         return;
       }
@@ -760,8 +832,11 @@ export default function PlanMap({
       // where it was moved to.
       const pan = core.pan();
       const zoom = core.zoom();
+      tapReveals.current++;
+      kickFramed();
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
+          tapReveals.current--;
           const still = cy.current?.zoom() === zoom && cy.current.pan().x === pan.x && cy.current.pan().y === pan.y;
           if (taps.current === now && still && cy.current !== null && host.current !== null) {
             shown.current = { id, centered: false, picked: false };
@@ -793,6 +868,7 @@ export default function PlanMap({
     const enter = (event: cytoscape.EventObject) => setHovered((event.target as cytoscape.NodeSingular).id());
     const leave = () => setHovered(null);
     core.on("tap", tap);
+    core.on("viewport", kickFramed);
     core.on("tapstart", "node", press);
     core.on("tapdrag", drag);
     core.on("dragpan", dragged);
@@ -807,6 +883,7 @@ export default function PlanMap({
       core.off("mouseover", HOVERABLE, enter);
       core.off("mouseout", HOVERABLE, leave);
       core.off("tap", tap);
+      core.off("viewport", kickFramed);
       core.off("tapstart", "node", press);
       core.off("tapdrag", drag);
       core.off("dragpan", dragged);
@@ -821,6 +898,7 @@ export default function PlanMap({
         className="map"
         data-testid="map"
         data-state="laying-out"
+        data-settled="false"
         aria-busy={active && !drawnOnce && items.length > 0 ? true : undefined}
       />
       {active && drawnOnce && placed !== null && items.length > 0 ? (
