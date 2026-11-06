@@ -192,7 +192,7 @@ export function Overview({
           </button>
         </header>
         {outline === null || outline.projects.length === 0 ? (
-          <p className="empty">No projects yet: add an item at the top level, and work inside it.</p>
+          <p className="empty">No projects yet: add an item, and work inside it.</p>
         ) : (
           <ul className="rows">
             {outline.projects.map((project) => {
@@ -214,6 +214,7 @@ export function Overview({
                         ) : (
                           <StageCounts counts={progress.counts} />
                         )}
+                        {project.noInitiative ? <span className="muted"> · No initiative</span> : null}
                       </span>
                     </span>
                     <span className="go">

@@ -14,8 +14,8 @@ export type Run =
   | { kind: "project"; id: string }
   /** Something to do to the item whose panel shows. */
   | { kind: "on-item"; action: OnItem }
-  /** The target of a move or link waiting for one: an item, or the top level for a move. */
-  | { kind: "target"; id: string | null };
+  /** The target of a move or link waiting for one: an item. */
+  | { kind: "target"; id: string };
 
 export type OnItem = "edit" | "move" | "waits-for" | "add-inside";
 
@@ -133,8 +133,7 @@ export function entries(plan: Plan): Entry[] {
 }
 
 /**
- * What a move or a link waiting for its target can be pointed at from the menu: any item shown, projects among them,
- * and for a move the top level first.
+ * What a move or a link waiting for its target can be pointed at from the menu: any item shown, projects among them.
  */
 export function targets(plan: Plan, pick: "move" | "link", from: string | null = null): Entry[] {
   const { model } = plan;
@@ -149,21 +148,7 @@ export function targets(plan: Plan, pick: "move" | "link", from: string | null =
     return false;
   };
   const left = (id: string) => (pick === "move" ? !inside(id) && id !== parent : id !== from);
-  const top =
-    pick === "move" && (from === null || parent !== null)
-      ? [
-          entry({
-            key: "target:top",
-            group: "Actions",
-            title: "Top level",
-            detail: null,
-            also: "",
-            run: { kind: "target", id: null },
-          }),
-        ]
-      : [];
   return [
-    ...top,
     ...listed(plan)
       .filter(({ id }) => left(id))
       .map(({ id, title, parent: itemParent, project, isProject }) =>

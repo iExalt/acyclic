@@ -10,6 +10,8 @@ export interface MapItem {
   title: string;
   state: string;
   parent: string | null;
+  /** The initiative above it at any depth; null when it is in none. */
+  initiative: string | null;
   thread: string | null;
   /** Its stage as core gives it, a parent's from its leaves; null for a parent with none to count. */
   stage: Stage | null;
@@ -55,6 +57,7 @@ export function buildModel(items: Item[]): Model {
         title: item.title,
         state: item.state,
         parent: item.parent,
+        initiative: item.initiative,
         thread: item.thread,
         stage: item.stage ?? null,
         progress:

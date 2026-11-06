@@ -25,6 +25,8 @@ interface RawItem {
   thread: Raw<string>;
   state: Raw<string>;
   notes: Raw<string>;
+  /** The initiative above it at any depth; null when it is in none. */
+  initiative: string | null;
   links: { waits_for: string[]; waited_on_by: string[] };
   /**
    * Where it stands, as core tells it: a leaf's own stage, or a parent's from its leaves. A parent with no leaves to
@@ -293,6 +295,35 @@ export async function thread(id: string, fetcher: Fetch = fetch): Promise<Thread
     task: row.task ?? null,
     notes: typeof row.notes === "string" ? row.notes : null,
     members: row.members.map((member) => ({ id: member.id, title: text(member.title, member.id) })),
+  };
+}
+
+/** An initiative, the top level above the items. */
+export interface Initiative {
+  id: string;
+  title: string;
+  items: number;
+}
+
+/** Every initiative, and the items whose parent is unset or names nothing: in no initiative. */
+export interface Initiatives {
+  initiatives: Initiative[];
+  noInitiative: string[];
+}
+
+/** Every initiative, with the ids of the items in none. */
+export async function initiatives(fetcher: Fetch = fetch): Promise<Initiatives> {
+  const raw = await command<{
+    initiatives: { id: string; title: Raw<string>; counts?: { items?: number } }[];
+    no_initiative: { items: string[] };
+  }>({ initiative: "list" }, fetcher);
+  return {
+    initiatives: raw.initiatives.map((row) => ({
+      id: row.id,
+      title: titleOr(row.title, row.id),
+      items: row.counts?.items ?? 0,
+    })),
+    noInitiative: raw.no_initiative.items,
   };
 }
 

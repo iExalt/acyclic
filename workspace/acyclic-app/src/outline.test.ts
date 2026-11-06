@@ -22,10 +22,11 @@ describe("outlineOf", () => {
   it("lists each project with its threads, a thread in two under both, and threads in no project apart", () => {
     expect(outlineOf(model, threads)).toEqual({
       projects: [
-        { id: "p1", title: "P1", threads: [{ id: "t", also: ["p2"] }] },
+        { id: "p1", title: "P1", noInitiative: true, threads: [{ id: "t", also: ["p2"] }] },
         {
           id: "p2",
           title: "P2",
+          noInitiative: true,
           threads: [
             { id: "t", also: ["p1"] },
             { id: "u", also: [] },
@@ -34,6 +35,19 @@ describe("outlineOf", () => {
       ],
       others: ["v", "w", "x"],
     });
+  });
+
+  it("marks a project in no initiative, and not one under an initiative that the items don't include", () => {
+    const tops = buildModel([
+      item("epic", "init", [], { initiative: "init" }),
+      item("a", "epic", [], { initiative: "init" }),
+      item("lost"),
+      item("b", "lost"),
+    ]);
+    expect(outlineOf(tops, []).projects.map((project) => [project.id, project.noInitiative])).toEqual([
+      ["epic", false],
+      ["lost", true],
+    ]);
   });
 
   it("lists projects as the Map packs them: each after those it waits on, through what is inside, else by id", () => {

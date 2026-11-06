@@ -34,10 +34,13 @@ describe("commands", () => {
     const built = [
       ["list", { item: "list" }],
       ["show", { item: { show: { items: [ID.a, ID.b] } } }],
+      ["initiatives", { initiative: "list" }],
       ["threads", { thread: "list" }],
       ["add under a parent, in a thread", addCommand({ id: ID.c, title: "C", parent: ID.a, thread: ID.t })],
-      ["add at the top level", addCommand({ id: ID.d, title: "D", parent: null, thread: null })],
-      ["move to the top level", moveCommand(ID.c, null)],
+      [
+        "add with no parent, under the tracker's only initiative",
+        addCommand({ id: ID.d, title: "D", parent: null, thread: null }),
+      ],
       ["move under a parent", moveCommand(ID.d, ID.a)],
       ["c waits for d", linkCommand(ID.c, ID.d)],
       ["c no longer waits for d", unlinkCommand(ID.c, ID.d)],
@@ -50,13 +53,14 @@ describe("commands", () => {
 describe("pick", () => {
   const move: Mode = { kind: "move", item: "plant" };
 
-  it("moves under a box or to the top level, and refuses the item, its descendants, its own parent and the background", () => {
+  it("moves under a box only, and refuses the item, its descendants, its own parent and the background", () => {
     expect(pick(model, move, { kind: "item", id: "beds" })).toEqual({
       mode: { kind: "idle" },
       command: moveCommand("plant", "beds"),
       refusal: null,
     });
-    expect(pick(model, move, { kind: "top" }).command).toEqual(moveCommand("plant", null));
+    // moveCommand takes a parent only: nothing sends `no-parent`, which the server rejects.
+    expect(JSON.stringify(moveCommand("plant", "beds"))).not.toContain("no-parent");
     for (const target of [
       { kind: "item", id: "plant" },
       { kind: "item", id: "sow" },
@@ -68,7 +72,6 @@ describe("pick", () => {
       expect(step.mode).toBe(move);
       expect(step.refusal).not.toBeNull();
     }
-    expect(pick(model, { kind: "move", item: "tools" }, { kind: "top" }).refusal).toMatch(/already at the top/);
   });
 
   it("links the selected item to the one tapped, which comes first, and refuses links the Map couldn't draw", () => {

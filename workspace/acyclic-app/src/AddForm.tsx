@@ -1,4 +1,4 @@
-// Adding an item: a title, its thread, and, when no parent is given, the project it goes in or the top level. Its id is
+// Adding an item: a title, its thread, and, when no parent is given, the project or initiative it goes in. Its id is
 // made as the form opens, so a send that is repeated is the same add.
 
 import { type FormEvent, useRef, useState } from "react";
@@ -16,6 +16,8 @@ export interface AddFormProps {
   /** With no parent, the projects to put it in, and the one it starts in. */
   projects: readonly { id: string; title: string }[];
   project: string | null;
+  /** With no parent, the initiatives an epic can go in: with several, the server needs one named. */
+  initiatives: readonly { id: string; title: string }[];
   /** Visible threads in each project, used only while the thread choice remains automatic. */
   projectThreads: readonly { id: string; threads: readonly { id: string }[] }[];
   /** Each thread, named as everywhere a badge doesn't stand beside it. */
@@ -33,6 +35,7 @@ export function AddForm({
   thread: initialThread,
   projects,
   project: initialProject,
+  initiatives,
   projectThreads,
   threads,
   draft,
@@ -79,7 +82,7 @@ export function AddForm({
         {/* biome-ignore lint/a11y/noAutofocus: the form opens to take a title */}
         <input name="title" value={title} autoFocus onChange={(event) => setTitle(event.target.value)} />
       </label>
-      {parent !== null || projects.length === 0 ? null : (
+      {parent !== null || (projects.length === 0 && initiatives.length < 2) ? null : (
         <label>
           Project
           <select
@@ -91,12 +94,21 @@ export function AddForm({
               if (!threadChosen) setThread(inferredThread(next));
             }}
           >
-            <option value="">None, at the top level</option>
+            <option value="">None, in the only initiative</option>
             {projects.map((one) => (
               <option key={one.id} value={one.id}>
                 {one.title}
               </option>
             ))}
+            {initiatives.length === 0 ? null : (
+              <optgroup label="Initiatives">
+                {initiatives.map((one) => (
+                  <option key={one.id} value={one.id}>
+                    {one.title}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </label>
       )}

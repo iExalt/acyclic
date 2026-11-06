@@ -244,6 +244,10 @@ export function App() {
     () => new Map(loaded === null ? [] : loaded.threads.threads.map((one) => [one.id, one.counts])),
     [loaded],
   );
+  const initiativeTitles = useMemo(
+    () => new Map((loaded?.initiatives ?? []).map((one) => [one.id, one.title])),
+    [loaded],
+  );
   const itemsById = useMemo(() => new Map(shown.map((item) => [item.id, item])), [shown]);
   const waves = useMemo(
     () => (loaded === null || outline === null ? null : wavesView(loaded.threads, outline)),
@@ -298,7 +302,7 @@ export function App() {
             : was,
       );
       if (step.command === null || mode.kind === "idle") return;
-      // A move pins the new parent, or the item itself when it goes to the top level; a link, the item linked from.
+      // A move pins the new parent; a link, the item linked from.
       const pin = mode.kind === "move" && target.kind === "item" ? target.id : mode.item;
       send(step.command, { select: mode.item, pin, undo: true });
     },
@@ -619,7 +623,7 @@ export function App() {
         </button>
       </div>
     );
-  const titleOf = (id: string) => model?.items.get(id)?.title ?? id;
+  const titleOf = (id: string) => model?.items.get(id)?.title ?? initiativeTitles.get(id) ?? id;
   const startAdd = (parent: string | null) => go({ kind: "add", parent });
   /**
    * Adds an item and, once saved, shows it on the Map, selected where it landed; closing it goes back to the view it was
@@ -638,7 +642,7 @@ export function App() {
   const runCommand = (run: Run) => {
     if (run.kind === "target" || run.kind === "refresh" || dirtyForm()) {
       go({ kind: "shut", layer: "command" });
-      if (run.kind === "target") return choose(run.id === null ? { kind: "top" } : { kind: "item", id: run.id });
+      if (run.kind === "target") return choose({ kind: "item", id: run.id });
       if (run.kind === "refresh") return refresh();
       return tell(UNSAVED);
     }
@@ -938,9 +942,7 @@ export function App() {
         {view === "map" && shown.length === 0 ? (
           <div className="empty-plan" data-testid="empty-plan">
             <h2>No items yet</h2>
-            <p className="muted">
-              Add an item at the top level, then the work inside it. What agents import shows here too.
-            </p>
+            <p className="muted">Add an item, then the work inside it. What agents import shows here too.</p>
             <button type="button" className="primary" onClick={() => startAdd(null)}>
               New item
             </button>
@@ -950,11 +952,6 @@ export function App() {
         {panel === "mode" ? (
           <PickBar>
             <span className="grow">{prompt}</span>
-            {mode.kind === "move" ? (
-              <button type="button" onClick={() => choose({ kind: "top" })} data-action="top-level">
-                Top level
-              </button>
-            ) : null}
             <button type="button" className="quiet" onClick={() => choose({ kind: "cancel" })}>
               Cancel
             </button>
@@ -967,6 +964,7 @@ export function App() {
             // The thread picked, else the one of the item it goes in, else of the item selected, as the project is.
             thread={thread ?? model?.items.get(adding.parent ?? selected ?? "")?.thread ?? null}
             projects={outline?.projects ?? []}
+            initiatives={loaded?.initiatives ?? []}
             project={current.project}
             projectThreads={outline?.projects ?? []}
             threads={sorted.map((one) => ({ id: one.id, label: one.title }))}
@@ -1009,6 +1007,7 @@ export function App() {
               send(edit, { select: chosen.id, pin: chosen.id, undo: true }, { kind: "edit", id: chosen.id, edited })
             }
             threads={sorted}
+            initiativeTitles={initiativeTitles}
             lines={lines}
             needs={load.needs}
             busy={busy}

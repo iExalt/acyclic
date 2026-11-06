@@ -7,7 +7,7 @@ import type { Model } from "./map/model";
 import { uuidv7 } from "./uuid";
 
 /**
- * A new item, under the id the app made for it. A null parent is top level; a null thread asks the tracker to inherit.
+ * A new item, under the id the app made for it. A null parent sends none, which the server fills in when the tracker has one initiative; a null thread asks the tracker to inherit.
  */
 export interface NewItem {
   id: string;
@@ -30,9 +30,9 @@ export function redraft(item: NewItem, code: string): NewItem {
   return code === "deleted" ? { ...item, id: uuidv7() } : item;
 }
 
-/** Moves an item under a new parent, or to the top level. */
-export function moveCommand(item: string, parent: string | null): Command {
-  return { item: { edit: parent === null ? { item, "no-parent": true } : { item, parent } } };
+/** Moves an item under a new parent: every item has one, so there is no moving it out. */
+export function moveCommand(item: string, parent: string): Command {
+  return { item: { edit: { item, parent } } };
 }
 
 /** `from` waits for `to`: an edit of `from`. */
@@ -56,9 +56,8 @@ export function chain(model: Model, id: string): string[] {
   return out;
 }
 
-/** Why `item` can't go under `parent` (null for the top level), or null if it can. */
-export function moveRefusal(model: Model, item: string, parent: string | null): string | null {
-  if (parent === null) return model.items.get(item)?.parent === null ? `${item} is already at the top level` : null;
+/** Why `item` can't go under `parent`, or null if it can. */
+export function moveRefusal(model: Model, item: string, parent: string): string | null {
   if (parent === item) return `${item} can't go under itself`;
   if (chain(model, parent).includes(item)) return `${item} can't go under its own descendant ${parent}`;
   if (model.items.get(item)?.parent === parent) return `${item} is already under ${parent}`;
@@ -92,8 +91,8 @@ export function expandTo(
 /** What a tap on the Map picks while a mode waits for a target. */
 export type Mode = { kind: "idle" } | { kind: "move"; item: string } | { kind: "link"; item: string };
 
-/** A target: an item on the Map, the "Top level" button (null), or the Map's background. */
-export type Pick = { kind: "item"; id: string } | { kind: "top" } | { kind: "background" } | { kind: "cancel" };
+/** A target: an item on the Map, or the Map's background. */
+export type Pick = { kind: "item"; id: string } | { kind: "background" } | { kind: "cancel" };
 
 export interface Step {
   mode: Mode;
@@ -107,11 +106,11 @@ export function pick(model: Model, mode: Mode, target: Pick): Step {
   if (target.kind === "cancel" || mode.kind === "idle") return { mode: idle, command: null, refusal: null };
   const refuse = (refusal: string): Step => ({ mode, command: null, refusal });
   if (mode.kind === "move") {
-    if (target.kind === "background") return refuse("Choose the box it goes in, or Top level");
-    const parent = target.kind === "top" ? null : target.id;
-    const refusal = moveRefusal(model, mode.item, parent);
+    if (target.kind === "background") return refuse("Choose the box it goes in");
+    if (target.kind !== "item") return refuse("Choose the box it goes in");
+    const refusal = moveRefusal(model, mode.item, target.id);
     if (refusal !== null) return refuse(refusal);
-    return { mode: idle, command: moveCommand(mode.item, parent), refusal: null };
+    return { mode: idle, command: moveCommand(mode.item, target.id), refusal: null };
   }
   if (target.kind !== "item") return refuse("Choose the item to link to");
   const refusal = linkRefusal(model, mode.item, target.id);
@@ -167,6 +166,8 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
       thread,
       state: "open",
       notes: null,
+      // Under an initiative it is in that one; under an item, in that item's; with no parent, the server picks.
+      initiative: parent === null ? null : (items.find((one) => one.id === parent)?.initiative ?? parent),
       links,
       conflicts: {},
     };

@@ -25,6 +25,7 @@ export function item(id: string, parent: string | null = null, waitsFor: string[
     thread: null,
     state: "open",
     notes: null,
+    initiative: null,
     links: { waits_for: waitsFor, waited_on_by: [] },
     conflicts: {},
     ...extra,

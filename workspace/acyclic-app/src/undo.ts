@@ -70,13 +70,15 @@ export function undoOf(command: Command, before: Plan): Undo | null {
     };
   }
 
-  if (keys.length === 1 && (keys[0] === "parent" || keys[0] === "no-parent")) {
-    const to = keys[0] === "parent" ? String(edit.parent) : null;
+  if (keys.length === 1 && keys[0] === "parent") {
+    const to = String(edit.parent);
     const back = was.parent;
+    // An item with no parent has none to go back to: the server never takes a move out of a parent.
+    if (back === null) return null;
     return {
-      text: to === null ? `Moved ${titleOf(id)} to the top level` : `Moved ${titleOf(id)} into ${titleOf(to)}`,
+      text: `Moved ${titleOf(id)} into ${titleOf(to)}`,
       undone: `Moved ${titleOf(id)} back`,
-      command: { item: { edit: back === null ? { item: id, "no-parent": true } : { item: id, parent: back } } },
+      command: { item: { edit: { item: id, parent: back } } },
       expect: [{ kind: "item-field", item: id, field: "parent", value: to }],
       holds: (now) => (now.items.get(id)?.parent ?? null) === to,
       shows: id,
