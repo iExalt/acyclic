@@ -48,4 +48,3 @@ runs:
         name: archive-${{ inputs.target }}
         path: dist/*.tar.gz
         if-no-files-found: error
-
