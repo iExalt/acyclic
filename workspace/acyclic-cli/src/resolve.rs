@@ -66,16 +66,18 @@ impl Kind {
 }
 
 /// The records of a model that references may name.
-pub(crate) struct Records {
+pub(crate) struct Records<'a> {
+    model: &'a Model,
     items: Vec<Candidate>,
-    threads: Vec<Candidate>,
+    /// Built on first use: most commands name no thread, and a tracker of loose tasks has a thread for each.
+    threads: std::cell::OnceCell<Vec<Candidate>>,
     repositories: Vec<Candidate>,
 }
 
-impl Records {
+impl<'a> Records<'a> {
     /// Every item, thread and repository record in `model`. A thread an item names but that has no record is no
     /// thread: the item's reference dangles.
-    pub(crate) fn of(model: &Model) -> Self {
+    pub(crate) fn of(model: &'a Model) -> Self {
         let items = model
             .items
             .values()
@@ -83,27 +85,6 @@ impl Records {
                 id: item.id.clone(),
                 names: item.title.all().into_iter().cloned().collect(),
                 task: None,
-            })
-            .collect();
-        // Every thread, a loose task's thread of one among them, which a claim makes. One shown as its task is named
-        // by the task's title while the task is open; an emptied one keeps no title that others may not take.
-        let threads = model
-            .all_threads()
-            .into_iter()
-            .map(|id| {
-                let task = model.task_of(&id);
-                let names: Vec<String> =
-                    match model.shown_as_task(&id).and_then(|t| model.items.get(t)) {
-                        Some(task) if !task.is_finished() => {
-                            task.title.all().into_iter().cloned().collect()
-                        },
-                        Some(_) => Vec::new(),
-                        None if model.is_emptied_one(&id) => Vec::new(),
-                        None => model.threads.get(&id).map_or_else(Vec::new, |thread| {
-                            thread.title.all().into_iter().cloned().collect()
-                        }),
-                    };
-                Candidate { task: task.map(str::to_owned), id, names }
             })
             .collect();
         let repositories = model
@@ -115,7 +96,34 @@ impl Records {
                 task: None,
             })
             .collect();
-        Self { items, threads, repositories }
+        Self { model, items, threads: std::cell::OnceCell::new(), repositories }
+    }
+
+    /// Every thread, a loose task's thread of one among them, which a claim makes. One shown as its task is named by
+    /// the task's title while the task is open; an emptied one keeps no title that others may not take.
+    fn threads(&self) -> &[Candidate] {
+        self.threads.get_or_init(|| {
+            let model = self.model;
+            model
+                .all_threads()
+                .into_iter()
+                .map(|id| {
+                    let task = model.task_of(&id);
+                    let names: Vec<String> =
+                        match model.shown_as_task(&id).and_then(|t| model.items.get(t)) {
+                            Some(task) if !task.is_finished() => {
+                                task.title.all().into_iter().cloned().collect()
+                            },
+                            Some(_) => Vec::new(),
+                            None if model.is_emptied_one(&id) => Vec::new(),
+                            None => model.threads.get(&id).map_or_else(Vec::new, |thread| {
+                                thread.title.all().into_iter().cloned().collect()
+                            }),
+                        };
+                    Candidate { task: task.map(str::to_owned), id, names }
+                })
+                .collect()
+        })
     }
 
     /// The item `reference` names.
@@ -125,7 +133,7 @@ impl Records {
 
     /// The thread `reference` names.
     pub(crate) fn thread(&self, reference: &str) -> Result<String, CliError> {
-        resolve(Kind::Thread, reference, &self.threads)
+        resolve(Kind::Thread, reference, self.threads())
     }
 
     /// The repository record `reference` names.
@@ -135,7 +143,7 @@ impl Records {
 
     /// The items, or with `items` false the threads, each by the shortest ending of its id that names it.
     pub(crate) fn endings(&self, items: bool) -> BTreeMap<String, String> {
-        let candidates = if items { &self.items } else { &self.threads };
+        let candidates = if items { &self.items[..] } else { self.threads() };
         let mut found = endings(candidates.iter().map(|c| c.id.as_str()));
         // An ending that is another record's title would resolve as ambiguous: it grows until it isn't, at the
         // latest to the whole id.

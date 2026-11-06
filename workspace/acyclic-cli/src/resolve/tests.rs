@@ -37,7 +37,7 @@ fn tracker() -> Replica {
     r
 }
 
-fn with<T>(check: impl FnOnce(&Records) -> T) -> T {
+fn with<T>(check: impl FnOnce(&Records<'_>) -> T) -> T {
     let r = tracker();
     let model = Model::read(r.state()).unwrap();
     check(&Records::of(&model))
