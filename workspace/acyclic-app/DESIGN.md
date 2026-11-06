@@ -456,8 +456,8 @@ before what went wrong.
   boxes do; unfolded, a thread's done box is a frame around its items with its name and chevron, the user's pick over a
   Fold button in the thread's panel or a Fold tile. A tap on a thread's done box anywhere but its chevron picks the
   thread; a tap on Done folds or unfolds it, as it holds no one thing to pick. A move or a link never takes a done box
-  as its target. Finding a folded item, or opening a link to it, unfolds every box above it. Done items fold even while their thread
-  has work left, but canceled work isn't folded: it stays beside the Done box as the quiet tile it is.
+  as its target. Finding a folded item, or opening a link to it, unfolds every box above it. Done items fold even
+  while their thread has work left, but canceled work isn't folded: it stays beside the Done box as a quiet tile.
 - **Canceled work** reads as dropped, not delivered: a struck-through circle in the muted ink on a notch-greyer tint (a
   restrained default). The item form's State select sets it and Open undoes it, and Undo of a cancel sets the state
   back. A box counts its canceled leaves apart ("2 canceled").
