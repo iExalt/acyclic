@@ -42,8 +42,9 @@ unless the menu's Theme picks one on the device (System, Light or Dark; System b
 two in step.
 
 - **Surfaces:** `ground` (the page and the Map), `chrome` (sidebar and bars), `sheet` (panels), `tile` and `box` (the
-  Map's items and boxes). A tile in progress takes a cooler tint, one stalled a warm one, one done, waiting, parked or
-  canceled a greyer one; one in review keeps the tile's, its icon saying so, after a tint read as a selection.
+  Map's items and boxes). A tile in progress takes a cooler tint, one done, waiting, parked or canceled a greyer one;
+  one stalled keeps ready's, its exclamation-mark icon alone saying so, since a warm tint drew more attention than ready
+  work; one in review keeps the tile's, its icon saying so, after a tint read as a selection.
 - **Ink:** `ink` for text, `muted` for secondary text, `rule` between things, `edge` around controls, and `field`
   around a field, which only its edge marks out, so at 3:1 on what it sits on.
 - **Accent:** the same as `ink`. It fills the primary action and draws the focus ring.
