@@ -211,6 +211,15 @@ fn resolve(kind: Kind, reference: &str, candidates: &[Candidate<'_>]) -> Result<
             &format!("{reference:?} ends the ids of {} {}s", by_ending.len(), kind.noun()),
             &by_ending,
         )),
+        ([], [one]) => Err(CliError::new(
+            "usage",
+            exit::USAGE,
+            format!(
+                "{reference:?} is {} characters, too short for an id ending, which takes at least {MIN_ENDING}; name {} by its full id or a longer ending",
+                reference.len(),
+                one.id
+            ),
+        )),
         ([], [_, ..]) => Err(ambiguous(
             kind,
             &format!(

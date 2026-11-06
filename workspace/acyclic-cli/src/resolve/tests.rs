@@ -91,6 +91,12 @@ fn what_names_several_records_or_too_little_is_refused_with_the_candidates() {
             ("ambiguous", 2)
         );
         assert!(short.message.contains("at least 6"), "{}", short.message);
+        // One record ends so, but the reference is too short to be an ending: not ambiguous.
+        let unique = records.item("b1").unwrap_err();
+        assert_eq!(unique.code, "usage");
+        assert!(unique.message.contains("at least 6"), "{}", unique.message);
+        assert!(unique.message.contains("2 characters"), "{}", unique.message);
+        assert!(!unique.message.contains("ambiguous"), "{}", unique.message);
         let bare = records.repository("acyclic").unwrap_err();
         assert_eq!(
             (bare.code, candidates(&bare)),
