@@ -17,6 +17,7 @@ on:
       - workspace/**
       - .github/actions/**
       - scripts/notices.sh
+      - scripts/profile-hash.sh
       - scripts/notices/**
       - scripts/publish-image.sh
       - .github/workflows/build.yml
