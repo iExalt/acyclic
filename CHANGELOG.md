@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/iExalt/acyclic/compare/v0.7.1...v0.7.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **app:** remove Map dimming during hover and selection ([#217](https://github.com/iExalt/acyclic/issues/217)) ([504505d](https://github.com/iExalt/acyclic/commit/504505d2342d8a9a80ad5074a727feef84e613c9))
+
 ## [0.7.1](https://github.com/iExalt/acyclic/compare/v0.7.0...v0.7.1) (2026-11-06)
 
 
