@@ -790,3 +790,71 @@ fn a_clear_raced_against_a_move_is_no_value_to_keep() {
         "{kept:?}"
     );
 }
+
+#[test]
+fn two_replicas_making_one_title_apart_leave_a_duplicate_on_the_list_that_never_notifies() {
+    let mut a = replica("a");
+    crate::model::add_initiative(&mut a, "init", "Init", user(1)).unwrap();
+    crate::model::add_initiative(&mut a, "other", "Other", user(1)).unwrap();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    // Each made "Sow" without seeing the other's; one more in another initiative is no twin.
+    add_item(&mut a, "x", "Sow", user(2)).unwrap();
+    set_parent(&mut a, "x", Some("init"), user(2)).unwrap();
+    for (id, parent) in [("y", "init"), ("z", "other")] {
+        add_item(&mut b, id, "Sow", user(2)).unwrap();
+        set_parent(&mut b, id, Some(parent), user(2)).unwrap();
+    }
+    assert!(!list(&a).iter().any(|entry| matches!(entry, Entry::DuplicateTitle { .. })));
+    a.join(&b.state).unwrap();
+
+    let twins: Vec<Entry> = list(&a)
+        .into_iter()
+        .filter(|entry| matches!(entry, Entry::DuplicateTitle { .. }))
+        .collect();
+    assert_eq!(
+        twins,
+        [Entry::DuplicateTitle {
+            items: vec!["x".into(), "y".into()],
+            initiative: Some("init".into())
+        }]
+    );
+    let entry = &twins[0];
+    assert_eq!(entry.kind(), "duplicate-title");
+    assert_eq!(entry.key(), "duplicate-title:x:y");
+    assert_eq!(
+        entry.identity(),
+        r#"{"entry":"duplicate-title","items":["x","y"],"initiative":"init"}"#
+    );
+    assert!(!entry.notifies());
+    assert_eq!(
+        entry.summary(&|id| match id {
+            "x" => "Sow".into(),
+            "init" => "Init".into(),
+            other => other.into(),
+        }),
+        "2 items share the title Sow in Init"
+    );
+    // In no initiative, it says so, and leaves the initiative out of its identity.
+    let bare = Entry::DuplicateTitle { items: vec!["p".into(), "q".into()], initiative: None };
+    assert_eq!(bare.summary(&|_| "Sow".into()), "2 items share the title Sow in no initiative");
+    assert_eq!(bare.identity(), r#"{"entry":"duplicate-title","items":["p","q"]}"#);
+
+    // Finishing one leaf frees the title, and the entry goes.
+    model::set_state(&mut a, "y", ItemState::Done, user(3)).unwrap();
+    assert!(!list(&a).iter().any(|entry| matches!(entry, Entry::DuplicateTitle { .. })));
+}
+
+#[test]
+fn twins_in_no_initiative_are_listed_with_no_initiative() {
+    let mut r = replica("a");
+    for id in ["p", "q"] {
+        add_item(&mut r, id, "Bare", user(1)).unwrap();
+    }
+    let twins: Vec<Entry> =
+        list(&r).into_iter().filter(|e| matches!(e, Entry::DuplicateTitle { .. })).collect();
+    assert_eq!(
+        twins,
+        [Entry::DuplicateTitle { items: vec!["p".into(), "q".into()], initiative: None }]
+    );
+}

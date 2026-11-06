@@ -70,8 +70,14 @@ its leaves are, and is never finished or reopened by hand. What is under way sho
 Leave out `--id` in `acyclic item add`, `acyclic thread add` and `acyclic repository add`: the tracker makes a UUIDv7
 and prints it. To know an id before adding, as a plan written ahead does, take new ones from `acyclic id [N]`, which
 prints N of them and needs no tracker, and pass each as `--id`; any other id is refused. If an add fails
-`already-exists`, a thread (for `thread add`) or an open item (for `item add`) has that title, most likely from an
-earlier try; the error's details give its id. Titles are how people find work, so two open items never share one.
+`already-exists`, a thread (for `thread add`) or an unfinished item in the same initiative (for `item add`) has that
+title, most likely from an earlier try; the error's details give its id. Titles are how people find work, so two
+unfinished items in one initiative never share one: adding, renaming, moving, reopening and un-canceling all refuse a
+duplicate. Finishing a leaf frees its title, but a parent keeps its name even when all its leaves are done. The same
+title in two initiatives is allowed, and a reference to it is `ambiguous`, listing each candidate with its initiative
+(`Dup, in One`; in the details, `initiative` is `{id, title}`, or null in no initiative); one shared by unfinished and
+finished work names the unfinished. An import that would clash is refused as `invalid-import`, naming both items, the
+title and the initiative. Replicas that made one title apart leave a `duplicate-title` on `acyclic needs`.
 Never put counters in titles.
 
 `acyclic item` also has `reopen` and `delete`; `delete` refuses an item with children, anything it waits

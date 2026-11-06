@@ -550,6 +550,29 @@ impl Model {
         }
     }
 
+    /// Whether an item keeps its title against others in its initiative: unfinished work does, and so does a parent,
+    /// finished or not, so a caught-up epic keeps its name. Only a finished leaf frees its title.
+    #[must_use]
+    pub fn holds_title(&self, id: &str) -> bool {
+        self.items.get(id).is_some_and(|item| !item.is_finished() || !self.children(id).is_empty())
+    }
+
+    /// Items holding the same title within one initiative, in groups of two or more, sorted. Items in no initiative are
+    /// one scope. An item whose conflicted parent leads to several initiatives is its own scope, apart from any in one: its conflict
+    /// is already on the needs-you list, so a title it shares is left to that.
+    #[must_use]
+    pub fn duplicate_titles(&self) -> Vec<Vec<&str>> {
+        let mut scopes: BTreeMap<(Vec<&str>, &str), Vec<&str>> = BTreeMap::new();
+        for (id, item) in &self.items {
+            if let Some(title) = item.title.one()
+                && self.holds_title(id)
+            {
+                scopes.entry((self.initiatives_of(id), title.as_str())).or_default().push(id);
+            }
+        }
+        scopes.into_values().filter(|group| group.len() > 1).collect()
+    }
+
     /// Whether `id` names an initiative or an item, live or deleted, other than a record of kind `own`: an item's `parent`
     /// names either by its id alone, so no id may name both.
     #[must_use]

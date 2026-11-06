@@ -445,11 +445,13 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
         .with(json!({"id": other.id(), "kind": other.kind()})),
         Rule::TitleTaken(other) => {
             let (of, id) = (other.kind(), other.id());
+            // Items are unique within an initiative, threads across the tracker.
+            let within = if of == "item" { " in the same initiative" } else { "" };
             CliError::refused(
                 "already-exists",
                 format!(
-                    "{of} {id} has this title, so the add would make a second; change that one with `acyclic {of} \
-                     edit {id}`, or give this one another title"
+                    "{of} {id} has this title{within}, so this would make a second; change that one with \
+                     `acyclic {of} edit {id}`, or give this one another title"
                 ),
             )
             .with(json!({"id": id}))

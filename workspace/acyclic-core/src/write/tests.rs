@@ -1105,3 +1105,152 @@ fn work_directly_under_an_initiative_takes_no_thread_from_its_neighbours() {
     commit_ok(&mut r, 5, vec![add("kid2", vec![under("one")])]);
     assert_eq!(thread_of(&r, "kid2"), thread_of(&r, "kid"));
 }
+
+/// An item with this title under `parent`, or under none.
+fn titled(id: &str, title: &str, parent: Option<&str>) -> Change {
+    let mut with = vec![Assign::Item(id.to_owned(), ItemAssign::Title(title.to_owned()))];
+    if let Some(parent) = parent {
+        with.push(Assign::Item(id.to_owned(), ItemAssign::Parent(parent.to_owned())));
+    }
+    Change::Add {
+        record: Record::Item(id.to_owned()),
+        minted: false,
+        on_repeat: Repeat::Update,
+        with,
+    }
+}
+
+/// Two initiatives and a few titles in them: `s1` and `s2` are both "Sow", one in each; `f1` is done and `r1` open, both
+/// "Reap"; `c1` is canceled and `p1` open, both "Plow"; `done-epic` is a caught-up parent of one done leaf; `e2` is an
+/// epic in `i2` over `k2`, which is "Reap" too.
+fn titled_world() -> Replica {
+    let mut r = replica("a");
+    for id in ["i1", "i2"] {
+        crate::model::add_initiative(&mut r, id, id, by(1)).unwrap();
+    }
+    commit_ok(
+        &mut r,
+        2,
+        vec![
+            titled("s1", "Sow", Some("i1")),
+            titled("s2", "Sow", Some("i2")),
+            titled("f1", "Reap", Some("i1")),
+            titled("c1", "Plow", Some("i1")),
+            titled("w2", "Water", Some("i2")),
+            titled("done-epic", "Roadmap", Some("i1")),
+            titled("done-kid", "Stage", Some("done-epic")),
+            titled("e2", "Epic", Some("i2")),
+            titled("k2", "Reap", Some("e2")),
+        ],
+    );
+    commit_ok(
+        &mut r,
+        3,
+        vec![
+            item("f1", ItemAssign::State(ItemState::Done)),
+            item("c1", ItemAssign::State(ItemState::Canceled)),
+            item("done-kid", ItemAssign::State(ItemState::Done)),
+        ],
+    );
+    // A title a finished leaf held is free to take, and so twins appear that reopening would make.
+    commit_ok(&mut r, 4, vec![titled("r1", "Reap", Some("i1")), titled("p1", "Plow", Some("i1"))]);
+    r
+}
+
+#[test]
+fn a_title_is_unique_among_unfinished_items_in_an_initiative_on_every_way_to_take_one() {
+    let r = titled_world();
+    let taken = |other: &str| vec![Rule::TitleTaken(Record::Item(other.into()))];
+    let minted = |id: &str, title: &str, parent: &str| match titled(id, title, Some(parent)) {
+        Change::Add { record, on_repeat, with, .. } => {
+            Change::Add { record, minted: true, on_repeat, with }
+        },
+        other => other,
+    };
+    let state = |id: &str, to: ItemState| item(id, ItemAssign::State(to));
+    let table: Vec<(&str, Change, Vec<Rule>)> = vec![
+        ("add, given id", titled("n", "Sow", Some("i1")), taken("s1")),
+        ("add, minted id", minted("n", "Sow", "i1"), taken("s1")),
+        ("add under an epic of the initiative", titled("n", "Sow", Some("e2")), taken("s2")),
+        ("add, same title in another initiative", titled("n", "Water", Some("i1")), vec![]),
+        ("add, a finished leaf's title", titled("n", "Reap", Some("i1")), taken("r1")),
+        ("add, a caught-up epic's title", titled("n", "Roadmap", Some("i1")), taken("done-epic")),
+        ("add, a free title", titled("n", "Weed", Some("i1")), vec![]),
+        ("rename onto a twin", item("w2", ItemAssign::Title("Sow".into())), taken("s2")),
+        ("rename to a free title", item("s1", ItemAssign::Title("Water".into())), vec![]),
+        ("move onto a twin", item("s2", ItemAssign::Parent("i1".into())), taken("s1")),
+        ("move without a twin", item("w2", ItemAssign::Parent("i1".into())), vec![]),
+        (
+            "move an epic whose child has a twin",
+            item("e2", ItemAssign::Parent("i1".into())),
+            taken("r1"),
+        ),
+        (
+            "move under an item of the initiative",
+            item("s2", ItemAssign::Parent("done-epic".into())),
+            taken("s1"),
+        ),
+        ("reopen a finished twin", state("f1", ItemState::Backlog), taken("r1")),
+        ("un-cancel a twin", state("c1", ItemState::Backlog), taken("p1")),
+        ("park a twin", state("c1", ItemState::Parked), taken("p1")),
+        ("reopen a finished leaf with no twin", state("done-kid", ItemState::Backlog), vec![]),
+    ];
+    for (name, change, expected) in table {
+        assert_eq!(refused_or_none(&r, change), expected, "{name}");
+    }
+}
+
+#[test]
+fn only_a_leaf_frees_its_title_by_finishing_so_a_caught_up_epic_keeps_its_name() {
+    let mut r = titled_world();
+    let model = read(&r);
+    assert!(model.items["done-kid"].is_done() && !model.holds_title("done-kid"));
+    assert!(
+        model.holds_title("done-epic"),
+        "its leaves are done, so it reads done, and it keeps its name"
+    );
+    assert_eq!(
+        refused(&r, vec![titled("n", "Roadmap", Some("i1"))]),
+        [Rule::TitleTaken(Record::Item("done-epic".into()))]
+    );
+    // A finished leaf that is given a child is a parent again, and takes its name back from the twin that has it.
+    commit_ok(&mut r, 6, vec![titled("again", "Stage", Some("i1"))]);
+    assert_eq!(
+        refused(&r, vec![titled("late", "Late", Some("done-kid"))]),
+        [Rule::TitleTaken(Record::Item("again".into()))]
+    );
+}
+
+#[test]
+fn items_in_no_initiative_are_one_scope() {
+    let mut r = titled_world();
+    commit_ok(&mut r, 5, vec![titled("n1", "Loose", None)]);
+    commit_ok(&mut r, 5, vec![titled("n2", "Other", None)]);
+    assert_eq!(
+        refused(&r, vec![titled("n3", "Loose", None)]),
+        [Rule::TitleTaken(Record::Item("n1".into()))]
+    );
+    assert_eq!(
+        refused(&r, vec![item("n2", ItemAssign::Title("Loose".into()))]),
+        [Rule::TitleTaken(Record::Item("n1".into()))]
+    );
+    // An initiative's own items are another scope.
+    assert_eq!(refused_or_none(&r, titled("n4", "Loose", Some("i1"))), vec![]);
+}
+
+#[test]
+fn a_clash_the_tracker_already_has_is_not_refused_again_by_an_edit_that_leaves_it_be() {
+    let mut a = titled_world();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    commit_ok(&mut a, 5, vec![titled("twin-a", "Fresh", Some("i1"))]);
+    commit_ok(&mut b, 5, vec![titled("twin-b", "Fresh", Some("i1"))]);
+    a.join(&b.state).unwrap();
+    assert_eq!(read(&a).duplicate_titles(), [vec!["twin-a", "twin-b"]]);
+    // Moving the epic that holds one of them within its scope, or parking it, makes nothing worse.
+    commit_ok(&mut a, 6, vec![item("twin-a", ItemAssign::Parent("i1".into()))]);
+    commit_ok(&mut a, 7, vec![item("twin-b", ItemAssign::State(ItemState::Parked))]);
+    // Renaming one ends it.
+    commit_ok(&mut a, 8, vec![item("twin-b", ItemAssign::Title("Other".into()))]);
+    assert_eq!(read(&a).duplicate_titles(), Vec::<Vec<&str>>::new());
+}

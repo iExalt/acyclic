@@ -618,6 +618,39 @@
       "summary": "Lost 01900000-0000-7000-8000-0000000000aa: its parent gone doesn't exist"
     },
     {
+      "identity": "{\"entry\":\"duplicate-title\",\"items\":[\"01900000-0000-7000-8000-0000000000ab\",\"01900000-0000-7000-8000-0000000000ac\"],\"initiative\":\"01900000-0000-7000-8000-0000000000ff\"}",
+      "items": [
+        {
+          "id": "01900000-0000-7000-8000-0000000000ab",
+          "initiative": "01900000-0000-7000-8000-0000000000ff",
+          "parent": "01900000-0000-7000-8000-0000000000ff",
+          "readiness": {
+            "readiness": "ready"
+          },
+          "stage": "ready",
+          "state": "open",
+          "thread": null,
+          "title": "Twin"
+        },
+        {
+          "id": "01900000-0000-7000-8000-0000000000ac",
+          "initiative": "01900000-0000-7000-8000-0000000000ff",
+          "parent": "01900000-0000-7000-8000-0000000000ff",
+          "readiness": {
+            "readiness": "ready"
+          },
+          "stage": "ready",
+          "state": "open",
+          "thread": null,
+          "title": "Twin"
+        }
+      ],
+      "key": "duplicate-title:01900000-0000-7000-8000-0000000000ab:01900000-0000-7000-8000-0000000000ac",
+      "kind": "duplicate-title",
+      "notify": false,
+      "summary": "2 items share the title Twin in Default"
+    },
+    {
       "fix": "acyclic item edit 01900000-0000-7000-8000-0000000000b1 --no-thread",
       "identity": "{\"entry\":\"thread-on-parent\",\"item\":\"01900000-0000-7000-8000-0000000000b1\",\"thread\":\"01900000-0000-7000-8000-0000000000f1\",\"fix\":\"acyclic item edit 01900000-0000-7000-8000-0000000000b1 --no-thread\"}",
       "item": {

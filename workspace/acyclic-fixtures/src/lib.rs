@@ -82,6 +82,9 @@ struct Generator {
     made: u64,
     /// Each item's id.
     item_ids: Vec<String>,
+    /// How many items have each drawn title, so a repeat is told apart: an initiative holds one unfinished item per
+    /// title, and every item here is in one initiative.
+    drawn: std::collections::BTreeMap<String, usize>,
     /// Each repository's id: the product, deploy and website repositories.
     repository_ids: Vec<String>,
     /// Each item's repository, by index into `repository_ids`: the one its evidence names, if it is done.
@@ -105,6 +108,7 @@ impl Generator {
             ids: SplitMix64::new(seed ^ 0x6964_735f_7365_6564),
             made: 0,
             item_ids: Vec::new(),
+            drawn: std::collections::BTreeMap::new(),
             repository_ids: Vec::new(),
             repository: Vec::new(),
             total,
@@ -168,6 +172,9 @@ impl Generator {
             None => (1, index),
         };
         let title = self.title();
+        let seen = self.drawn.entry(title.clone()).or_insert(0);
+        *seen += 1;
+        let title = if *seen > 1 { format!("{title}, part {seen}") } else { title };
         let roll = self.rng.unit();
         let repository = if roll < 0.85 {
             0
@@ -662,7 +669,7 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_535, 10_668_042_948_317_295_399));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_775, 1_025_738_443_312_359_225));
     }
 
     #[test]

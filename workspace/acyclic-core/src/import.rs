@@ -304,6 +304,18 @@ pub enum ValidationError {
         /// The other repository that has it.
         other: String,
     },
+    /// Two unfinished items in one initiative, or both in none, would share a title: two the document makes, or one it
+    /// makes or changes and one the tracker holds.
+    TitleTaken {
+        /// The first item by id.
+        item: String,
+        /// The other item.
+        other: String,
+        /// The title they share.
+        title: String,
+        /// The title of the initiative they are in, or none when they are in no initiative.
+        initiative: Option<String>,
+    },
     /// An evidence commit that isn't `<owner>/<name>@<sha>` or `<repository id>@<sha>`.
     InvalidCommit {
         /// The item.
@@ -378,6 +390,16 @@ impl fmt::Display for ValidationError {
             },
             Self::RepositoryNameTaken { repository, name, other } => {
                 write!(f, "repository {repository}: {name} is repository {other}'s name too")
+            },
+            Self::TitleTaken { item, other, title, initiative } => {
+                let place = initiative.as_ref().map_or_else(
+                    || "no initiative".to_owned(),
+                    |name| format!("initiative {name:?}"),
+                );
+                write!(
+                    f,
+                    "items {item} and {other} would both be titled {title:?} in {place}, and an unfinished item's title is its own there"
+                )
             },
             Self::InvalidCommit { item, commit } => {
                 write!(f, "item {item}: evidence commit {commit:?} isn't <repository id>@<sha>")

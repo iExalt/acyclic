@@ -288,7 +288,7 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
     let router = router(Config { tracker: tracker.clone(), ..config(None) }, tailscale());
     let pass = [("host", HOST_NAME), (IDENTITY, LOGIN), ("content-type", "application/json")];
     let accepted = json!({
-        "command": {"item": {"edit": {"item": item, "title": "B"}}},
+        "command": {"item": {"edit": {"item": item, "title": "A2"}}},
         "expect": [
             {"kind": "item-field", "item": item, "field": "title", "value": "A"},
             {"kind": "item-field", "item": item, "field": "notes", "value": null},
@@ -322,7 +322,7 @@ fn app_write_expectations_are_strict_and_refusal_leaves_the_locked_state_unchang
         (StatusCode::CONFLICT, Some("changed-since"))
     );
     let mismatches = refusal["error"]["details"]["mismatches"].as_array().unwrap();
-    assert_eq!(mismatches[0]["actual"], json!("B"));
+    assert_eq!(mismatches[0]["actual"], json!("A2"));
     assert!(mismatches.iter().any(|mismatch| mismatch["actual"] == json!("T")));
     assert!(mismatches.iter().any(|mismatch| mismatch["actual"] == json!(true)));
     assert_eq!(snapshot(), before, "a refused guard must not stamp the clock or renew a claim");

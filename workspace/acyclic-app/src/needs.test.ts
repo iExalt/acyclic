@@ -115,6 +115,16 @@ describe("needView", () => {
     }
   });
 
+  it("opens both items of a duplicate title from core's words, with no kind of its own to handle", () => {
+    const twins = (examples.needs as Need[]).find((need) => need.kind === "duplicate-title");
+    if (twins === undefined) throw new Error("the examples have no duplicate-title");
+    expect(twins.notify).toBe(false);
+    const view = needView(twins, none);
+    expect(view).toMatchObject({ kind: "duplicate-title", key: twins.key, actions: [] });
+    expect(view.text).toContain(String(twins.summary));
+    expect(view.items).toEqual((twins.items as { id: string }[]).map((one) => one.id));
+  });
+
   it("says a dangling waits-for as the plan reads, with the CLI's fix, and any other dangling field as before", () => {
     const titles = (id: string) => id.toUpperCase();
     const waits = needView(
