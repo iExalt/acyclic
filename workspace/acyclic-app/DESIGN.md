@@ -259,14 +259,14 @@ the Map, wide, are square. Sheets on a phone round their top corners, by 14 px.
   arrow keys or a mouse choose a row. Enter on a nonempty query opens the first result when none is selected; Enter
   on an empty, unselected menu does nothing.
 - **Keys, in Linear's habits.** G then O, M, T or N goes to the Overview, the Map, Threads or Needs you; C adds; / and
-  ⌘K search; ? lists the keys in the command menu, each runnable, and under them as text the rest: an item's keys
-  while none is open, J and K, search and undo, in the platform's own chords. With an item's panel shown, E edits, M
-  moves, W picks what it waits for, A adds inside; a move or link from the keyboard finds its target in the menu. A
-  move or link waiting for its target takes the focus in its pick bar, where typing finds the target (the key typed
-  starts the search and Enter picks the first match) and Enter, / and ? open an empty search. J and K move through
-  the Overview's rows and Needs you's entries, an entry being no control, so Enter on it does nothing; its focus ring
-  is rounded to the radius and drawn outside the entry, clear of its badge. No single key settles a need or deletes. Keys go to fields, input methods and changed forms first, and the
-  menu's Single-key shortcuts switch, per device, turns them off.
+  ⌘K search; ? lists the keys in the command menu, each runnable, and under them as text the rest: an item's keys while
+  none is open, J and K, search and undo, in the platform's own chords. With an item's panel shown, E edits, M moves, W
+  picks what it waits for, A adds inside; a move or link from the keyboard finds its target in the menu. A move or link
+  waiting for its target takes the focus in its pick bar, where typing finds the target (the key typed starts the search
+  and Enter picks the first match) and Enter, / and ? open an empty search. J and K move through the Overview's rows and
+  Needs you's entries, an entry being no control, so Enter on it does nothing; its focus ring is rounded to the radius
+  and drawn outside the entry, clear of its badge. No single key settles a need or deletes. Keys go to fields, input
+  methods and changed forms first, and the menu's Single-key shortcuts switch, per device, turns them off.
 - **Undo, not confirm.** A move, an item's fields (but its thread) and a link added or removed offer Undo in their
   notice, and ⌘Z while it shows; nothing else does, as nothing else has an exact inverse (a conflict settled, a reopen,
   a thread changed: agents act on them). Undo reads the plan first, and without that read it undoes nothing; it takes
