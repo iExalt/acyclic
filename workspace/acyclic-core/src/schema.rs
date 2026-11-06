@@ -24,8 +24,6 @@ pub mod item {
     pub const STATE: &str = "state";
     /// The parent item's id.
     pub const PARENT: &str = "parent";
-    /// A rough size.
-    pub const SIZE: &str = "size";
     /// Evidence of completion.
     pub const EVIDENCE: &str = "evidence";
     /// The thread the item belongs to; at most one, since it is a single field.
@@ -33,6 +31,20 @@ pub mod item {
     /// Set when the item is deleted: a tombstone no write clears. See `crate::delete`.
     pub const DELETED: &str = "deleted";
 }
+
+/// Fields older versions wrote and no command writes now, as `(kind, field)`. Their stored values stay in the state
+/// but lie dormant: a conflict in one isn't noted, since no command could settle it.
+pub const RETIRED: &[(&str, &str)] = &[
+    (kind::ITEM, "size"),
+    (kind::ITEM, "archived"),
+    (kind::ITEM, "reopened"),
+    (kind::REPOSITORY, repository::INSTALLATION),
+    (kind::ITEM, "gate"),
+];
+
+/// Prefixes of the sets older versions wrote and no command writes now, on any kind, whose elements lie dormant as
+/// [`RETIRED`] fields do.
+pub const RETIRED_SETS: &[&str] = &["area/", "resource/"];
 
 /// Link fields. A link's id derives from its kind and ends, so two replicas adding one link make one entity.
 pub mod link {

@@ -139,7 +139,6 @@ impl View<'_> {
             json!({
                 "role": model.role(id),
                 "notes": item.notes,
-                "size": item.size,
                 "repositories": item.repositories,
                 "children": model.children(id),
                 "links": links(&model.links, id),
@@ -478,7 +477,9 @@ mod tests {
 
     #[test]
     fn an_item_is_one_row_that_show_extends() {
-        let r = tracker();
+        let mut r = tracker();
+        // A size an older version stored is retired: it stays in the state but no item shows it.
+        r.write(&key(kind::ITEM, "a"), "size", USER, NOW, Some(json!("m"))).unwrap();
         viewing(&r, |view| {
             let row = view.item_row("c").unwrap();
             assert_eq!(
@@ -496,7 +497,7 @@ mod tests {
             // And its stage, rolled up from them under the key a leaf's has.
             assert_eq!(view.item_row("goal").unwrap()["stage"], "in-progress");
             let shown = view.item("a", &view.model.items["a"]).unwrap();
-            assert_eq!(shown.get("progress"), None);
+            assert_eq!((shown.get("progress"), shown.get("size")), (None, None));
             // The summary is at the top level, with no nested item, and show adds the rest.
             let summary = view.item_row("a").unwrap();
             for (name, value) in summary.as_object().unwrap() {

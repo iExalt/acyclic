@@ -179,7 +179,6 @@ fn an_add_repeated_changes_nothing_and_one_that_differs_is_refused() {
     let mut r = replica();
     let full = ItemFields {
         notes: Change::Set("n".into()),
-        size: Change::Set(Size::M),
         state: Some(ItemState::Parked),
         waits_for: Delta { add: vec!["x".into()], remove: vec![] },
         ..titled("A")

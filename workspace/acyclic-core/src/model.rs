@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
 use crate::graph;
-use crate::schema::{item as field, kind, link, repository, set, thread};
+use crate::schema::{RETIRED, RETIRED_SETS, item as field, kind, link, repository, set, thread};
 use crate::state::{Error, Key, Millis, Replica, State};
 
 /// The longest item id: a link's id holds two, and ids are file names.
@@ -113,27 +113,6 @@ pub enum ProgressState {
     Done,
 }
 
-/// A rough size.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Size {
-    /// Extra small.
-    Xs,
-    /// Small.
-    S,
-    /// Medium.
-    M,
-    /// Large.
-    L,
-    /// Extra large.
-    Xl,
-}
-
-impl Size {
-    /// Every size, smallest first.
-    pub const ALL: [Self; 5] = [Self::Xs, Self::S, Self::M, Self::L, Self::Xl];
-}
-
 /// What shows a done item was done.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -187,8 +166,6 @@ pub struct Item {
     pub done_at: Option<Millis>,
     /// The parent item's id.
     pub parent: Value<String>,
-    /// A rough size.
-    pub size: Value<Size>,
     /// Evidence of completion.
     pub evidence: Value<Evidence>,
     /// The thread the item belongs to.
@@ -333,13 +310,18 @@ impl Model {
     }
 
     /// Notes each field of a live entity that holds different values, read or not, so a field a newer version wrote
-    /// still shows; claims contest rather than conflict, and a set's elements only ever hold `true`.
+    /// still shows; claims contest rather than conflict, a set's elements only ever hold `true`, and a retired field
+    /// lies dormant, since nothing could settle it.
     fn note_conflicts(&mut self, key: &Key, entity: &crate::state::Entity) {
         if self.deleted.contains(key) {
             return;
         }
         for (name, register) in entity {
-            if name == crate::claim::FIELD || name.starts_with(set::REPOSITORY) {
+            if name == crate::claim::FIELD
+                || name.starts_with(set::REPOSITORY)
+                || RETIRED.contains(&(key.kind.as_str(), name.as_str()))
+                || RETIRED_SETS.iter().any(|prefix| name.starts_with(prefix))
+            {
                 continue;
             }
             let mut values = register.values().map(|stamped| &stamped.value);
@@ -895,7 +877,6 @@ fn read_item(state: &State, key: &Key) -> Result<Item, Error> {
         state: value(state, key, field::STATE)?,
         done_at,
         parent: value(state, key, field::PARENT)?,
-        size: value(state, key, field::SIZE)?,
         evidence: value(state, key, field::EVIDENCE)?,
         thread: value(state, key, field::THREAD)?,
         repositories: elements(state, key, set::REPOSITORY),

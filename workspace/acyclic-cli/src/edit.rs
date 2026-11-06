@@ -8,7 +8,7 @@
 
 use acyclic_core::ids;
 use acyclic_core::import::owner_name;
-use acyclic_core::model::{By, ItemState, Model, Size, WriteError};
+use acyclic_core::model::{By, ItemState, Model, WriteError};
 use acyclic_core::state::Replica;
 use acyclic_core::write::{
     self, Assign, Change as WriteChange, ChangeSet, CommitError, FieldName, ItemAssign, Outcome,
@@ -69,7 +69,6 @@ pub(crate) struct ItemFields {
     pub thread: Change<String>,
     pub state: Option<ItemState>,
     pub notes: Change<String>,
-    pub size: Change<Size>,
     pub repositories: Delta,
     pub waits_for: Delta,
 }
@@ -287,9 +286,6 @@ pub(crate) fn item_changes(id: &str, fields: &ItemFields, adding: Adding) -> Cha
     if let Some(notes) = fields.notes.given() {
         assigns.push(field(ItemAssign::Notes(notes.cloned())));
     }
-    if let Some(size) = fields.size.given() {
-        assigns.push(field(ItemAssign::Size(size.copied())));
-    }
     if let Some(parent) = fields.parent.given() {
         assigns.push(field(ItemAssign::Parent(parent.cloned())));
     }
@@ -369,11 +365,10 @@ fn changes(record: Record, assigns: Vec<Assign>, adding: Adding) -> ChangeSet {
 mod tests;
 
 /// The flag that sets a field, as an add's refusal names it, in the order the flags are checked.
-const FLAGS: [(&str, &str); 11] = [
+const FLAGS: [(&str, &str); 10] = [
     ("title", "--title"),
     ("parent", "--parent"),
     ("notes", "--notes"),
-    ("size", "--size"),
     ("state", "--state"),
     ("waits-for", "--waits-for"),
     ("thread", "--thread"),

@@ -8,7 +8,7 @@ pub mod stats;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use acyclic_core::import::{Evidence, Import, Item, Repository, Size, State, Thread};
+use acyclic_core::import::{Evidence, Import, Item, Repository, State, Thread};
 
 pub use rng::SplitMix64;
 
@@ -169,11 +169,10 @@ impl Generator {
         } else {
             2
         };
-        let size = match depth {
-            1 | 2 => Size::Xl,
-            _ => [Size::Xs, Size::S, Size::S, Size::M, Size::M, Size::L][self.rng.below(6)],
-        };
-        // A resource draw plans no longer carry, kept so each seed keeps its structure.
+        // A size draw and a resource draw plans no longer carry, kept so each seed keeps its structure.
+        if depth >= 3 {
+            self.rng.below(6);
+        }
         let _ = depth >= 3 && self.rng.chance(0.01);
         let id = self.id();
         self.item_ids.push(id.clone());
@@ -186,7 +185,6 @@ impl Generator {
             thread: None,
             repositories: (depth > 1).then(|| vec![self.repository_ids[repository].clone()]),
             waits_for: None,
-            size: Some(size),
             evidence: None,
         });
         self.depth.push(depth);
@@ -546,7 +544,7 @@ mod tests {
         // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (156_110, 5_764_513_502_845_841_242));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (149_368, 15_104_859_600_027_612_192));
     }
 
     #[test]

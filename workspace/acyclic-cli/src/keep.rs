@@ -151,7 +151,6 @@ fn item_edit(id: &str, assign: &ItemAssign) -> Command {
         ItemAssign::Notes(notes) => set("notes", notes),
         ItemAssign::Parent(parent) => set("parent", parent),
         ItemAssign::Thread(thread) => set("thread", thread),
-        ItemAssign::Size(size) => set("size", &size.as_ref().map(word)),
         ItemAssign::WaitsFor(to, true) => ("waits-for", Flag::Each(to.clone())),
         ItemAssign::WaitsFor(to, false) => ("no-waits-for", Flag::Each(to.clone())),
         ItemAssign::Repository(repository, true) => ("repository", Flag::Each(repository.clone())),
@@ -190,8 +189,7 @@ const fn clear(flag: &str) -> &'static str {
     match flag.as_bytes() {
         b"notes" => "no-notes",
         b"parent" => "no-parent",
-        b"thread" => "no-thread",
-        _ => "no-size",
+        _ => "no-thread",
     }
 }
 

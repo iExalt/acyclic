@@ -127,7 +127,7 @@ describe("told", () => {
 });
 
 describe("a write drawn before the server answers", () => {
-  const items = [item("garden"), item("beds", "garden", [], { notes: "old", size: "s" })];
+  const items = [item("garden"), item("beds", "garden", [], { notes: "old", thread: "t" })];
 
   it("draws an added item where it goes, once, and says when the plan holds it", () => {
     const add = { kind: "add" as const, item: { id: "pond", title: "Pond", parent: "garden", thread: "t" } };
@@ -150,7 +150,7 @@ describe("a write drawn before the server answers", () => {
       edited: { base, draft: { ...base, title: " Raised beds ", notes: "", state: "parked" } },
     };
     const drawn = withPending(items, edit);
-    expect(drawn[1]).toMatchObject({ title: "Raised beds", notes: null, size: "s", state: "parked" });
+    expect(drawn[1]).toMatchObject({ title: "Raised beds", notes: null, thread: "t", state: "parked" });
     expect(drawn[0]).toBe(items[0]);
     expect(landed(edit, items)).toBe(false);
     expect(landed(edit, drawn)).toBe(true);

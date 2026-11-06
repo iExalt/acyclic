@@ -167,7 +167,6 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
       thread,
       state: "backlog",
       notes: null,
-      size: null,
       links,
       conflicts: {},
     };
@@ -187,7 +186,6 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
           state: one.state === "done" ? one.state : (changed.state ?? one.state),
           thread: or(changed.thread, one.thread),
           notes: or(changed.notes, one.notes),
-          size: or(changed.size, one.size),
         },
   );
 }

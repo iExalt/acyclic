@@ -38,10 +38,10 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every r
   ],
   "items": [
     // Required: id and title. "state" is backlog, parked or done, backlog for a new item.
-    // Optional: parent, thread, notes, size (xs, s, m, l, xl), repositories, waits_for (the items it can't start
-    // before they are done), and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"},
-    // either part or both. A list given replaces the record's: [] clears it.
-    {"id": "01900000-0000-7000-8000-000000000003", "title": "Build the beds", "size": "m",
+    // Optional: parent, thread, notes, repositories, waits_for (the items it can't start before they are done),
+    // and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"}, either part or both. A list
+    // given replaces the record's: [] clears it.
+    {"id": "01900000-0000-7000-8000-000000000003", "title": "Build the beds",
      "thread": "01900000-0000-7000-8000-000000000002", "repositories": ["01900000-0000-7000-8000-000000000001"]},
     {"id": "01900000-0000-7000-8000-000000000004", "title": "Plant the seeds",
      "thread": "01900000-0000-7000-8000-000000000002", "waits_for": ["01900000-0000-7000-8000-000000000003"]}
@@ -92,22 +92,6 @@ pub struct Repository {
 /// This compatibility re-export keeps import documents and the model on the same state type.
 pub use crate::model::ItemState as State;
 
-/// A rough size.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Size {
-    /// Extra small.
-    Xs,
-    /// Small.
-    S,
-    /// Medium.
-    M,
-    /// Large.
-    L,
-    /// Extra large.
-    Xl,
-}
-
 /// What shows a done item was done: a commit, words, or both.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -147,9 +131,6 @@ pub struct Item {
     /// The items it waits for, which it can't start until they are done: the whole list, replacing the item's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waits_for: Option<Vec<String>>,
-    /// A rough size.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<Size>,
     /// Evidence of completion, for done items only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<Evidence>,

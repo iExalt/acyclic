@@ -110,8 +110,7 @@
             "title": "C2",
             "state": "parked",
             "thread": "01900000-0000-7000-8000-0000000000f1",
-            "notes": "n",
-            "size": "m"
+            "notes": "n"
           }
         }
       }
@@ -123,8 +122,7 @@
           "edit": {
             "item": "01900000-0000-7000-8000-0000000000c1",
             "no-thread": true,
-            "no-notes": true,
-            "no-size": true
+            "no-notes": true
           }
         }
       }

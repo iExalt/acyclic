@@ -24,7 +24,7 @@ export interface Undo {
 }
 
 /** An item's fields an edit can set and an undo set back, with the value each holds; an empty one is null. */
-const FIELDS = ["title", "state", "notes", "size"] as const;
+const FIELDS = ["title", "state", "notes"] as const;
 type Field = (typeof FIELDS)[number];
 const held = (item: Item | undefined, field: Field): string | null => (item === undefined ? null : item[field]);
 

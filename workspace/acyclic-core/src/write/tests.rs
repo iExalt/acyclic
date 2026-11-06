@@ -567,7 +567,7 @@ fn change(tc: &TestCase) -> Change {
     let pick = |tc: &TestCase| ids[tc.draw(gs::integers::<usize>().max_value(6))].to_owned();
     let maybe = |tc: &TestCase| tc.draw(gs::booleans()).then(|| pick(tc));
     let id = pick(tc);
-    let assign = match tc.draw(gs::integers::<u8>().max_value(9)) {
+    let assign = match tc.draw(gs::integers::<u8>().max_value(8)) {
         0 => ItemAssign::Title(pick(tc)),
         1 => ItemAssign::Notes(maybe(tc)),
         2 => ItemAssign::State(
@@ -575,10 +575,9 @@ fn change(tc: &TestCase) -> Change {
                 [tc.draw(gs::integers::<usize>().max_value(2))],
         ),
         3 => ItemAssign::Parent(maybe(tc)),
-        4 => ItemAssign::Size(tc.draw(gs::booleans()).then_some(Size::M)),
-        5 => ItemAssign::Thread(tc.draw(gs::booleans()).then(|| "t".to_owned())),
-        6 => ItemAssign::Repository("r".into(), tc.draw(gs::booleans())),
-        7 => ItemAssign::WaitsFor(pick(tc), tc.draw(gs::booleans())),
+        4 => ItemAssign::Thread(tc.draw(gs::booleans()).then(|| "t".to_owned())),
+        5 => ItemAssign::Repository("r".into(), tc.draw(gs::booleans())),
+        6 => ItemAssign::WaitsFor(pick(tc), tc.draw(gs::booleans())),
         _ => return add(&id, vec![]),
     };
     Change::Set(Assign::Item(id, assign))
@@ -782,7 +781,6 @@ fn the_projection_is_what_reading_the_writes_gives(tc: TestCase) {
                 "title" => ItemAssign::Title("settled".into()),
                 "state" => ItemAssign::State(ItemState::Done),
                 "notes" => ItemAssign::Notes(None),
-                "size" => ItemAssign::Size(None),
                 "thread" => ItemAssign::Thread(None),
                 _ => ItemAssign::Parent(None),
             };

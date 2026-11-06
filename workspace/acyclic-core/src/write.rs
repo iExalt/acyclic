@@ -11,7 +11,7 @@ use serde_json::Value as Json;
 
 use crate::import::is_object_id;
 use crate::model::{
-    self, By, Evidence, Item, ItemState, Model, Repository, Size, Thread, Value, WriteError,
+    self, By, Evidence, Item, ItemState, Model, Repository, Thread, Value, WriteError,
 };
 use crate::place::{Inherited, passed_down};
 use crate::ready::{Readiness, ReadinessEvaluator, Stage};
@@ -77,8 +77,6 @@ pub enum ExpectedItemField {
     State,
     /// The notes.
     Notes,
-    /// The size.
-    Size,
 }
 
 /// A thread field an exact edit can restore.
@@ -231,7 +229,6 @@ pub fn check_expected(
                     ExpectedItemField::Parent => serde_json::to_value(&item.parent),
                     ExpectedItemField::State => serde_json::to_value(&item.state),
                     ExpectedItemField::Notes => serde_json::to_value(&item.notes),
-                    ExpectedItemField::Size => serde_json::to_value(&item.size),
                 }
                 .expect("model values serialize")
             },
@@ -375,8 +372,6 @@ pub enum FieldName {
     State,
     /// An item's parent.
     Parent,
-    /// An item's size.
-    Size,
     /// An item's evidence.
     Evidence,
     /// An item's thread.
@@ -404,7 +399,6 @@ impl FieldName {
             Self::Notes => field::NOTES,
             Self::State => field::STATE,
             Self::Parent => field::PARENT,
-            Self::Size => field::SIZE,
             Self::Evidence => field::EVIDENCE,
             Self::Thread => field::THREAD,
             Self::Brief => thread::BRIEF,
@@ -437,8 +431,6 @@ pub enum ItemAssign {
     State(ItemState),
     /// Its parent, or the top level.
     Parent(Option<String>),
-    /// Its size, or none.
-    Size(Option<Size>),
     /// Its evidence, or none.
     Evidence(Option<Evidence>),
     /// Its thread, or none.
@@ -494,7 +486,6 @@ impl Assign {
                     ItemAssign::Notes(_) => FieldName::Notes,
                     ItemAssign::State(_) => FieldName::State,
                     ItemAssign::Parent(_) => FieldName::Parent,
-                    ItemAssign::Size(_) => FieldName::Size,
                     ItemAssign::Evidence(_) => FieldName::Evidence,
                     ItemAssign::Thread(_) => FieldName::Thread,
                     ItemAssign::Repository(r, _) => FieldName::Repository(r.clone()),
@@ -532,7 +523,6 @@ impl Assign {
                 ItemAssign::Notes(v) => to_json(v),
                 ItemAssign::State(v) => to_json(v),
                 ItemAssign::Parent(v) => to_json(v),
-                ItemAssign::Size(v) => to_json(v),
                 ItemAssign::Evidence(v) => to_json(v),
                 ItemAssign::Thread(v) => to_json(v),
                 ItemAssign::Repository(_, present) | ItemAssign::WaitsFor(_, present) => {
@@ -1448,7 +1438,6 @@ fn holds(model: &Model, assign: &Assign) -> bool {
                 ItemAssign::Notes(v) => item.notes.holds(v.as_ref()),
                 ItemAssign::State(v) => item.state.holds(Some(v)),
                 ItemAssign::Parent(v) => item.parent.holds(v.as_ref()),
-                ItemAssign::Size(v) => item.size.holds(v.as_ref()),
                 ItemAssign::Evidence(v) => item.evidence.holds(v.as_ref()),
                 ItemAssign::Thread(v) => item.thread.holds(v.as_ref()),
                 ItemAssign::Repository(r, present) => item.repositories.contains(r) == *present,
@@ -1489,7 +1478,6 @@ const fn assign_name(assign: &ItemAssign) -> &'static str {
         ItemAssign::Notes(_) => field::NOTES,
         ItemAssign::State(_) => field::STATE,
         ItemAssign::Parent(_) => field::PARENT,
-        ItemAssign::Size(_) => field::SIZE,
         ItemAssign::Evidence(_) => field::EVIDENCE,
         ItemAssign::Thread(_) => field::THREAD,
         ItemAssign::Repository(..) => set::REPOSITORY,
@@ -1505,7 +1493,6 @@ fn empty_item(id: &str) -> Item {
         state: Value::None,
         done_at: None,
         parent: Value::None,
-        size: Value::None,
         evidence: Value::None,
         thread: Value::None,
         repositories: BTreeSet::new(),
@@ -1617,7 +1604,6 @@ fn project_item(model: &mut Model, id: &str, assign: &ItemAssign, at: Millis) {
             item.done_at = (*v == ItemState::Done).then_some(at);
         },
         ItemAssign::Parent(v) => item.parent = one(v.clone()),
-        ItemAssign::Size(v) => item.size = one(*v),
         ItemAssign::Evidence(v) => item.evidence = one(v.clone()),
         ItemAssign::Thread(v) => item.thread = one(v.clone()),
         ItemAssign::Repository(r, present) => {

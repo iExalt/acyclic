@@ -4,7 +4,7 @@ import { type FormEvent, useRef, useState } from "react";
 import type { Command, Item } from "./api";
 import type { Edited } from "./edits";
 import { useFieldInView } from "./focus";
-import { draftOf, type ItemDraft, itemEdit, SIZES, STATES, stateHint } from "./forms";
+import { draftOf, type ItemDraft, itemEdit, STATES, stateHint } from "./forms";
 import { StageLabel } from "./Stage";
 import { stateWords } from "./stages";
 
@@ -89,17 +89,6 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
           {threads.map((one) => (
             <option key={one.id} value={one.id}>
               {one.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Size
-        <select name="size" value={draft.size} onChange={set("size")}>
-          <option value="">None</option>
-          {SIZES.map((size) => (
-            <option key={size} value={size}>
-              {size}
             </option>
           ))}
         </select>

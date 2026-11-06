@@ -234,10 +234,10 @@ fn usage_errors_and_help_are_text() {
     assert!(edit.stdout.contains("\nGlobal options:\n"), "{edit:?}");
     assert_eq!((item.code, item.stdout.starts_with("Adds, edits")), (exit::OK, true), "{item:?}");
     // An enum-valued input lists its values in help, and a wrong one names them.
-    assert!(edit.stdout.contains("[possible values: xs, s, m, l, xl]"), "{edit:?}");
-    let wrong = run("acyclic item edit a --size huge");
+    assert!(edit.stdout.contains("[possible values: backlog, parked]"), "{edit:?}");
+    let wrong = run("acyclic item edit a --state huge");
     assert_eq!(wrong.code, exit::USAGE);
-    assert!(wrong.stderr.contains("[possible values: xs, s, m, l, xl]"), "{wrong:?}");
+    assert!(wrong.stderr.contains("[possible values: backlog, parked]"), "{wrong:?}");
 }
 
 #[test]
@@ -540,7 +540,7 @@ fn every_command_follows_the_input_conventions() {
                 assert!(longs.contains(&field), "{path}: --no-{field} without --{field}");
             }
             // An input that takes one of the model's enums lists its values.
-            if ["size", "state", "level", "kind", "format", "renderer", "shell"].contains(&id) {
+            if ["state", "level", "kind", "format", "renderer", "shell"].contains(&id) {
                 assert!(!arg.get_possible_values().is_empty(), "{path}: {id} lists no values");
             }
         }
@@ -596,6 +596,8 @@ fn removed_fields_the_link_group_and_the_in_progress_state_are_refused_as_unknow
         "acyclic item add -t T --resource x",
         "acyclic item add -t T --gate x",
         "acyclic item edit a --no-gate",
+        "acyclic item add -t T --size m",
+        "acyclic item edit a --no-size",
         "acyclic link add a waits-for b",
         "acyclic item edit a --state in-progress",
     ] {
@@ -616,7 +618,6 @@ fn flags_that_contradict_each_other_are_usage_errors() {
         "acyclic item edit a --notes x --no-notes",
         "acyclic item edit a --parent b --no-parent",
         "acyclic item edit a --thread t --no-thread",
-        "acyclic item edit a --size m --no-size",
         "acyclic item edit a --waits-for b --no-waits-for b",
         "acyclic item edit a --repository r --no-repository r",
         "acyclic thread edit t --brief b --no-brief",
