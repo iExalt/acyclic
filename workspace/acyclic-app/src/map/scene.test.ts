@@ -113,6 +113,39 @@ describe("scene", () => {
     expect(opened.edges.every((edge) => !edge.dim && !edge.hovered)).toBe(true);
   });
 
+  it("leaves edge and junction emphasis alone when hover highlights no connection", () => {
+    const isolated = buildModel([...plan, item("alone", "top")]);
+    const open = visible(isolated, { collapsed: new Set() });
+    const layout: Placed = {
+      ...placed,
+      nodes: new Map(open.nodes.map((node, i) => [node.id, { x: i * 20, y: 0, width: 10, height: 10 }])),
+      routes: new Map([
+        [
+          "a->b",
+          [
+            { x: 5, y: 5 },
+            { x: 25, y: 5 },
+          ],
+        ],
+      ]),
+      junctions: new Map([["a->b", [{ x: 15, y: 5 }]]]),
+    };
+    for (const thread of [null, "t"]) {
+      const rest = scene(open, layout, { item: null, thread }, threadOf);
+      const hovered = scene(open, layout, { item: null, thread, hovered: "alone" }, threadOf);
+      expect(rest.edges.length).toBeGreaterThan(0);
+      expect(rest.junctions.length).toBeGreaterThan(0);
+      expect(hovered.edges).toEqual(rest.edges);
+      expect(hovered.junctions).toEqual(rest.junctions);
+    }
+    // Even if a tile has a connection, one hidden as redundant cannot be highlighted.
+    const redundant = { ...layout, redundant: new Set(["a->b"]) };
+    const rest = scene(open, redundant, { item: "c", thread: "u" }, threadOf);
+    const hovered = scene(open, redundant, { item: "c", thread: "u", hovered: "b" }, threadOf);
+    expect(rest.edges).toMatchObject([{ id: "a->c", dim: false, hovered: false }]);
+    expect(hovered.edges).toEqual(rest.edges);
+  });
+
   it("routes a thread through the collapsed box that hides a member", () => {
     const closed = visible(model, { collapsed: new Set(["top"]) });
     const drawn = scene(closed, placed, { item: null, thread: "t" }, threadOf);
