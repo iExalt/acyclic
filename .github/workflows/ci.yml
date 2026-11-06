@@ -27,7 +27,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - id: profiles
-        run: echo "hash=$(sh scripts/profile-hash.sh)" >> "$GITHUB_OUTPUT"
+        run: |
+          hash=$(sh scripts/profile-hash.sh)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ${{ steps.profiles.outputs.hash }}
@@ -40,7 +42,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - id: profiles
-        run: echo "hash=$(sh scripts/profile-hash.sh)" >> "$GITHUB_OUTPUT"
+        run: |
+          hash=$(sh scripts/profile-hash.sh)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ${{ steps.profiles.outputs.hash }}
@@ -77,7 +81,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - id: profiles
-        run: echo "hash=$(sh scripts/profile-hash.sh)" >> "$GITHUB_OUTPUT"
+        run: |
+          hash=$(sh scripts/profile-hash.sh)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
       # A cache of its own, holding only the journeys profile the check builds, not the dev build an older cache had.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
