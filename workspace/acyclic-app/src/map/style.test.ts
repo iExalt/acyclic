@@ -18,7 +18,7 @@ describe("style", () => {
     const node = (id: string, classes: string) =>
       core.add({
         group: "nodes",
-        data: { id, label: id, width: 200, height: 64, textWidth: 150, layer: 0, mark: MARK },
+        data: { id, label: id, width: 200, height: 64, textWidth: 150, layer: 0, mark: MARK, stageMark: MARK },
         classes,
       });
     const drawn = (classes: string) => {
@@ -37,8 +37,8 @@ describe("style", () => {
     };
     const plain = { border: "solid", align: "left-inside", opacity: 1, fill: 1, colour: expect.any(String) };
     expect(drawn("leaf")).toEqual({ ...plain, images: [MARK] });
-    expect(drawn("box")).toEqual({ ...plain, images: [MARK] });
-    expect(drawn("collapsed")).toEqual({ ...plain, images: [MARK] });
+    expect(drawn("box")).toEqual({ ...plain, images: [MARK, MARK] });
+    expect(drawn("collapsed")).toEqual({ ...plain, images: [MARK, MARK] });
     // Outside the thread lit, a tile fades, but its title stays at full strength, muted.
     expect(drawn("leaf dim")).toMatchObject({ opacity: 1, fill: 0.35, colour: rgb(PALETTES.dark.muted) });
   });

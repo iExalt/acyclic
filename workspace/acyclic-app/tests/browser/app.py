@@ -397,7 +397,14 @@ def centre(page, id, rise=0):
 
 def tap_middle(page, view, id, rise=0):
     """Taps the middle of a node where it is drawn, after bringing it to full size, `rise` above the middle."""
+    # Existence is not clickability: a frame-first reveal has already inserted its hidden children.
+    ready = """id => {
+        const m = document.querySelector('[data-testid=map]'), node = m?.cy?.getElementById(id);
+        return m?.dataset.settled === 'true' && node?.nonempty() && node.visible();
+    }"""
+    page.wait_for_function(ready, arg=id)
     centre(page, id, rise)
+    page.wait_for_function(ready, arg=id)
     middle = page.get_by_test_id("map").evaluate(
         "(m, id) => { const b = m.cy.getElementById(id).renderedBoundingBox({ includeLabels: false });"
         " const r = m.getBoundingClientRect(); return { x: r.x + (b.x1 + b.x2) / 2, y: r.y + (b.y1 + b.y2) / 2 }; }",
@@ -1868,8 +1875,45 @@ def map_journey(page, view, plan, name, failures, hint=None):
             ("expanding", expected + len(plan.children(box))),
             ("collapsing", expected),
         ]:
+            # Capture actual animation frames, including nested reflow. Size changes must not add a swoop
+            # outside the valid endpoints, and new contents appear only once their frame has landed.
+            page.get_by_test_id("map").evaluate(
+                """(m, id) => {
+                    const cy = m.cy, end = performance.now() + 3000;
+                    const probe = { frames: [], running: true };
+                    m.frameProbe = probe;
+                    const capture = () => {
+                        const node = cy.getElementById(id), z = cy.zoom(), pan = cy.pan();
+                        const children = cy.nodes().filter(n => n.data('owner') === id);
+                        probe.frames.push({
+                            x: (node.position().x - node.width() / 2) * z + pan.x,
+                            y: (node.position().y - node.height() / 2) * z + pan.y,
+                            early: children.some(n => n.visible() &&
+                                (Math.abs(node.width() - node.data('width')) > 0.1 ||
+                                 Math.abs(node.height() - node.data('height')) > 0.1)),
+                            fading: children.some(n => n.visible() && Number(n.style('opacity')) < 1),
+                        });
+                    };
+                    probe.capture = capture;
+                    const tick = () => {
+                        if (!probe.running || performance.now() >= end) return;
+                        capture(); requestAnimationFrame(tick);
+                    };
+                    tick();
+                }""",
+                box,
+            )
             tap_box(page, view, box)
             wait_drawn(page, nodes)
+            samples = page.get_by_test_id("map").evaluate(
+                "m => { const p = m.frameProbe; p.running = false; p.capture(); delete m.frameProbe; return p.frames; }"
+            )
+            for axis in ("x", "y"):
+                limits = sorted((samples[0][axis], samples[-1][axis]))
+                if any(not limits[0] - 1 <= frame[axis] <= limits[1] + 1 for frame in samples):
+                    failures.append(f"{name}: {action} {box} overshot its layout corners on {axis}")
+            if any(frame["early"] or frame["fading"] for frame in samples):
+                failures.append(f"{name}: {action} {box} revealed contents before its frame landed or faded them")
             if action == "expanding":
                 relaid = page.get_by_test_id("map").evaluate(corner, box) != placed
                 if not checked:
