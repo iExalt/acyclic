@@ -1,10 +1,13 @@
 name: Build one release archive
-description: Builds the acyclic binary for a target, checks it runs, and uploads its archive; the caller has checked the commit out and set TARGET and ACYCLIC_REQUIRE_APP
+description: Builds the acyclic binary for a target, checks it runs, and uploads its archive; the caller has checked the source and defining tooling out, selected Mise tools and set TARGET and ACYCLIC_REQUIRE_APP
 
 inputs:
   target:
     description: The Rust target triple to build
     required: true
+  frontend-producer:
+    description: Whether this native job produces the shared frontend
+    default: "false"
   reuse-notices:
     description: Whether to restore the crates' licence notices from a cache; a build that publishes sets it to false, and generates them afresh
     default: "true"
@@ -12,7 +15,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
     - id: profiles
       run: |
         hash=$(sh scripts/profile-hash.sh)
@@ -30,8 +32,9 @@ runs:
         sudo apt-get install -y --no-install-recommends musl-tools
         echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
       shell: bash
-    - run: mise run build:app
-      shell: bash
+    - uses: ./.build-tooling/.github/actions/frontend
+      with:
+        producer: ${{ inputs.frontend-producer }}
     - run: cargo build --release --locked -p acyclic --target "$TARGET"
       shell: bash
     - name: Check the binary runs, and is static on Linux

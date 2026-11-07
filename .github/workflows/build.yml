@@ -1,32 +1,19 @@
 name: Build
 
 # Builds the release binaries and the server's image, and rehearses publishing the image into a throwaway registry.
-# Every pull request runs it, and `build ok` is the check that must pass before a merge. Pushes to main run it too, so
-# pull requests and tags start from main's caches. publish.yml calls it to build the tagged commit it publishes.
+# CI calls it for pull requests and main; publish.yml calls it for the tagged source.
+# The x86 job shares its frontend before compiling Rust, while the other jobs prepare independently.
 on:
-  pull_request:
-  push:
-    branches: [main]
-    paths:
-      - Cargo.toml
-      - Cargo.lock
-      - Containerfile
-      - LICENSE
-      - THIRD_PARTY.md
-      - mise.toml
-      - workspace/**
-      - .github/actions/**
-      - scripts/notices.sh
-      - scripts/profile-hash.sh
-      - scripts/notices/**
-      - scripts/publish-image.sh
-      - .github/workflows/build.yml
   workflow_call:
     inputs:
       ref:
         description: The commit or tag to build
         type: string
         required: true
+      reuse-notices:
+        description: Reuse crate notices for the ordinary CI caller
+        type: boolean
+        default: false
       skip-rehearsal:
         description: Skip rehearsing the image's publication
         type: boolean
@@ -34,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # A newer push to a pull request replaces its running build. A called run takes the caller's github context, so it
 # gets a group of its own that can't collide with the caller's.
@@ -64,11 +52,35 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
-      - uses: ./.github/actions/build-archive
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        with:
+          install_args: rust node pnpm github:EmbarkStudios/cargo-about
+      - name: Require defining workflow identity
+        id: tooling
+        env:
+          JOB_CONTEXT: ${{ toJSON(job) }}
+        run: |
+          repository=$(jq -er '.workflow_repository | select(type == "string")' <<< "$JOB_CONTEXT")
+          revision=$(jq -er '.workflow_sha | select(type == "string")' <<< "$JOB_CONTEXT")
+          [[ "$repository" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.tooling.outputs.repository }}
+          ref: ${{ steps.tooling.outputs.revision }}
+          path: .build-tooling
+          persist-credentials: false
+      - uses: ./.build-tooling/.github/actions/build-archive
+        env:
+          FRONTEND_TOOLING_REPOSITORY: ${{ steps.tooling.outputs.repository }}
+          FRONTEND_TOOLING_SHA: ${{ steps.tooling.outputs.revision }}
         with:
           target: ${{ matrix.target }}
+          frontend-producer: ${{ matrix.arch == 'amd64' }}
           # A build that publishes (publish.yml calls this workflow with a ref) generates the notices afresh.
-          reuse-notices: ${{ inputs.ref == '' }}
+          reuse-notices: ${{ inputs.ref == '' || inputs.reuse-notices == true }}
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build the image from this archive, and run it on this architecture
@@ -119,10 +131,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
-      - uses: ./.github/actions/build-archive
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        with:
+          install_args: rust node pnpm github:EmbarkStudios/cargo-about
+      - name: Require defining workflow identity
+        id: tooling
+        env:
+          JOB_CONTEXT: ${{ toJSON(job) }}
+        run: |
+          repository=$(jq -er '.workflow_repository | select(type == "string")' <<< "$JOB_CONTEXT")
+          revision=$(jq -er '.workflow_sha | select(type == "string")' <<< "$JOB_CONTEXT")
+          [[ "$repository" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.tooling.outputs.repository }}
+          ref: ${{ steps.tooling.outputs.revision }}
+          path: .build-tooling
+          persist-credentials: false
+      - uses: ./.build-tooling/.github/actions/build-archive
+        env:
+          FRONTEND_TOOLING_REPOSITORY: ${{ steps.tooling.outputs.repository }}
+          FRONTEND_TOOLING_SHA: ${{ steps.tooling.outputs.revision }}
         with:
           target: aarch64-apple-darwin
-          reuse-notices: ${{ inputs.ref == '' }}
+          reuse-notices: ${{ inputs.ref == '' || inputs.reuse-notices == true }}
 
   rehearse:
     name: rehearse publishing

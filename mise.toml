@@ -34,7 +34,7 @@ run = [
   "sh scripts/pre-push-test.sh",
   "rumdl check .",
   "actionlint",
-  "shellcheck scripts/build-ci-image.sh scripts/with-ci-buildkit.sh",
+  "shellcheck scripts/build-ci-image.sh scripts/with-ci-buildkit.sh scripts/check-browser.sh scripts/check-browser-artifact.sh",
 ]
 
 [tasks."app:install"]
@@ -80,11 +80,11 @@ description = "Drives the app in headless Chromium and WebKit; downloads Playwri
 depends = ["build:app"]
 # Unbuffered, so each journey's line reaches CI's log as it finishes, and the log's timestamps time it.
 env = { ACYCLIC_REQUIRE_APP = "1", PYTHONUNBUFFERED = "1" }
-run = [
-  "cargo build --quiet --locked --profile journeys -p acyclic -p acyclic-fixtures",
-  "uv run --no-project --with playwright==1.64.0 python -m playwright install chromium webkit",
-  "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-app/tests/browser/app.py target/journeys/acyclic target/journeys/acyclic-fixtures",
-]
+run = "sh scripts/check-browser.sh"
+
+[tasks."check:browser:artifact"]
+description = "Check a verified frontend bundle without rebuilding it; ARTIFACT_ROOT names the complete bundle"
+run = 'sh scripts/check-browser-artifact.sh "$PWD" "${ARTIFACT_ROOT:?set ARTIFACT_ROOT}"'
 
 [tasks."deps:browser"]
 description = "Install the browsers' system libraries with apt, for check:browser on Linux; CI runs it as its own step, so check:browser's time is the tests'"
