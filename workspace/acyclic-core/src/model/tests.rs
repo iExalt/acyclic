@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::*;
+use crate::ready::{ReadinessEvaluator, Stage};
 use crate::state::ReplicaId;
 
 fn replica(name: &str) -> Replica {
@@ -432,6 +433,115 @@ fn canceled_leaves_leave_the_count_and_a_parent_of_nothing_else_reads_canceled()
     let conflicted = &model(&left).items["c"];
     assert!(conflicted.state.is_conflict() && !conflicted.is_done() && !conflicted.is_canceled());
     assert!(!conflicted.is_finished());
+}
+
+#[test]
+fn cancellation_union_counts_shared_leaves_once_across_parent_orders_and_root_states() {
+    for (open_parent, canceled_parent) in [("p1", "p2"), ("p2", "p1")] {
+        let mut a = replica("a");
+        items(&mut a, &["root", "p1", "p2", "shared"]);
+        set_parent(&mut a, "p1", Some("root"), by(2)).unwrap();
+        set_parent(&mut a, "p2", Some("root"), by(2)).unwrap();
+        set_state(&mut a, canceled_parent, ItemState::Canceled, by(3)).unwrap();
+        let mut b = replica("b");
+        b.join(&a.state).unwrap();
+        set_parent(&mut a, "shared", Some(open_parent), by(4)).unwrap();
+        set_parent(&mut b, "shared", Some(canceled_parent), by(4)).unwrap();
+        a.join(&b.state).unwrap();
+
+        for root_state in [ItemState::Backlog, ItemState::Parked, ItemState::Canceled] {
+            for leaf_state in [ItemState::Backlog, ItemState::Done, ItemState::Canceled] {
+                let mut r = a.clone();
+                set_state(&mut r, "root", root_state, by(5)).unwrap();
+                set_state(&mut r, "shared", leaf_state, by(6)).unwrap();
+                let model = model(&r);
+                assert!(model.items["shared"].parent.is_conflict());
+                let readiness = ReadinessEvaluator::new(&r.state, &model, 100);
+                let progress = model.progress("root").unwrap();
+                let rollup = readiness.progress("root").unwrap().unwrap();
+                let expected_counts =
+                    if leaf_state == ItemState::Done { (1, 0, 1) } else { (0, 1, 0) };
+                assert_eq!(
+                    (progress.done, progress.canceled, progress.total),
+                    expected_counts,
+                    "parents {open_parent}/{canceled_parent}, root {root_state:?}, leaf {leaf_state:?}"
+                );
+                assert_eq!(
+                    (rollup.stages.done, rollup.stages.canceled, rollup.stages.total()),
+                    expected_counts,
+                    "parents {open_parent}/{canceled_parent}, root {root_state:?}, leaf {leaf_state:?}"
+                );
+
+                let done = root_state == ItemState::Backlog && leaf_state == ItemState::Done;
+                let canceled = root_state == ItemState::Canceled || leaf_state != ItemState::Done;
+                assert_eq!(model.reads_done("root"), done);
+                assert_eq!(model.reads_canceled("root"), canceled);
+                assert_eq!(model.reads_finished("root"), done || canceled);
+                assert_eq!(readiness.canceled("root"), canceled);
+                assert_eq!(
+                    readiness.stage("shared").unwrap(),
+                    Some(if leaf_state == ItemState::Done { Stage::Done } else { Stage::Canceled })
+                );
+                let expected_stage = match (root_state, leaf_state) {
+                    (ItemState::Backlog, ItemState::Done) => Some(Stage::Done),
+                    (ItemState::Parked, ItemState::Done) => Some(Stage::Parked),
+                    _ => Some(Stage::Canceled),
+                };
+                assert_eq!(rollup.stage, expected_stage);
+            }
+        }
+    }
+}
+
+#[test]
+fn cancellation_union_walks_a_joined_parent_cycle_and_deduplicates_a_done_leaf() {
+    let mut a = replica("a");
+    items(&mut a, &["a", "b", "shared", "done"]);
+    set_parent(&mut a, "done", Some("b"), by(2)).unwrap();
+    set_state(&mut a, "a", ItemState::Canceled, by(3)).unwrap();
+    set_state(&mut a, "done", ItemState::Done, by(3)).unwrap();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    set_parent(&mut a, "a", Some("b"), by(4)).unwrap();
+    set_parent(&mut a, "shared", Some("a"), by(4)).unwrap();
+    set_parent(&mut b, "b", Some("a"), by(4)).unwrap();
+    set_parent(&mut b, "shared", Some("b"), by(4)).unwrap();
+    a.join(&b.state).unwrap();
+
+    let model = model(&a);
+    assert_eq!(model.parent_cycles(), vec![vec!["a".to_owned(), "b".to_owned()]]);
+    assert!(model.items["shared"].parent.is_conflict());
+    assert_eq!(model.progress("a"), Some(Progress { done: 1, canceled: 1, total: 1 }));
+    assert!(!model.reads_done("a") && model.reads_canceled("a") && model.reads_finished("a"));
+    let readiness = ReadinessEvaluator::new(&a.state, &model, 100);
+    let rollup = readiness.progress("a").unwrap().unwrap();
+    assert_eq!((rollup.stages.done, rollup.stages.canceled, rollup.stages.total()), (1, 1, 1));
+    assert_eq!(rollup.stage, Some(Stage::Canceled));
+    assert_eq!(readiness.stage("done").unwrap(), Some(Stage::Done));
+}
+
+#[test]
+fn a_conflicted_parent_state_does_not_seed_manual_cancellation() {
+    let mut a = replica("a");
+    items(&mut a, &["root", "p1", "p2", "shared"]);
+    set_parent(&mut a, "p1", Some("root"), by(2)).unwrap();
+    set_parent(&mut a, "p2", Some("root"), by(2)).unwrap();
+    set_state(&mut a, "p2", ItemState::Parked, by(3)).unwrap();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    set_state(&mut a, "p2", ItemState::Canceled, by(4)).unwrap();
+    set_state(&mut b, "p2", ItemState::Backlog, by(4)).unwrap();
+    set_parent(&mut a, "shared", Some("p1"), by(5)).unwrap();
+    set_parent(&mut b, "shared", Some("p2"), by(5)).unwrap();
+    a.join(&b.state).unwrap();
+
+    let model = model(&a);
+    assert!(model.items["p2"].state.is_conflict());
+    assert_eq!(model.progress("root"), Some(Progress { done: 0, canceled: 0, total: 1 }));
+    assert!(!model.reads_canceled("shared") && !model.reads_canceled("root"));
+    let readiness = ReadinessEvaluator::new(&a.state, &model, 100);
+    assert_eq!(readiness.stage("shared").unwrap(), Some(Stage::Ready));
+    assert!(!readiness.canceled("shared"));
 }
 
 #[test]

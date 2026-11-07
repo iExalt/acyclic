@@ -501,6 +501,37 @@ fn an_indirect_cycle_through_a_done_leaf_is_still_refused() {
 }
 
 #[test]
+fn canceling_a_done_part_with_a_shared_canceled_leaf_is_refused() {
+    let mut a = replica("a");
+    commit_ok(
+        &mut a,
+        1,
+        vec![
+            add("root", vec![]),
+            add("p1", vec![under("root")]),
+            add("p2", vec![under("root")]),
+            add("shared", vec![]),
+            add("done", vec![under("p2")]),
+        ],
+    );
+    crate::model::set_state(&mut a, "p2", ItemState::Canceled, by(2)).unwrap();
+    crate::model::set_state(&mut a, "done", ItemState::Done, by(2)).unwrap();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    commit_ok(&mut a, 3, vec![item("shared", under("p1"))]);
+    commit_ok(&mut b, 3, vec![item("shared", under("p2"))]);
+    a.join(&b.state).unwrap();
+
+    let model = read(&a);
+    assert_eq!(model.progress("root"), Some(model::Progress { done: 1, canceled: 1, total: 1 }));
+    assert!(model.reads_done("root"));
+    assert_eq!(
+        refused(&a, vec![item("root", ItemAssign::State(ItemState::Canceled))]),
+        [Rule::CancelDone]
+    );
+}
+
+#[test]
 fn a_direct_lineage_rule_does_not_hide_an_independent_effective_cycle() {
     let mut r = done_tree();
     commit_ok(&mut r, 3, vec![add("p", vec![]), add("d", vec![under("p")]), add("x", vec![])]);

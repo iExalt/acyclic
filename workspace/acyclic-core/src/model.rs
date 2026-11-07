@@ -242,12 +242,11 @@ struct Tally {
     total: usize,
 }
 
-/// A leaf beneath a parent, with set-aside state inherited from its ancestors.
+/// A leaf beneath a parent, with parked state inherited from its ancestors.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Leaf<'a> {
     pub(crate) item: &'a Item,
     pub(crate) parked: bool,
-    pub(crate) canceled: bool,
 }
 
 /// A link as read: `from` waits for `to`.
@@ -612,14 +611,17 @@ impl Model {
         if self.children(id).is_empty() {
             return None;
         }
-        Some(Self::progress_from_leaves(&self.leaves_under(id)))
+        let canceled = self.canceled_descendants();
+        Some(Self::progress_from_leaves(&self.leaves_under(id), &canceled))
     }
 
     /// Counts a previously collected set of leaves structurally, without consulting readiness or time.
-    pub(crate) fn progress_from_leaves(leaves: &[Leaf<'_>]) -> Progress {
+    pub(crate) fn progress_from_leaves(leaves: &[Leaf<'_>], canceled: &BTreeSet<&str>) -> Progress {
         let mut tally = Tally::default();
         for leaf in leaves {
-            if leaf.item.is_canceled() || (leaf.canceled && !leaf.item.is_done()) {
+            if leaf.item.is_canceled()
+                || (canceled.contains(leaf.item.id.as_str()) && !leaf.item.is_done())
+            {
                 tally.canceled += 1;
             } else {
                 tally.total += 1;
@@ -629,9 +631,28 @@ impl Model {
         Progress { done: tally.done, canceled: tally.canceled, total: tally.total }
     }
 
+    /// Every item beneath a part canceled by hand, each once across conflicted parents and cycles.
+    pub(crate) fn canceled_descendants(&self) -> BTreeSet<&str> {
+        let mut descendants = BTreeSet::new();
+        let mut stack: Vec<&str> = self
+            .items
+            .values()
+            .filter(|item| item.state == Value::One(ItemState::Canceled))
+            .map(|item| item.id.as_str())
+            .collect();
+        while let Some(at) = stack.pop() {
+            for child in self.children(at) {
+                if descendants.insert(child) {
+                    stack.push(child);
+                }
+            }
+        }
+        descendants
+    }
+
     /// The leaves under `id`, each item once, so a parent cycle ends the walk.
     ///
-    /// A leaf inherits parked and canceled only from parent items; its own state remains on `item`.
+    /// A leaf inherits parked only from parent items; cancellation is derived from the whole ancestry union.
     pub(crate) fn leaves_under(&self, id: &str) -> Vec<Leaf<'_>> {
         let mut seen = BTreeSet::from([id.to_owned()]);
         let mut found = Vec::new();
@@ -641,36 +662,27 @@ impl Model {
             .into_iter()
             .rev()
             .map(|child| {
-                (
-                    child,
-                    root.is_some_and(|item| item.state == Value::One(ItemState::Parked)),
-                    root.is_some_and(|item| item.state == Value::One(ItemState::Canceled)),
-                )
+                (child, root.is_some_and(|item| item.state == Value::One(ItemState::Parked)))
             })
             .collect();
-        while let Some((at, parked, canceled)) = stack.pop() {
+        while let Some((at, parked)) = stack.pop() {
             if !seen.insert(at.to_owned()) {
                 continue;
             }
             let Some(item) = self.items.get(at) else { continue };
             let children = self.children(at);
             if children.is_empty() {
-                found.push(Leaf { item, parked, canceled });
+                found.push(Leaf { item, parked });
             } else {
                 let parked = parked || item.state == Value::One(ItemState::Parked);
-                let canceled = canceled || item.state == Value::One(ItemState::Canceled);
-                stack.extend(children.into_iter().rev().map(|child| (child, parked, canceled)));
+                stack.extend(children.into_iter().rev().map(|child| (child, parked)));
             }
         }
         found
     }
 
-    /// Whether an item reads as done: a leaf by its own state, a parent once every leaf under it that isn't canceled
-    /// is, and one is, unless it is parked or canceled by hand.
-    #[must_use]
-    pub fn reads_done(&self, id: &str) -> bool {
-        let Some(item) = self.items.get(id) else { return false };
-        match self.progress(id) {
+    fn done_from_progress(item: &Item, progress: Option<Progress>) -> bool {
+        match progress {
             Some(progress) => {
                 progress.done == progress.total
                     && progress.done > 0
@@ -681,31 +693,48 @@ impl Model {
         }
     }
 
-    /// Whether an item reads as canceled, unless it reads done: a leaf by its own state, a parent canceled by hand or
-    /// with every leaf under it canceled, and anything under a part canceled by hand, as that part cancels what is
-    /// open beneath it. A leaf reading canceled has the stage canceled.
-    #[must_use]
-    pub fn reads_canceled(&self, id: &str) -> bool {
-        let Some(item) = self.items.get(id) else { return false };
-        if self.reads_done(id) {
-            return false;
+    /// Whether the item's stored state and leaves read as done.
+    fn completion(&self, id: &str) -> (bool, bool) {
+        let Some(item) = self.items.get(id) else { return (false, false) };
+        let progress = self.progress(id);
+        let done = Self::done_from_progress(item, progress);
+        if done {
+            return (true, false);
         }
-        let own = match self.progress(id) {
+        let canceled = match progress {
             Some(progress) => {
                 item.state == Value::One(ItemState::Canceled)
                     || (progress.total == 0 && progress.canceled > 0)
             },
             None => item.is_canceled(),
-        };
-        own || self.ancestors(id).into_iter().any(|above| {
-            self.items.get(above).is_some_and(|a| a.state == Value::One(ItemState::Canceled))
-        })
+        } || self.ancestors(id).into_iter().any(|above| {
+            self.items.get(above).is_some_and(|item| item.state == Value::One(ItemState::Canceled))
+        });
+        (false, canceled)
+    }
+
+    /// Whether an item reads as done: a leaf by its own state, a parent once every leaf under it that isn't canceled
+    /// is, and one is, unless it is parked or canceled by hand.
+    #[must_use]
+    pub fn reads_done(&self, id: &str) -> bool {
+        let Some(item) = self.items.get(id) else { return false };
+        Self::done_from_progress(item, self.progress(id))
+    }
+
+    /// Whether an item reads as canceled, unless it reads done: a leaf by its own state, a parent canceled by hand or
+    /// with every leaf under it canceled, and anything under a part canceled by hand, as that part cancels what is
+    /// open beneath it. A leaf canceled through its ancestry can still read as `Waiting` while its state or thread
+    /// conflicts; rollups count it as canceled.
+    #[must_use]
+    pub fn reads_canceled(&self, id: &str) -> bool {
+        self.completion(id).1
     }
 
     /// Whether an item reads as finished: done or canceled.
     #[must_use]
     pub fn reads_finished(&self, id: &str) -> bool {
-        self.reads_done(id) || self.reads_canceled(id)
+        let (done, canceled) = self.completion(id);
+        done || canceled
     }
 
     /// An item's thread as reads see it: the one stored on it, unless it has children. A thread stored on a parent,
