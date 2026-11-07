@@ -39,6 +39,9 @@ jobs:
 
   build:
     needs: tag
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/build.yml
     with:
       ref: refs/tags/${{ inputs.tag || github.ref_name }}

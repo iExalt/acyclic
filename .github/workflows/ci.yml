@@ -65,6 +65,7 @@ jobs:
         with:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-${{ hashFiles('workspace/acyclic-app/pnpm-lock.yaml') }}
+      - run: node --test scripts/frontend-artifact.test.mjs scripts/frontend-availability.test.mjs
       - run: mise run check:app
 
   browser:

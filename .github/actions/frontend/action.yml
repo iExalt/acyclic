@@ -1,0 +1,49 @@
+name: Produce or consume the complete frontend
+description: Shares one immutable verified frontend within this workflow run; only the designated producer can build it
+inputs:
+  producer:
+    description: Whether this is the one frontend producer
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Resolve the exact same-run frontend
+      id: artifact
+      env:
+        GH_TOKEN: ${{ github.token }}
+        MODE: ${{ inputs.producer == 'true' && 'lookup' || 'wait' }}
+        TOOLING_ROOT: ${{ github.action_path }}/../../..
+      shell: bash
+      run: node "$TOOLING_ROOT/scripts/frontend-availability.mjs" "$MODE" "$GITHUB_WORKSPACE"
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      if: steps.artifact.outputs.artifact-id != ''
+      with:
+        artifact-ids: ${{ steps.artifact.outputs.artifact-id }}
+        path: ${{ runner.temp }}/frontend-artifact
+        merge-multiple: true
+    - name: Build only when the producer has no committed bundle
+      if: inputs.producer == 'true' && steps.artifact.outputs.artifact-id == ''
+      shell: bash
+      run: mise run build:app
+    - name: Bind the complete frontend to its source and tooling
+      if: inputs.producer == 'true' && steps.artifact.outputs.artifact-id == ''
+      env:
+        TOOLING_ROOT: ${{ github.action_path }}/../../..
+        ARTIFACT_ROOT: ${{ runner.temp }}/frontend-artifact
+      shell: bash
+      run: node "$TOOLING_ROOT/scripts/frontend-artifact.mjs" create "$GITHUB_WORKSPACE" "$ARTIFACT_ROOT"
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      if: inputs.producer == 'true' && steps.artifact.outputs.artifact-id == ''
+      with:
+        name: ${{ steps.artifact.outputs.artifact-name }}
+        path: ${{ runner.temp }}/frontend-artifact/
+        include-hidden-files: true
+        if-no-files-found: error
+    - name: Verify and install before any asset embedding
+      env:
+        TOOLING_ROOT: ${{ github.action_path }}/../../..
+        ARTIFACT_ROOT: ${{ runner.temp }}/frontend-artifact
+      shell: bash
+      run: |
+        node "$TOOLING_ROOT/scripts/frontend-artifact.mjs" install "$GITHUB_WORKSPACE" "$ARTIFACT_ROOT"
+        node -e 'const m = require(process.env.ARTIFACT_ROOT + "/manifest.json"); console.log("frontend verified", m.sourceCommit, m.bundleSha256, m.files.length, new Date().toISOString())'
