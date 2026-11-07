@@ -231,6 +231,193 @@ class Plan:
 LONG_CODE = "workspace/acyclic-app/src/a/very/long/path/that/has/no/spaces/to/break/at/" + "x" * 60 + "/file.tsx"
 
 
+def _import_id_allocator(data):
+    """Allocate deterministic UUIDv7 ids that sort after every id in a seeded import."""
+    seed_ids = [
+        record["id"]
+        for kind in ("items", "threads", "initiatives", "repositories")
+        for record in data.get(kind, [])
+    ]
+    seed_timestamps = [
+        int(record_id.replace("-", "")[:12], 16)
+        for record_id in seed_ids
+        if re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}", record_id)
+    ]
+    millis = max(seed_timestamps, default=0)
+
+    def allocate():
+        nonlocal millis
+        millis += 1
+        return f"{millis >> 16:08x}-{millis & 0xffff:04x}-7000-8000-000000000000"
+
+    return allocate
+
+
+def compose_seeded_import(data, include_small_scenarios):
+    """Compose the browser's initial import additions without changing generated seed records."""
+    composed = json.loads(json.dumps(data))
+    composed.setdefault("threads", [])
+    composed.setdefault("initiatives", [])
+    composed.setdefault("repositories", [])
+    composed.setdefault("items", [])
+    allocate = _import_id_allocator(composed)
+    ids = {}
+
+    def initiative(title):
+        record_id = allocate()
+        composed["initiatives"].append({"id": record_id, "title": title})
+        return record_id
+
+    def thread(title):
+        record_id = allocate()
+        composed["threads"].append({"id": record_id, "title": title})
+        return record_id
+
+    def item(title, parent, *, thread_id=None, waits_for=None, notes=None):
+        record = {"id": allocate(), "title": title, "parent": parent}
+        if thread_id is not None:
+            record["thread"] = thread_id
+        if waits_for is not None:
+            record["waits_for"] = list(waits_for)
+        if notes is not None:
+            record["notes"] = notes
+        composed["items"].append(record)
+        return record["id"]
+
+    seed_item_ids = {record["id"] for record in data["items"]}
+    seed_parent = {
+        record["id"]: record.get("parent") if record.get("parent") in seed_item_ids else None
+        for record in data["items"]
+    }
+    seed_waits = {record["id"]: record.get("waits_for", []) or [] for record in data["items"]}
+
+    def ancestors(record_id):
+        while record_id is not None:
+            yield record_id
+            record_id = seed_parent.get(record_id)
+
+    done = next(record for record in composed["items"] if record.get("state") == "done")
+    unwaiting = next(
+        record["id"]
+        for record in data["items"]
+        if record.get("state") != "done"
+        and record["id"] not in seed_parent.values()
+        and not any(seed_waits[ancestor] for ancestor in ancestors(record["id"]))
+    )
+    done["waits_for"] = [*(done.get("waits_for") or []), unwaiting]
+    first_depth_one = next(
+        record["id"]
+        for record in data["items"]
+        if seed_parent[record["id"]] is not None
+        and seed_parent[seed_parent[record["id"]]] is None
+    )
+    next(record for record in composed["items"] if record["id"] == first_depth_one)["notes"] = (
+        f"Kept in `{LONG_CODE}` for good."
+    )
+    ids["done_waiting"] = done["id"]
+    ids["done_wait_target"] = unwaiting
+    ids["notes_target"] = first_depth_one
+
+    if include_small_scenarios:
+        cycles = item("Cycles", data["initiatives"][0]["id"])
+        ids["cycles_root"] = cycles
+        cycle_holds = {}
+        for cycle_name in ("A", "B"):
+            cycle_threads = [thread(f"Cycle {cycle_name}{number}") for number in (1, 2)]
+            holds = [
+                item(f"Cycle {cycle_name}{number} holds", cycles, thread_id=cycle_thread)
+                for number, cycle_thread in enumerate(cycle_threads, 1)
+            ]
+            for number, cycle_thread in enumerate(cycle_threads, 1):
+                wait_id = item(
+                    f"Cycle {cycle_name}{number} waits",
+                    cycles,
+                    thread_id=cycle_thread,
+                    waits_for=[holds[number % 2]],
+                )
+                ids[f"cycle_{cycle_name}{number}_thread"] = cycle_thread
+                ids[f"cycle_{cycle_name}{number}_holds"] = holds[number - 1]
+                ids[f"cycle_{cycle_name}{number}_waits"] = wait_id
+            cycle_holds[cycle_name] = holds
+        ids["far"] = cycle_holds["A"][0]
+
+    second = initiative("Second initiative")
+    ids["second_initiative"] = second
+    if include_small_scenarios:
+        epic = item("Second epic", second)
+        second_thread = thread("Second work")
+        tasks = [
+            item(
+                f"Second task {number}",
+                epic,
+                thread_id=second_thread,
+                waits_for=[ids["far"]] if number == 1 else None,
+            )
+            for number in (1, 2)
+        ]
+        ids.update(second_epic=epic, second_thread=second_thread, second_task_1=tasks[0], second_task_2=tasks[1])
+
+    all_ids = [record["id"] for kind in ("items", "threads", "initiatives", "repositories") for record in composed[kind]]
+    assert len(all_ids) == len(set(all_ids)), "composed import ids must be unique"
+    return composed, ids
+
+
+def shrink_import():
+    """The static import fixture for the phone's shrink journey, in CLI creation order."""
+    allocate = _import_id_allocator({})
+    home = allocate()
+    proof_thread = allocate()
+    project, other, other_child = allocate(), allocate(), allocate()
+    anytime = allocate()
+    chain = [allocate() for _ in range(7)]
+    return {
+        "format": "acyclic-import",
+        "version": 4,
+        "initiatives": [{"id": home, "title": "Home"}],
+        "threads": [{"id": proof_thread, "title": "Shrink proof"}],
+        "repositories": [],
+        "items": [
+            {"id": project, "title": "Tall chain", "parent": home},
+            {"id": other, "title": "Other root", "parent": home},
+            {"id": other_child, "title": "Other child", "parent": other},
+            {"id": anytime, "title": "Any time", "parent": project},
+            *[
+                {
+                    "id": record_id,
+                    "title": f"Chain step {index}",
+                    "parent": project,
+                    **({"waits_for": [chain[index - 1]]} if index else {}),
+                }
+                for index, record_id in enumerate(chain)
+            ],
+        ],
+    }, {"project": project, "other": other, "chain": chain}
+
+
+def labels_import():
+    """The static import fixture for label wrapping, with stable natural-order item ids."""
+    thread_id = "00000000-0000-7000-8000-000000000004"
+    ids = [f"00000000-0000-7000-8000-00000000000{number}" for number in (1, 2, 3)]
+    titles = [
+        "Keep the whole project title readable while its header grows",
+        "Read every word including 🧑🏽‍🚀 and " + "supercalifragilisticexpialidocious" * 2,
+        "Ordinary item",
+    ]
+    return {
+        "format": "acyclic-import",
+        "version": 4,
+        "initiatives": [{"id": "00000000-0000-7000-8000-000000000000", "title": "Home"}],
+        "threads": [{"id": thread_id, "title": "Label proof"}],
+        "repositories": [],
+        "items": [
+            {"id": ids[0], "title": titles[0], "parent": "00000000-0000-7000-8000-000000000000"},
+            {"id": ids[1], "title": titles[1], "parent": ids[0]},
+            {"id": ids[2], "title": titles[2], "parent": ids[0], "thread": thread_id},
+        ],
+    }, ids, titles
+
+
+
 def add_thread_cycles(env):
     """Two cycles of two threads waiting on each other, in a project of their own, so Needs you names two. In each
     thread, a leaf waits on a leaf the other holds, which waits for nothing, so no cycle of items closes. Made apart
