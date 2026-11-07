@@ -85,3 +85,18 @@ test('actual provenance extraction rejects missing or malformed identity before 
     { ...valid, workflow_sha: 'latest' }, { ...valid, workflow_repository: 'a/b\nrevision=evil' },
     { ...valid, workflow_repository: 'a/b/c' }]) assert.notEqual(run(context), 0);
 });
+
+
+test('source-selected tools are cached before the tooling checkout, with a separate producer tool set', () => {
+  const setup = 'uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8';
+  for (const block of [job('build'), job('build-macos'), producer]) {
+    assert.equal(block.split(setup).length - 1, 1);
+    assert.ok(block.indexOf(setup) < block.indexOf("Check out the defining workflow's tooling"));
+  }
+  assert.doesNotMatch(archive, /jdx\/mise-action/);
+  assert.match(producer, /install_args: node pnpm/);
+  for (const name of ['build', 'build-macos']) {
+    assert.match(job(name), /install_args: rust node pnpm github:EmbarkStudios\/cargo-about/);
+    assert.doesNotMatch(job(name), /cache_key:/);
+  }
+});
