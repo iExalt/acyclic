@@ -1,0 +1,74 @@
+# Native-context stages this source-free recipe, replacing the base digest,
+# architecture and signed Release hashes for the requested platform.
+FROM ubuntu:24.04@@BASE_DIGEST@@ AS native
+ENV DEBIAN_FRONTEND=noninteractive \
+    MISE_DATA_DIR=/opt/mise \
+    MISE_CONFIG_DIR=/opt/mise-config \
+    MISE_CONFIG_FILE=/opt/mise-config/mise.toml \
+    RUSTUP_HOME=/opt/rustup \
+    CARGO_HOME=/opt/cargo \
+    RUSTUP_TOOLCHAIN=@@RUST_VERSION@@ \
+    RUSTUP_PROFILE=minimal \
+    PATH=/usr/local/bin:/opt/mise/shims:/usr/bin:/bin
+
+COPY snapshot/ /tmp/native-snapshot/
+RUN set -eu; \
+    command -v gpgv >/dev/null 2>&1 || { echo 'pinned Ubuntu base has no gpgv' >&2; exit 1; }; \
+    for release in noble noble-updates noble-security; do \
+      case "$release" in \
+        noble) expected=@@NOBLE_HASH@@ ;; \
+        noble-updates) expected=@@UPDATES_HASH@@ ;; \
+        noble-security) expected=@@SECURITY_HASH@@ ;; \
+      esac; \
+      printf '%s  %s\n' "$expected" "/tmp/native-snapshot/$release/InRelease" | sha256sum -c -; \
+      gpgv --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg "/tmp/native-snapshot/$release/InRelease"; \
+    done; \
+    rm -f /etc/apt/sources.list; rm -f /etc/apt/sources.list.d/*; rm -f /etc/apt/preferences /etc/apt/preferences.d/*; rm -f /etc/apt/apt.conf.d/*; rm -rf /var/lib/apt/lists/*; \
+    printf '%s\n' \
+      'deb [arch=@@ARCH@@] http://snapshot.ubuntu.com/ubuntu/@@SNAPSHOT@@ noble main universe' \
+      'deb [arch=@@ARCH@@] http://snapshot.ubuntu.com/ubuntu/@@SNAPSHOT@@ noble-updates main universe' \
+      'deb [arch=@@ARCH@@] http://snapshot.ubuntu.com/ubuntu/@@SNAPSHOT@@ noble-security main universe' \
+      > /etc/apt/sources.list; \
+    printf '%s\n' 'Acquire::Retries "3";' 'APT::Update::Error-Mode "any";' 'APT::Install-Recommends "false";' 'APT::Install-Suggests "false";' 'APT::Get::Always-Include-Phased-Updates "true";' \
+      > /etc/apt/apt.conf.d/99native-ci; \
+    apt-get update; \
+    for suite in noble noble-updates noble-security; do \
+      case "$suite" in noble) expected=@@NOBLE_HASH@@ ;; noble-updates) expected=@@UPDATES_HASH@@ ;; noble-security) expected=@@SECURITY_HASH@@ ;; esac; \
+      list="$(find /var/lib/apt/lists -maxdepth 1 -type f -name "*_dists_${suite}_InRelease" -print -quit)"; \
+      [ -n "$list" ] || { echo "missing fetched snapshot Release: $suite" >&2; exit 1; }; \
+      printf '%s  %s\n' "$expected" "$list" | sha256sum -c -; \
+    done; \
+    apt-get install -y --no-remove --no-install-recommends @@PACKAGES@@; \
+    mkdir -p /usr/share/native-ci; \
+    LC_ALL=C dpkg-query -W -f='${binary:Package}\t${Version}\t${Architecture}\n' | LC_ALL=C sort > /usr/share/native-ci/dpkg-receipt.tsv; \
+    rm -rf /var/lib/apt/lists/* /tmp/native-snapshot
+
+COPY mise.toml /opt/mise-config/mise.toml
+RUN set -eu; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) mise_sha=@@MISE_SHA@@; rust_target=x86_64-unknown-linux-musl ;; \
+      arm64) mise_sha=@@MISE_SHA@@; rust_target=aarch64-unknown-linux-musl ;; \
+      *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
+    esac; \
+    release=@@MISE_VERSION@@; \
+    case "$arch" in amd64) asset_arch=x64 ;; arm64) asset_arch=arm64 ;; esac; \
+    curl --fail --location --silent --show-error "https://github.com/jdx/mise/releases/download/v${release}/mise-v${release}-linux-${asset_arch}.tar.xz" -o /tmp/mise.tar.xz; \
+    printf '%s  %s\n' "$mise_sha" /tmp/mise.tar.xz | sha256sum -c -; \
+    tar -xJOf /tmp/mise.tar.xz mise/bin/mise > /usr/local/bin/mise; chmod 0755 /usr/local/bin/mise; \
+    mise install; \
+    mise exec -- rustup target add "$rust_target"; \
+    rm -f /tmp/mise.tar.xz; \
+    chmod -R a+rX /opt/mise /opt/rustup /opt/cargo; \
+    for tool in rustc cargo rustup cargo-about; do \
+      selected="$(mise which "$tool")"; test -x "$selected"; \
+      ln -s "$selected" "/usr/local/bin/$tool"; \
+    done
+
+RUN set -eu; \
+    groupadd --gid 10001 builder; useradd --uid 10001 --gid 10001 --create-home --shell /bin/sh builder; \
+    mkdir -p /workspace /output /home/builder/.cargo; chown builder:builder /workspace /output /home/builder /home/builder/.cargo
+USER builder:builder
+WORKDIR /workspace
+ENV HOME=/home/builder CC_x86_64_unknown_linux_musl=musl-gcc CC_aarch64_unknown_linux_musl=musl-gcc
+LABEL org.opencontainers.image.title="Acyclic native Rust musl CI builder"
