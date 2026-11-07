@@ -19,60 +19,91 @@ concurrency:
   group: native-builder-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-env:
-  # Only Python and its environment bootstrap are host prerequisites.
-  MISE_DISABLE_TOOLS: rust,ruff,cargo:cargo-edit,cargo:cargo-generate,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,aqua:rvben/rumdl,github:EmbarkStudios/cargo-about,aqua:rhysd/actionlint,aqua:koalaman/shellcheck,node,pnpm
-
 jobs:
   native:
     name: native builder ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - { platform: linux/amd64, runner: ubuntu-24.04 }
           - { platform: linux/arm64, runner: ubuntu-24.04-arm }
     steps:
+      - name: Initialize fail-closed host receipt
+        timeout-minutes: 2
+        env:
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          NATIVE_PLATFORM: ${{ matrix.platform }}
+          NATIVE_RUNNER: ${{ matrix.runner }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/native-host"
+          printf '%s\n' '{"schema_version":1,"ready":false,"candidate_ready":false,"collection_status":"failed","diagnostic_exit":1,"blockers":["initialization incomplete"]}' > "$RUNNER_TEMP/native-host/receipt.json"
+          python3 - "$RUNNER_TEMP/native-host/receipt.json" <<'PY'
+          import datetime
+          import json
+          import os
+          import pathlib
+          import re
+          import sys
+
+          def observed(value, pattern, reason):
+              if value and re.fullmatch(pattern, value):
+                  return {"state": "OBSERVED", "value": value, "reason": reason}
+              return {"state": "UNKNOWN", "value": None, "reason": "identity unavailable or unsafe"}
+
+          fields = {
+              "event_head_sha": observed(os.getenv("EVENT_HEAD_SHA"), r"[0-9a-f]{40}", "immutable PR event head"),
+              "event_base_sha": observed(os.getenv("EVENT_BASE_SHA"), r"[0-9a-f]{40}", "immutable PR event base"),
+              "workflow_ref": observed(os.getenv("GITHUB_WORKFLOW_REF"), r"iExalt/acyclic/.github/workflows/native-builder.yml@refs/pull/[0-9]+/merge", "workflow ref"),
+              "workflow_sha": observed(os.getenv("GITHUB_WORKFLOW_SHA"), r"[0-9a-f]{40}", "workflow commit"),
+              "run_id": observed(os.getenv("GITHUB_RUN_ID"), r"[0-9]+", "run ID"),
+              "run_attempt": observed(os.getenv("GITHUB_RUN_ATTEMPT"), r"[0-9]+", "run attempt"),
+              "logical_job": {"state": "OBSERVED", "value": "native", "reason": "workflow job key"},
+              "matrix_architecture": observed(os.getenv("NATIVE_PLATFORM"), r"linux/(amd64|arm64)", "matrix platform"),
+              "runner_label": observed(os.getenv("NATIVE_RUNNER"), r"ubuntu-24.04(-arm)?", "matrix runner"),
+              "runner_image_os": observed(os.getenv("ImageOS"), r"ubuntu[0-9.]*", "runner image OS"),
+              "runner_image_version": observed(os.getenv("ImageVersion"), r"[0-9.]+", "runner image version"),
+              "checkout_sha": {"state": "UNKNOWN", "value": None, "reason": "checkout not completed"},
+              "native_architecture": {"state": "UNKNOWN", "value": None, "reason": "host inventory not completed"},
+          }
+          receipt = {
+              "schema_version": 1,
+              "collected_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "fields": fields,
+              "collection_status": "failed",
+              "candidate_ready": False,
+              "ready": False,
+              "diagnostic_exit": 1,
+              "blockers": ["host collection incomplete", "diagnostic-only revision"],
+          }
+          pathlib.Path(sys.argv[1]).write_text(json.dumps(receipt, sort_keys=True) + "\n")
+          PY
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
-      - name: Check existing native rootless prerequisites
+      - name: Collect read-only host prerequisites
+        if: always()
+        timeout-minutes: 4
         run: |
-          for tool in rootlesskit slirp4netns newuidmap newgidmap skopeo docker; do
-            command -v "$tool" >/dev/null || { echo "missing existing rootless/runtime prerequisite: $tool" >&2; exit 1; }
-          done
-          uname -m
-          python --version
-      - name: Check common and native input boundaries
-        run: |
-          python scripts/ci-image-test.py
-          python scripts/ci/native-context-test.py
-          python scripts/ci/native-run-test.py
-      - name: Stage and build the source-free candidate without publication
-        env:
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          fingerprint=$(python scripts/ci/native-context.py --platform "$PLATFORM" \
-            --helper scripts/build-ci-image.sh --helper scripts/validate-ci-image.py --helper scripts/with-ci-buildkit.sh \
-            --output-dir "$RUNNER_TEMP/native-context")
-          timeout --signal=TERM --kill-after=15s 900 \
-            sh scripts/with-ci-buildkit.sh "$RUNNER_TEMP/native-tools" \
-            sh scripts/build-ci-image.sh "$RUNNER_TEMP/native-context" native "$PLATFORM" "$fingerprint" "$RUNNER_TEMP/native-image"
-      - name: Execute the exact candidate and pinned local reference
-        run: |
-          python scripts/ci/native-run.py "$RUNNER_TEMP/native-image" "$RUNNER_TEMP/native-context" "$PWD" "$RUNNER_TEMP/native-candidate" candidate
-          python scripts/ci/native-run.py "$RUNNER_TEMP/native-image" "$RUNNER_TEMP/native-context" "$PWD" "$RUNNER_TEMP/native-pinned" pinned
+          if test -f scripts/ci/native-host-prereqs.py; then
+            if timeout --signal=TERM --kill-after=5s 180s python3 scripts/ci/native-host-prereqs.py "$RUNNER_TEMP/native-host/receipt.json"; then
+              result=0
+            else
+              result=$?
+            fi
+            echo "diagnostic collector exit: $result"
+          else
+            echo 'host collector unavailable; UNKNOWN receipt retained' >&2
+          fi
+          exit 1
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
+        timeout-minutes: 5
         with:
           name: native-builder-${{ strategy.job-index }}
           if-no-files-found: error
-          path: |
-            ${{ runner.temp }}/native-image/manifest.json
-            ${{ runner.temp }}/native-candidate/receipt.json
-            ${{ runner.temp }}/native-candidate/run.log
-            ${{ runner.temp }}/native-pinned/receipt.json
-            ${{ runner.temp }}/native-pinned/run.log
+          path: ${{ runner.temp }}/native-host/receipt.json
