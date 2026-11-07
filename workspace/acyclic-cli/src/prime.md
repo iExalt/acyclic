@@ -160,8 +160,10 @@ give the item the parent, waits-for and thread it belongs with.
    `acyclic item edit --thread`, and give each a title and notes. A new child joins the thread its siblings share,
    finished ones included, and none above it; an add or an import reports it as `placed`. When its siblings differ or
    some are in none, `item add` is refused (`thread-unclear`) unless it gets `--thread` or `--no-thread`, and an import
-   unless the new item names its thread; an explicit `--thread` always wins, and `item add --claim` claims the item's
-   thread in the same write; for an item in no thread, that is its own thread of one. A move never changes a thread. An
+   unless the new item names its thread; an explicit `--thread` always wins. `item add --claim` claims the item's
+   thread in the same write, including the thread of one for a loose item, and cannot be combined with `--no-thread`.
+   To add an item outside its inherited thread and then claim it, use `acyclic item add --no-thread`, then
+   `acyclic thread claim <item-id>` with the new item's id. A move never changes a thread. An
    item's first child takes its thread, or, when the child is moved in or given its own thread, the parent's is dropped;
    a thread on an item with children is ignored, and `acyclic needs` lists it as `thread-on-parent`, and a thread with
    no item as `empty-thread`. A task's own thread of one is never deleted: it goes from the list once nothing is in it
