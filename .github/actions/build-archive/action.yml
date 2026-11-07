@@ -1,5 +1,5 @@
 name: Build one release archive
-description: Builds the acyclic binary for a target, checks it runs, and uploads its archive; the caller has checked the commit out and set TARGET and ACYCLIC_REQUIRE_APP
+description: Builds the acyclic binary for a target, checks it runs, and uploads its archive; the caller has checked the commit out, selected its Mise tools, and set TARGET and ACYCLIC_REQUIRE_APP
 
 inputs:
   target:
@@ -15,7 +15,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
     - id: profiles
       run: |
         hash=$(sh scripts/profile-hash.sh)
