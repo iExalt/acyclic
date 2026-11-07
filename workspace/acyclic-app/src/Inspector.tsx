@@ -134,7 +134,7 @@ export function Inspector({
   );
   const panel = useRef<HTMLElement>(null);
   const sheet = useSheet(panel, onDismiss);
-  // A removed link's row goes with its button: the keyboard goes on to the row that took its place, else to the panel.
+  // A removed link's row goes with its button: focus the first remaining row in its group, else the panel.
   const held = useHeld(busy, [...item.links.waits_for, ...item.links.waited_on_by].join("\n"));
   useFocusIn(panel);
   const chip = (id: string) => {
@@ -178,7 +178,7 @@ export function Inspector({
                     `${testid}:${id}`,
                     () => unlink(id),
                     () =>
-                      panel.current?.querySelector<HTMLElement>(`[data-testid="${testid}"] .unlink`) ?? panel.current,
+                      panel.current?.querySelector<HTMLElement>(`[data-testid="${testid}"] .link-row`) ?? panel.current,
                   )}
                 >
                   <Icon of={X} size={16} />

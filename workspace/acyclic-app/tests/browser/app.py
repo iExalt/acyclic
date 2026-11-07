@@ -1699,6 +1699,138 @@ def keys_journey(page, plan, name, failures):
 
 
 @timed
+def link_focus_journey(page, env, plan, name, failures):
+    """After removing links, keep keyboard focus on the next row, then the Inspector when its group is empty."""
+    media = page.evaluate(
+        """() => ({ hover: matchMedia('(hover: hover)').matches,
+          pointer: matchMedia('(pointer: fine)').matches,
+          coarse: matchMedia('(pointer: coarse)').matches, touches: navigator.maxTouchPoints })"""
+    )
+    if not media["hover"] or not media["pointer"] or media["coarse"] or media["touches"]:
+        failures.append(f"{name}: link focus needs a desktop hover/fine-pointer context, got {media}")
+        return
+    parent = next((id for id in plan.items if plan.depth(id) == 0 and plan.children(id)), None)
+    if parent is None:
+        failures.append(f"{name}: the fixture has no parent for temporary link-focus items")
+        return
+    title = f"Keyboard focus {time.monotonic_ns()}"
+    items = []
+    try:
+        for suffix in ("subject", "first", "last"):
+            record = json.loads(
+                run(env, "item", "add", "--parent", parent, "--no-thread", "--title", f"{title} {suffix}")
+            )["data"]["item"]
+            items.append((record, f"{title} {suffix}"))
+        subject, subject_title = items[0]
+        outgoing = items[1:]
+        run(env, "item", "edit", subject, *(arg for target, _ in outgoing for arg in ("--waits-for", target)))
+        page.reload()
+        page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
+        to_map(page)
+        page.keyboard.press("Escape")
+        page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
+        page.keyboard.press("ControlOrMeta+k")
+        page.keyboard.type(subject_title)
+        page.keyboard.press("Enter")
+        page.get_by_test_id("inspector").wait_for(timeout=5_000)
+        page.mouse.move(1, page.viewport_size["height"] - 1)
+        if page.locator(".link:hover").count():
+            failures.append(f"{name}: the pointer still hovers a link row before keyboard removal")
+            return
+
+        def remove_pair(testid, rows):
+            group = page.locator(f"[data-testid={testid}]")
+            if group.locator(".link-row").count() != 2:
+                failures.append(f"{name}: {testid} started with {group.locator('.link-row').count()} rows, expected two")
+                return False
+            first = page.locator(f"[data-testid={testid}] .link-row[data-select='{rows[0][0]}']")
+            # Focus is setup only; Tab and Enter must reach the remove control through normal keyboard navigation.
+            hidden = first.locator("xpath=..").locator(".unlink")
+            if hidden.is_visible():
+                failures.append(f"{name}: {testid}'s remove control was visible before its row got keyboard focus")
+                return False
+            first.focus()
+            page.keyboard.press("Tab")
+            button = page.get_by_role("button", name=f"Remove the link to {rows[0][1]}", exact=True)
+            if not button.evaluate("e => e === document.activeElement") or not button.is_visible():
+                failures.append(f"{name}: Tab didn't focus and reveal {testid}'s first remove button")
+                return False
+            page.keyboard.press("Enter")
+            try:
+                button.wait_for(state="detached", timeout=10_000)
+                if group.locator(".link-row").count() != 1:
+                    raise PlaywrightTimeout(f"{testid} did not have exactly one link row left")
+                selector = f"[data-testid={testid}] .link-row[data-select='{rows[1][0]}']"
+                remaining = page.locator(selector)
+                remaining.wait_for(state="visible", timeout=10_000)
+                page.wait_for_function(
+                    "selector => document.querySelector(selector) === document.activeElement",
+                    arg=selector,
+                    timeout=5_000,
+                )
+            except PlaywrightTimeout:
+                failures.append(f"{name}: removing the first {testid} link didn't focus its exact remaining row")
+                return False
+            remaining_button = page.get_by_role("button", name=f"Remove the link to {rows[1][1]}", exact=True)
+            if not remaining_button.is_visible():
+                failures.append(f"{name}: the remaining {testid} row didn't reveal its remove control on focus")
+                return False
+            page.keyboard.press("Tab")
+            if not remaining_button.evaluate("e => e === document.activeElement"):
+                failures.append(f"{name}: Tab didn't focus {testid}'s last remove button")
+                return False
+            page.keyboard.press("Enter")
+            try:
+                page.locator(f"[data-testid={testid}]").wait_for(state="detached", timeout=10_000)
+                page.wait_for_function(
+                    "() => document.activeElement?.matches('[data-testid=inspector]')",
+                    timeout=5_000,
+                )
+            except PlaywrightTimeout:
+                failures.append(f"{name}: removing the last {testid} link didn't focus the Inspector fallback")
+                return False
+            return True
+
+        if not remove_pair("waits-for", outgoing):
+            return
+        for source, _ in outgoing:
+            run(env, "item", "edit", source, "--waits-for", subject)
+        page.reload()
+        page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
+        to_map(page)
+        page.keyboard.press("Escape")
+        page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
+        page.keyboard.press("ControlOrMeta+k")
+        page.keyboard.type(subject_title)
+        page.keyboard.press("Enter")
+        page.get_by_test_id("inspector").wait_for(timeout=5_000)
+        page.mouse.move(1, page.viewport_size["height"] - 1)
+        if not remove_pair("waited-on-by", outgoing):
+            return
+        print(f"{name}: keyboard removal focused the next link row and the empty group's Inspector fallback")
+    finally:
+        cleanup_errors = []
+        if len(items) == 3:
+            for source, targets in [(subject, [target for target, _ in outgoing]), *[(source, [subject]) for source, _ in outgoing]]:
+                try:
+                    run(env, "item", "edit", source, *(arg for target in targets for arg in ("--no-waits-for", target)))
+                except (Exception, SystemExit) as err:
+                    cleanup_errors.append(str(err))
+        for id, _ in reversed(items):
+            try:
+                run(env, "item", "delete", id)
+            except (Exception, SystemExit) as err:
+                cleanup_errors.append(str(err))
+        try:
+            page.reload()
+            page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
+        except (Exception, SystemExit) as err:
+            cleanup_errors.append(str(err))
+        if cleanup_errors:
+            failures.append(f"{name}: temporary link-focus cleanup failed: {'; '.join(cleanup_errors)}")
+
+
+@timed
 def installable(context, page, origin, name, failures):
     cdp = context.new_cdp_session(page)
     if errors := cdp.send("Page.getInstallabilityErrors")["installabilityErrors"]:
@@ -4409,6 +4541,7 @@ def shard_run(shard):
                     if name == "desktop":
                         cross_origin_journey(context, origin, env, name, failures)
                         keys_journey(page, plan, name, failures)
+                        link_focus_journey(page, env, plan, name, failures)
                     if name == "phone" and hint is not None:
                         # Edits run once, on the phone the app is used on; the plan is read again after them.
                         leaf = min(
