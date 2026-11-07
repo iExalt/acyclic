@@ -343,11 +343,25 @@ impl<'a> ReadinessEvaluator<'a> {
             return (Rc::clone(&leaf_set.leaves), leaf_set.progress);
         }
         let leaves: Rc<[Leaf<'a>]> = self.model.leaves_under(id).into();
-        let progress = Model::progress_from_leaves(&leaves);
+        let progress = Model::progress_from_leaves(&leaves, self.canceled_descendants());
         self.leaf_sets
             .borrow_mut()
             .insert(id.to_owned(), LeafSet { leaves: Rc::clone(&leaves), progress });
         (leaves, progress)
+    }
+
+    /// Whether anything reads canceled, found once per state snapshot.
+    fn any_canceled(&self) -> bool {
+        *self.any_canceled.get_or_init(|| {
+            self.model.items.values().any(|item| item.state.all().contains(&&ItemState::Canceled))
+        })
+    }
+
+    /// Descendants of any manually canceled item, shared by reads and structural rollups.
+    fn canceled_descendants(&self) -> &BTreeSet<&'a str> {
+        self.under_canceled.get_or_init(|| {
+            if self.any_canceled() { self.model.canceled_descendants() } else { BTreeSet::new() }
+        })
     }
 
     /// Whether an item reads done, using structural counts that don't depend on readiness or time.
@@ -367,10 +381,7 @@ impl<'a> ReadinessEvaluator<'a> {
     /// canceled by hand is found from its own state, and a parent from its children.
     fn reads_canceled(&self, id: &str) -> bool {
         // Nothing is canceled in most trackers, and then nothing reads canceled: no work to remember.
-        let any = *self.any_canceled.get_or_init(|| {
-            self.model.items.values().any(|item| item.state.all().contains(&&ItemState::Canceled))
-        });
-        if !any {
+        if !self.any_canceled() {
             return false;
         }
         if let Some(known) = self.canceled.borrow().get(id) {
@@ -379,24 +390,7 @@ impl<'a> ReadinessEvaluator<'a> {
         let Some(item) = self.model.items.get(id) else { return false };
         // A parent cycle ends here: it reads as not canceled while it is being worked out.
         self.canceled.borrow_mut().insert(id.to_owned(), false);
-        let under = self.under_canceled.get_or_init(|| {
-            let mut under = BTreeSet::new();
-            let mut stack: Vec<&str> = self
-                .model
-                .items
-                .values()
-                .filter(|item| item.state == Value::One(ItemState::Canceled))
-                .map(|item| item.id.as_str())
-                .collect();
-            while let Some(at) = stack.pop() {
-                for child in self.model.children(at) {
-                    if under.insert(child) {
-                        stack.push(child);
-                    }
-                }
-            }
-            under
-        });
+        let under = self.canceled_descendants();
         let kids = self.model.children(id);
         let reads = if kids.is_empty() {
             !item.is_done() && (item.is_canceled() || under.contains(id))
@@ -607,11 +601,12 @@ impl<'a> ReadinessEvaluator<'a> {
             return Ok(None);
         }
         let mut stages = Stages::default();
+        let canceled = self.canceled_descendants();
         let (leaves, _) = self.leaves_under(id);
         for leaf in leaves.iter() {
             let stage = self.stage(&leaf.item.id)?.unwrap_or(Stage::Waiting);
             let open = !matches!(stage, Stage::Done | Stage::Canceled);
-            let stage = if leaf.canceled && open {
+            let stage = if canceled.contains(leaf.item.id.as_str()) && open {
                 Stage::Canceled
             } else if leaf.parked && open {
                 Stage::Parked

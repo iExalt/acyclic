@@ -568,6 +568,77 @@ fn readiness_cycles_only_include_unfinished_leaves_and_keep_canceled_waits_disti
 }
 
 #[test]
+fn shared_leaves_are_canceled_under_any_conflicted_parent_with_done_leaf_priority() {
+    let mut a = replica("a");
+    items(&mut a, &["root", "p1", "p2", "shared", "done"]);
+    set_parent(&mut a, "p1", Some("root"), by(2)).unwrap();
+    set_parent(&mut a, "p2", Some("root"), by(2)).unwrap();
+    set_parent(&mut a, "done", Some("p2"), by(2)).unwrap();
+    set_state(&mut a, "p2", ItemState::Canceled, by(3)).unwrap();
+    set_state(&mut a, "done", ItemState::Done, by(3)).unwrap();
+
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    set_parent(&mut a, "shared", Some("p1"), by(4)).unwrap();
+    set_parent(&mut b, "shared", Some("p2"), by(4)).unwrap();
+    a.join(&b.state).unwrap();
+
+    let model = Model::read(&a.state).unwrap();
+    assert!(model.items["shared"].parent.is_conflict());
+    let readiness = ReadinessEvaluator::new(&a.state, &model, NOW);
+    let progress = model.progress("root").unwrap();
+    let rollup = readiness.progress("root").unwrap().unwrap();
+    assert_eq!((progress.done, progress.canceled, progress.total), (1, 1, 1));
+    assert_eq!((rollup.stages.done, rollup.stages.canceled, rollup.stages.total()), (1, 1, 1));
+    assert!(model.reads_done("root"));
+    assert_eq!(rollup.stage, Some(Stage::Done));
+    assert_eq!(model.reads_canceled("root"), readiness.canceled("root"));
+    assert!(
+        !model.reads_canceled("root"),
+        "the completed leaf takes precedence over canceled work"
+    );
+
+    set_state(&mut a, "done", ItemState::Backlog, by(5)).unwrap();
+    let model = Model::read(&a.state).unwrap();
+    let readiness = ReadinessEvaluator::new(&a.state, &model, NOW);
+    let progress = model.progress("root").unwrap();
+    let rollup = readiness.progress("root").unwrap().unwrap();
+    assert_eq!((progress.done, progress.canceled, progress.total), (0, 2, 0));
+    assert_eq!((rollup.stages.done, rollup.stages.canceled, rollup.stages.total()), (0, 2, 0));
+    assert!(!model.reads_done("root"));
+    assert_eq!(rollup.stage, Some(Stage::Canceled));
+    assert_eq!(model.reads_canceled("root"), readiness.canceled("root"));
+    assert!(model.reads_canceled("root"));
+}
+
+#[test]
+fn a_canceled_ancestor_counts_a_conflicted_leaf_canceled_without_hiding_its_readiness() {
+    let mut a = replica("a");
+    items(&mut a, &["p", "leaf"]);
+    set_parent(&mut a, "leaf", Some("p"), by(2)).unwrap();
+    set_state(&mut a, "p", ItemState::Canceled, by(3)).unwrap();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    set_state(&mut a, "leaf", ItemState::Done, by(4)).unwrap();
+    set_state(&mut b, "leaf", ItemState::Parked, by(4)).unwrap();
+    a.join(&b.state).unwrap();
+
+    let model = Model::read(&a.state).unwrap();
+    assert!(model.items["leaf"].state.is_conflict());
+    assert_eq!(model.progress("p"), Some(model::Progress { done: 0, canceled: 1, total: 0 }));
+    assert!(model.reads_canceled("leaf") && !model.reads_done("leaf"));
+    let readiness = ReadinessEvaluator::new(&a.state, &model, NOW);
+    assert_eq!(
+        readiness.of("leaf").unwrap(),
+        Some(Readiness::Conflicted { fields: vec!["state".into()] })
+    );
+    assert_eq!(readiness.stage("leaf").unwrap(), Some(Stage::Waiting));
+    let rollup = readiness.progress("p").unwrap().unwrap();
+    assert_eq!((rollup.stages.canceled, rollup.stages.waiting, rollup.stages.total()), (1, 0, 0));
+    assert_eq!(rollup.stage, Some(Stage::Canceled));
+}
+
+#[test]
 fn a_parked_parent_with_done_leaves_stays_parked_until_cleared() {
     let mut r = replica("a");
     items(&mut r, &["goal", "leaf", "dependent"]);
