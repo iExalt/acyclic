@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -129,45 +130,84 @@ def wrapper_failures(tmp):
         capture_output=True,
     )
     assert refused.returncode != 0 and existing.is_dir()
+
     fake = tmp / "fake bin"
     fake.mkdir()
-    calls, envlog = tmp / "calls [path]", tmp / "envlog [path]"
-    for tool in ("rootlesskit", "slirp4netns", "buildctl", "buildkitd"):
+    cleanup_calls = tmp / "rootless cleanup calls"
+    cleanup_fail = tmp / "fail cleanup"
+    envlog = tmp / "envlog [path]"
+    for tool in (
+        "slirp4netns",
+        "buildctl",
+        "buildkitd",
+        "newuidmap",
+        "newgidmap",
+        "mise",
+    ):
         p = fake / tool
         p.write_text("#!/bin/sh\nexit 0\n")
         p.chmod(0o755)
-    launcher = fake / "buildctl-daemonless.sh"
-    launcher.write_text(
+    rootlesskit = fake / "rootlesskit"
+    rootlesskit.write_text(
         "#!/bin/sh\n"
-        f"echo call >> {shlex.quote(str(calls))}\n"
-        f"env > {shlex.quote(str(envlog))}\n"
-        "printf partial-oci > image.oci.tar\nprintf partial-exporter > exporter.json\n"
-        "echo 'synthetic partial-export failure' >&2\nexit 23\n"
+        f"echo call >> {shlex.quote(str(cleanup_calls))}\n"
+        '[ "$1" = --subid-source=static ] || exit 81\n'
+        '[ "$2" = --net=none ] || exit 82\n'
+        '[ "$3" = rm ] && [ "$4" = -rf ] && [ "$5" = -- ] && [ "$#" -eq 6 ] || exit 83\n'
+        "target=$6\n"
+        'case "$target" in /tmp/ci-image-env.????????) ;; *) exit 84 ;; esac\n'
+        "case \"${target##*.}\" in *[!A-Za-z0-9]*|'') exit 85 ;; esac\n"
+        '[ ! -L "$target" ] && [ -d "$target" ] || exit 86\n'
+        '[ "$(stat -c \'%u:%g:%a\' -- "$target")" = "$(id -u):$(id -g):700" ] || exit 87\n'
+        f"[ ! -e {shlex.quote(str(cleanup_fail))} ] || exit 17\n"
+        'rm -rf -- "$target"\n'
     )
-    launcher.chmod(0o755)
-    out = tmp / "failed , ! output"
+    rootlesskit.chmod(0o755)
+    launcher = fake / "buildctl-daemonless.sh"
     env = dict(
         os.environ,
         PATH=str(fake) + os.pathsep + os.environ["PATH"],
         AWS_SECRET_ACCESS_KEY="SYNTHETIC_SECRET_MARKER",
         BUILDCTL_HOST="forbidden",
     )
+
+    launcher.write_text(
+        "#!/bin/sh\n"
+        f"env > {shlex.quote(str(envlog))}\n"
+        "printf partial-oci > image.oci.tar\nprintf partial-exporter > exporter.json\n"
+        "echo 'synthetic partial-export failure' >&2\nexit 23\n"
+    )
+    launcher.chmod(0o755)
     failed = subprocess.run(
-        [str(BUILDER), str(context), "image", "linux/amd64", FP, str(out)],
+        [
+            str(BUILDER),
+            str(context),
+            "image",
+            "linux/amd64",
+            FP,
+            str(tmp / "failed output"),
+        ],
         cwd=ROOT,
         env=env,
         capture_output=True,
         text=True,
     )
-    assert failed.returncode == 23 and not out.exists()
-    assert "synthetic partial-export failure" in failed.stderr
-    assert len(calls.read_text().splitlines()) == 1
+    assert (
+        failed.returncode == 23 and "synthetic partial-export failure" in failed.stderr
+    )
+    assert len(cleanup_calls.read_text().splitlines()) == 1
     inherited = envlog.read_text()
     assert (
         "SYNTHETIC_SECRET_MARKER" not in inherited and "BUILDCTL_HOST" not in inherited
     )
-    assert "USER=" + os.environ.get("USER", "") in inherited
-    assert "USER=root" not in inherited
+    assert (
+        "USER=" + os.environ.get("USER", "") in inherited
+        and "USER=root" not in inherited
+    )
+    assert (
+        "ROOTLESSKIT=rootlesskit --subid-source=static --net=slirp4netns --copy-up=/etc --disable-host-loopback"
+        in inherited
+    )
     assert (
         "BUILDKITD_FLAGS=--rootless --containerd-worker=false --oci-max-parallelism=4"
         in inherited
@@ -187,16 +227,24 @@ def wrapper_failures(tmp):
             if line.startswith(name + "=")
         )
         assert value != os.environ.get(name) and "ci-image-env." in value
+    env_root = pathlib.Path(
+        next(
+            line.split("=", 1)[1]
+            for line in inherited.splitlines()
+            if line.startswith("HOME=")
+        )
+    ).parent
+    assert "ci-image-env." in env_root.name and not env_root.exists()
     assert not any(p.name.startswith(".ci-image.") for p in tmp.iterdir())
 
     source_archive = tmp / "synthetic OCI.tar"
     source_meta, config_digest = archive(source_archive)
     source_metadata = json.loads(source_meta.read_text())
+    success_envlog = tmp / "success envlog"
     success_launcher = fake / "buildctl-daemonless.sh"
-    success_calls = tmp / "success calls"
     success_launcher.write_text(
         "#!/bin/sh\n"
-        f"echo call >> {shlex.quote(str(success_calls))}\n"
+        f"env > {shlex.quote(str(success_envlog))}\n"
         f"cp {shlex.quote(str(source_archive))} image.oci.tar\n"
         f"cp {shlex.quote(str(source_meta))} exporter.json\n"
     )
@@ -210,7 +258,7 @@ def wrapper_failures(tmp):
         text=True,
     )
     assert successful.returncode == 0, successful.stderr
-    assert len(success_calls.read_text().splitlines()) == 1
+    assert len(cleanup_calls.read_text().splitlines()) == 2
     assert {item.name for item in success_out.iterdir()} == {
         "image.oci.tar",
         "exporter.json",
@@ -225,10 +273,19 @@ def wrapper_failures(tmp):
         "config_digest": config_digest,
         "archive_sha256": hashlib.sha256(source_archive.read_bytes()).hexdigest(),
     }
+    success_env = success_envlog.read_text()
+    success_home = pathlib.Path(
+        next(
+            line.split("=", 1)[1]
+            for line in success_env.splitlines()
+            if line.startswith("HOME=")
+        )
+    ).parent
+    assert not success_home.exists()
 
-    race_launcher = fake / "buildctl-daemonless.sh"
     race_out = tmp / "raced , output"
     sentinel = race_out / "owner file"
+    race_launcher = fake / "buildctl-daemonless.sh"
     race_launcher.write_text(
         "#!/bin/sh\n"
         f"mkdir {shlex.quote(str(race_out))}\n"
@@ -245,15 +302,73 @@ def wrapper_failures(tmp):
         text=True,
     )
     assert raced.returncode != 0 and raced.stderr.strip()
-    assert sentinel.read_text() == "keep"
-    assert {item.name for item in race_out.iterdir()} == {"owner file"}
+    assert sentinel.read_text() == "keep" and {
+        item.name for item in race_out.iterdir()
+    } == {"owner file"}
+    assert len(cleanup_calls.read_text().splitlines()) == 3
+
+    cleanup_fail.touch()
+    failing_out = tmp / "cleanup failed before publish"
+    failing_envlog = tmp / "failing envlog"
+    failure_launcher = fake / "buildctl-daemonless.sh"
+    failure_launcher.write_text(
+        "#!/bin/sh\n"
+        f"env > {shlex.quote(str(failing_envlog))}\n"
+        f"cp {shlex.quote(str(source_archive))} image.oci.tar\n"
+        f"cp {shlex.quote(str(source_meta))} exporter.json\n"
+    )
+    failure_launcher.chmod(0o755)
+    cleanup_failed = subprocess.run(
+        [str(BUILDER), str(context), "image", "linux/amd64", FP, str(failing_out)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert (
+        cleanup_failed.returncode != 0
+        and "rootless cleanup of private environment failed" in cleanup_failed.stderr
+    )
+    assert not failing_out.exists() and len(cleanup_calls.read_text().splitlines()) == 4
+    failed_env = failing_envlog.read_text()
+    residue = pathlib.Path(
+        next(
+            line.split("=", 1)[1]
+            for line in failed_env.splitlines()
+            if line.startswith("HOME=")
+        )
+    ).parent
+    assert residue.is_dir() and str(residue) in cleanup_failed.stderr
+    shutil.rmtree(residue)
+
+    # A failed build must keep its original status even when teardown also fails.
+    failure_launcher.write_text(failure_launcher.read_text() + "exit 23\n")
+    combined_out = tmp / "build and cleanup failed"
+    combined = subprocess.run(
+        [str(BUILDER), str(context), "image", "linux/amd64", FP, str(combined_out)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert combined.returncode == 23 and not combined_out.exists()
+    assert len(cleanup_calls.read_text().splitlines()) == 5
+    combined_env = dict(
+        line.split("=", 1) for line in failing_envlog.read_text().splitlines()
+    )
+    combined_residue = pathlib.Path(combined_env["HOME"]).parent
+    assert combined_residue.is_dir() and str(combined_residue) in combined.stderr
+    shutil.rmtree(combined_residue)
 
     preexisting = tmp / "existing buildkit tools"
     preexisting.mkdir()
     marker = preexisting / "owner file"
     marker.write_text("keep")
     rejected = subprocess.run(
-        [str(BOOTSTRAP), str(preexisting), "true"], cwd=ROOT, capture_output=True
+        [str(BOOTSTRAP), str(preexisting), "true"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
     )
     assert rejected.returncode != 0 and b"already exists" in rejected.stderr
     assert marker.read_text() == "keep"

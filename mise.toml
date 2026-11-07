@@ -34,6 +34,7 @@ run = [
   "sh scripts/pre-push-test.sh",
   "rumdl check .",
   "actionlint",
+  "shellcheck scripts/build-ci-image.sh scripts/with-ci-buildkit.sh",
 ]
 
 [tasks."app:install"]
