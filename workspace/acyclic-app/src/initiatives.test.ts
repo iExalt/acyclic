@@ -279,16 +279,23 @@ describe("what the Map and the Threads view draw", () => {
     expect(inContext(items, "big").some((one) => one.id === "lost")).toBe(false);
   });
 
-  it("keeps the threads with a task in the initiative, one spanning two in each", () => {
+  it("keeps threads with work in the initiative and truly empty threads, but not those only outside it", () => {
     const of = threadInitiatives(model);
-    const threads = ["t1", "t2", "empty"].map((id) => ({ id }));
-    expect(threadsIn(threads, of, "big").map((one) => one.id)).toEqual(["t1"]);
+    const threads = ["t1", "t2", "empty", "outside"].map((id) => ({ id }));
+    const membership = new Map(of);
+    membership.set("outside", new Set(["small", null]));
+    expect(threadsIn(threads, membership, "big").map((one) => one.id)).toEqual(["t1", "empty"]);
     // t2 has a task in "small" and one in no initiative.
-    expect(threadsIn(threads, of, "small").map((one) => one.id)).toEqual(["t2"]);
+    expect(threadsIn(threads, membership, "small").map((one) => one.id)).toEqual(["t2", "empty", "outside"]);
+    membership.set("unassigned", new Set([null]));
+    expect(threadsIn([...threads, { id: "unassigned" }], membership, "big").map((one) => one.id)).toEqual([
+      "t1",
+      "empty",
+    ]);
     const spanning = new Map<string, Set<string | null>>([["t", new Set(["big", "small"])]]);
     expect(threadsIn([{ id: "t" }], spanning, "big")).toHaveLength(1);
     expect(threadsIn([{ id: "t" }], spanning, "small")).toHaveLength(1);
-    expect(threadsIn(threads, of, null)).toHaveLength(3);
+    expect(threadsIn(threads, membership, null)).toHaveLength(4);
   });
 
   it("scopes the outline to the epics of the initiative, and the threads at work in them", () => {

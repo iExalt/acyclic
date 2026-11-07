@@ -39,8 +39,10 @@ export function styleFor(p: Palette, family = FONT): cytoscape.StylesheetJson {
   return style;
 }
 
-/** The shift up of a title that a stub's room at the foot of its node makes off-centre. */
+/** The title band before a stub's reserved row. */
 const lifted = (node: cytoscape.NodeSingular) => -Number(node.data("reserve") ?? 0) / 2;
+const titleBand = (node: cytoscape.NodeSingular) =>
+  Number(node.data("header") ?? STRIP) - Number(node.data("reserve") ?? 0);
 
 /** Boxes are the zones of the map and items its stations; a lit item takes its thread's line colour. */
 function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
@@ -86,7 +88,7 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
         "font-weight": WEIGHT.bold,
         "text-valign": "top",
         // The label's foot sits on the box's top edge; this brings it down into the title strip.
-        "text-margin-y": (node: cytoscape.NodeSingular) => Number(node.data("header") ?? STRIP) - 8,
+        "text-margin-y": (node: cytoscape.NodeSingular) => titleBand(node) - 8,
       },
     },
     // A box's marks, its chevron and the icon of where its work stands, drawn over its title strip; its title in ink
@@ -109,7 +111,7 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
     // A box's title alone, with no counts under it, sits half a line lower: in the middle of the strip.
     {
       selector: "node.box.one-line",
-      style: { "text-margin-y": (node: cytoscape.NodeSingular) => Number(node.data("header") ?? STRIP) / 2 + 8 },
+      style: { "text-margin-y": (node: cytoscape.NodeSingular) => titleBand(node) / 2 + 8 },
     },
     // A tile's marks, its thread's stripe and its stage's icon, with its title between them.
     {

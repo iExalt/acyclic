@@ -2663,6 +2663,144 @@ def threads_journey(page, view, env, plan, name, failures):
     print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
 
 
+@timed
+def visibility_journey(page, view, env, plan, name, failures):
+    """An empty thread stays reachable in a scoped Threads view, foreign-only membership stays out, and a box's own
+    cross-initiative wait gets a dashed stub in the header row and opens its target."""
+    base = page.url.split("?", 1)[0]
+    foreign_initiatives = sorted({row["initiative"] for row in plan.elsewhere.values() if row["initiative"] is not None})
+    if not foreign_initiatives:
+        failures.append(f"{name}: the fixture has no foreign initiative for the visibility journey's cross-initiative task")
+        return
+    foreign_initiative = foreign_initiatives[0]
+    empty_thread = None
+    foreign_thread = None
+    foreign_item = None
+    outer = None
+    box = None
+    child = None
+    try:
+        empty_thread = json.loads(run(env, "thread", "add", "--title", f"Empty visibility {name}"))["data"]["thread"]
+        foreign_thread = json.loads(run(env, "thread", "add", "--title", f"Foreign visibility {name}"))["data"]["thread"]
+        foreign_item = json.loads(
+            run(
+                env,
+                "item",
+                "add",
+                "--title",
+                f"Foreign task {name}",
+                "--parent",
+                foreign_initiative,
+                "--thread",
+                foreign_thread,
+            )
+        )["data"]["item"]
+        outer = json.loads(run(env, "item", "add", "--title", f"Visibility container {name}", "--parent", plan.initiative, "--no-thread"))["data"]["item"]
+        box = json.loads(
+            run(
+                env,
+                "item",
+                "add",
+                "--title",
+                f"A long nested waiting box {name} whose title wraps across the header",
+                "--parent",
+                outer,
+                "--no-thread",
+            )
+        )["data"]["item"]
+        child = json.loads(run(env, "item", "add", "--title", f"Box child {name}", "--parent", box, "--no-thread"))["data"]["item"]
+        run(env, "item", "edit", box, "--waits-for", foreign_item)
+        page.goto(f"{base}?initiative={plan.initiative}")
+        page.get_by_test_id("overview").wait_for(timeout=10_000)
+        page.locator("[data-view=threads]").click()
+        page.get_by_test_id("threads-view").wait_for(timeout=5_000)
+        empty = page.locator(f"[data-thread-tile='{empty_thread}']")
+        empty.wait_for(timeout=10_000)
+        if page.locator(f"[data-thread-tile='{foreign_thread}']").count():
+            failures.append(f"{name}: a thread with membership only outside the selected initiative appeared in Threads")
+        empty.click()
+        panel = page.get_by_test_id("thread-panel")
+        panel.wait_for(timeout=10_000)
+        panel.get_by_role("heading", name=f"Empty visibility {name}", exact=True).wait_for(timeout=10_000)
+        if f"Empty visibility {name}" not in panel.inner_text():
+            failures.append(f"{name}: the truly empty thread's tile opened a different thread panel")
+        page.keyboard.press("Escape")
+        panel.wait_for(state="detached", timeout=5_000)
+        to_map(page)
+        if box is None or foreign_item is None:
+            raise AssertionError("runtime fixture ids were not created")
+        wait_drawn(page, len(plan.default()) + 2)
+        page.wait_for_function(
+            "id => { const m=document.querySelector('[data-testid=map]'), n=m?.cy?.getElementById(id);"
+            " return m?.dataset.settled==='true' && n?.visible() && !m.cy.elements().some(e=>e.animated()); }",
+            arg=box,
+            timeout=10_000,
+        )
+        centre(page, box)
+        page.wait_for_function(
+            "id => { const m=document.querySelector('[data-testid=map]'), n=m?.cy?.getElementById(id);"
+            " return m?.dataset.settled==='true' && n?.visible() && !m.cy.elements().some(e=>e.animated()); }",
+            arg=box,
+            timeout=10_000,
+        )
+        tap_box(page, view, box)
+        stub_id = f"stub {box}"
+        page.wait_for_function(
+            "([box, child, stub]) => { const m=document.querySelector('[data-testid=map]');"
+            " const b=m?.cy?.getElementById(box), c=m?.cy?.getElementById(child), s=m?.cy?.getElementById(stub);"
+            " return m?.dataset.settled==='true' && b?.data('kind')==='box' && c?.nonempty() && c.visible()"
+            " && s?.nonempty() && !m.cy.elements().some(e=>e.animated()); }",
+            arg=[box, child, stub_id],
+            timeout=10_000,
+        )
+        geometry = page.get_by_test_id("map").evaluate(
+            "(m, ids) => { const b=m.cy.getElementById(ids[0]), c=m.cy.getElementById(ids[1]);"
+            " const box=b.boundingBox({ includeLabels:false }), child=c.boundingBox({ includeLabels:false });"
+            " return { header:Number(b.data('header')), clearance:child.y1-(box.y1+Number(b.data('header'))) }; }",
+            [box, child],
+        )
+        if geometry["clearance"] < -0.5:
+            failures.append(f"{name}: the nested box's wrapped title or stub row overlaps its child: {geometry}")
+        stub = page.get_by_test_id("map").evaluate(
+            "(m, id) => { const n=m.cy.getElementById(id); return { target:n.data('target'), style:n.pstyle('border-style').strValue }; }",
+            stub_id,
+        )
+        if stub != {"target": foreign_item, "style": "dashed"}:
+            failures.append(f"{name}: the open box's outside wait drew {stub}, not its dashed target {foreign_item}")
+        tap_middle(page, view, stub_id)
+        inspector = page.get_by_test_id("inspector")
+        inspector.wait_for(timeout=10_000)
+        inspector.get_by_role("heading", name=f"Foreign task {name}", exact=True).wait_for(timeout=10_000)
+        if f"item={foreign_item}" not in page.url:
+            failures.append(f"{name}: tapping the open-box stub did not open its target: {page.url}")
+        print(f"{name}: empty thread included, foreign-only thread excluded, open-box stub opened its target")
+        page.keyboard.press("Escape")
+        page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
+    finally:
+        # Remove only the rows this journey added; the shared seeded plan remains unchanged.
+        if box is not None and foreign_item is not None:
+            cleanup = subprocess.run(
+                [ACYCLIC, "item", "edit", box, "--no-waits-for", foreign_item],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            if cleanup.returncode != 0:
+                failures.append(f"{name}: couldn't unlink the temporary cross-initiative wait: {cleanup.stderr}")
+        for item_id in (child, box, outer, foreign_item):
+            if item_id is not None:
+                cleanup = subprocess.run([ACYCLIC, "item", "delete", item_id], env=env, capture_output=True, text=True)
+                if cleanup.returncode != 0:
+                    failures.append(f"{name}: couldn't delete temporary item {item_id}: {cleanup.stderr}")
+        for thread_id in (foreign_thread, empty_thread):
+            if thread_id is not None:
+                cleanup = subprocess.run([ACYCLIC, "thread", "delete", thread_id], env=env, capture_output=True, text=True)
+                if cleanup.returncode != 0:
+                    failures.append(f"{name}: couldn't delete temporary thread {thread_id}: {cleanup.stderr}")
+        page.goto(f"{base}?initiative={plan.initiative}")
+        page.get_by_test_id("overview").wait_for(timeout=10_000)
+
+
 def verify_thread_arrows(page, listed, want, name, failures):
     """Shows every expected wait by hovering its endpoints, checking all routes and their union."""
     expected = {
@@ -4534,6 +4672,7 @@ def shard_run(shard):
                     # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                     hint = map_journey(page, view, plan, name, failures, hint)
                     outline_journey(page, view, plan, name, failures)
+                    visibility_journey(page, view, env, plan, name, failures)
                     threads_journey(page, view, env, plan, name, failures)
                     deep_link_journey(context, origin, view, plan, name, failures)
                     history_journey(context, origin, view, plan, name, failures)

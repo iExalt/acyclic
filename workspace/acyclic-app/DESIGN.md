@@ -121,7 +121,8 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
   an entry written before one was chosen, which leaves the one in context. The address bar's link carries it; the link
   copied from an item's or a thread's panel does not. It orders the lists, is where New item goes, and marks the
   switcher; the Map, the Threads view and the outline show only its work.
-- **The Threads view names what crosses initiatives.** Waves are computed across the whole tracker and numbered for
+- **The Threads view names what crosses initiatives.** It includes truly empty threads, but not threads whose members
+  are only in other initiatives. Waves are computed across the whole tracker and numbered for
   the view without gaps. A tile with work in another initiative, or after a thread in one, has a tray under it that
   carries on its stripe, a stub for each: `↗ Initiative: task` for each unfinished task of the thread there (three at
   most, then "+n more in other initiatives"), and `after ↗ Initiative: thread` for each thread in an earlier wave that
@@ -409,9 +410,9 @@ before what went wrong.
   its arrow alone in the signal's colour, as a link across boxes is, naming the initiative and the item,
   `Initiative: item`, cut to the tile with an ellipsis, with "+n" for each further one. A hover (a title on the Map)
   names them all in full, and a tap opens the first, in its own initiative. The tile grows by the chip's room, its title
-  and marks centred above it, so the layout is as before with taller tiles; an open box's own wait on another initiative
-  shows no stub while the box is open, as its title strip has no place for one; it appears once the box is folded, and
-  the Inspector lists it. A finished item's waits show none.
+  and marks centred above it, so the layout is as before with taller tiles. An open box's own wait gets a reserved row
+  below its title band; its title, chevron and stage mark stay in that band, and the folded box carries the same stub
+  with its descendants' waits. A finished item's waits show none.
 - **Threads' waits stay named.** Every tile names the threads it waits on and any cycle peers. On wide screens, arrows
   appear only for a hovered or picked thread; phone layouts keep the names without arrows.
 - **Packed tight, in order where it counts.** The top level is packed into a rectangle with as little room wasted as

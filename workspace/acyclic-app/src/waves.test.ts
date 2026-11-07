@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { threadInitiatives, threadsIn } from "./initiatives";
+import { emptyThreadIds, threadInitiatives, threadsIn } from "./initiatives";
 import { item } from "./map/fixture";
 import { buildModel } from "./map/model";
 import { outlineOf } from "./outline";
@@ -58,6 +58,55 @@ describe("wavesView", () => {
     expect(view.anytime[0]?.counts).toBe(listed.threads[0]?.counts);
     expect(view.waves[0]?.[0]?.counts).toMatchObject({ leaves: 3, ready: 1, in_progress: 1, parked: 1 });
     expect(view.anytime[1]?.counts.leaves).toBe(0);
+  });
+});
+
+describe("truly empty threads", () => {
+  it("adds only scoped, known, unplaced empty records to Anytime, in natural id order", () => {
+    const threads = [
+      { id: "empty-wave", title: "Empty wave", task: null, waitsFor: [], counts: none },
+      { id: "empty-anytime", title: "Empty anytime", task: null, waitsFor: [], counts: none },
+      { id: "empty-10", title: "Empty ten", task: null, waitsFor: [], counts: none },
+      { id: "empty-2", title: "Empty two", task: null, waitsFor: [], counts: none },
+      { id: "empty-zero", title: "Empty zero", task: null, waitsFor: [], counts: none },
+      { id: "done", title: "Done", task: null, waitsFor: [], counts: { ...none, leaves: 1, done: 1 } },
+      { id: "canceled", title: "Canceled", task: null, waitsFor: [], counts: { ...none, leaves: 1, canceled: 1 } },
+      { id: "parent-only", title: "Parent only", task: null, waitsFor: [], counts: none },
+      { id: "regular", title: "Regular", task: null, waitsFor: [], counts: none },
+      { id: "foreign", title: "Foreign", task: null, waitsFor: [], counts: none },
+    ];
+    const memberships = new Map<string, ReadonlySet<string | null>>([
+      ["empty-zero", new Set<string | null>()],
+      ["done", new Set(["in"])],
+      ["canceled", new Set(["in"])],
+      ["parent-only", new Set(["in"])],
+      ["regular", new Set(["in"])],
+      ["foreign", new Set(["other"])],
+    ]);
+    const scoped = threadsIn(threads, memberships, "in");
+    const empty = emptyThreadIds(scoped, memberships);
+    expect(empty).toEqual(new Set(["empty-wave", "empty-anytime", "empty-10", "empty-2", "empty-zero"]));
+
+    const listed = {
+      threads,
+      waves: [["empty-wave"], ["regular"]],
+      anytime: ["empty-anytime"],
+    };
+    const keep = new Set(scoped.map((one) => one.id));
+    const view = wavesView(
+      scopeThreads(listed, keep),
+      outlineOf(buildModel(items), [...keep]),
+      new Map(),
+      new Set([...empty, "unknown"]),
+    );
+    expect(view.waves.map((wave) => wave.map((tile) => tile.id))).toEqual([["empty-wave"], ["regular"]]);
+    expect(view.anytime.map((tile) => tile.id)).toEqual(["empty-2", "empty-10", "empty-anytime", "empty-zero"]);
+    expect(view.anytime.filter((tile) => tile.id === "empty-anytime")).toHaveLength(1);
+    expect(view.anytime.some((tile) => tile.id === "unknown")).toBe(false);
+    expect(view.anytime.some((tile) => tile.id === "foreign")).toBe(false);
+    expect(view.anytime.some((tile) => tile.id === "done" || tile.id === "canceled" || tile.id === "parent-only")).toBe(
+      false,
+    );
   });
 });
 
