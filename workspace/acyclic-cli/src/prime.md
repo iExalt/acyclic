@@ -174,6 +174,10 @@ give the item the parent, waits-for and thread it belongs with.
    it before reading what another machine wrote and after writing what one should see. With
    `git config acyclic.pushAfterWrite true` in the tracker clone, every write pushes too and reports `push`; a push that
    fails leaves the write in place and shows in `acyclic needs` until a sync.
+7. `acyclic compact` squashes this replica's local state history when it has more than one commit. It preserves the
+   full audit history; a later `acyclic sync` propagates the local squash to peers. After a successful exchange, sync
+   suggests compaction once the local state history reaches 1,000 first-parent commits. Compaction is explicit and
+   local: it does not sync or push, does not run in the background, and may not reclaim disk space immediately.
 
 ## Details
 

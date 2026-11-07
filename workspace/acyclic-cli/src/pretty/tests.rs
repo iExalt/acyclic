@@ -217,6 +217,35 @@ fn init_and_sync_name_the_tracker_and_distinguish_local_changes_from_pushes() {
             format!("synced tracker with origin · fetched 2 · joined {word} · pushed {pushed}\n")
         );
     }
+    let synced =
+        json!({"remote": "origin", "fetched": 2, "joined": false, "pushed": 0, "changed": false});
+    for suggested in
+        [serde_json::Value::Bool(false), serde_json::Value::Bool(true), serde_json::Value::Null]
+    {
+        let mut data = synced.clone();
+        data["compact_suggested"] = suggested.clone();
+        let rendered = render(&command("sync"), &data, None, &BTreeMap::new());
+        assert_eq!(
+            rendered.contains("run acyclic compact"),
+            suggested == serde_json::Value::Bool(true),
+            "{rendered}"
+        );
+    }
+}
+
+#[test]
+fn compact_pretty_output_says_local_state_and_audit_are_separate() {
+    let command = command("compact");
+    let changed = json!({"changed": true, "squashed": "abc123", "pruned": []});
+    let unchanged = json!({"changed": false, "squashed": null, "pruned": []});
+    assert_eq!(
+        render(&command, &changed, None, &BTreeMap::new()),
+        "compacted local state history · audit history retained · pruned 0 audit files\n"
+    );
+    assert_eq!(
+        render(&command, &unchanged, None, &BTreeMap::new()),
+        "no compaction needed for local state history · audit history retained · pruned 0 audit files\n"
+    );
 }
 
 #[test]

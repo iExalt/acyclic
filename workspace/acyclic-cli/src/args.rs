@@ -62,7 +62,19 @@ pub const SECTIONS: [(&str, &[&str]); 2] = [
     ("Command Groups", &["initiative", "item", "thread", "repository"]),
     (
         "Other Commands",
-        &["needs", "init", "sync", "prime", "id", "import", "doctor", "serve", "up", "completions"],
+        &[
+            "needs",
+            "init",
+            "sync",
+            "compact",
+            "prime",
+            "id",
+            "import",
+            "doctor",
+            "serve",
+            "up",
+            "completions",
+        ],
     ),
 ];
 
@@ -148,6 +160,8 @@ pub enum Command {
     },
     /// Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs.
     Sync,
+    /// Compacts this clone's local state history while preserving its audit history.
+    Compact,
     /// Prints conventions for agents, matched to this version, as text.
     Prime,
     /// Prints new `UUIDv7` ids, one per line, as text, to name records with in `--id` or an import document.
@@ -276,7 +290,7 @@ pub enum Class {
     Standalone,
     /// Starts a server: `serve` and `up`.
     Server,
-    /// Works on the clone as a whole: `sync`, `import` and `doctor`.
+    /// Works on the clone as a whole: `sync`, `compact`, `import` and `doctor`.
     Clone,
     /// Only reads the tracker.
     Read,
@@ -296,7 +310,7 @@ impl Command {
             | Self::Completions { .. }
             | Self::Import { schema: true, .. } => Class::Standalone,
             Self::Serve(_) | Self::Up(_) => Class::Server,
-            Self::Sync | Self::Import { .. } | Self::Doctor => Class::Clone,
+            Self::Sync | Self::Compact | Self::Import { .. } | Self::Doctor => Class::Clone,
             Self::Needs
             | Self::Initiative(InitiativeCommand::List | InitiativeCommand::Show { .. })
             | Self::Item(ItemCommand::List | ItemCommand::Show { .. })

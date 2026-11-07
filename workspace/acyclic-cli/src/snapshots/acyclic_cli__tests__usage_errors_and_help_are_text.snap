@@ -16,6 +16,7 @@ Other Commands:
   needs        Lists what needs the user
   init         Sets up a tracker clone as a new replica, creating the repository if there is none
   sync         Fetches every replica's state from `origin`, joins it into this one, and pushes this replica's refs
+  compact      Compacts this clone's local state history while preserving its audit history
   prime        Prints conventions for agents, matched to this version, as text
   id           Prints new `UUIDv7` ids, one per line, as text, to name records with in `--id` or an import document
   import       Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example
