@@ -94,7 +94,11 @@ fn a_parent_cycle_made_by_a_join_is_reported_and_every_walk_ends() {
 
 #[test]
 fn a_conflicted_parent_counts_as_each_of_its_values() {
-    let (mut a, mut b) = pair(&["p1", "p2", "child"]);
+    let (mut a, mut b) = pair(&["root", "p1", "p2", "child"]);
+    for replica in [&mut a, &mut b] {
+        set_parent(replica, "p1", Some("root"), by(2)).unwrap();
+        set_parent(replica, "p2", Some("root"), by(2)).unwrap();
+    }
     set_parent(&mut a, "child", Some("p1"), by(2)).unwrap();
     set_parent(&mut b, "child", Some("p2"), by(2)).unwrap();
     a.join(&b.state).unwrap();
@@ -102,8 +106,9 @@ fn a_conflicted_parent_counts_as_each_of_its_values() {
     assert!(m.items["child"].parent.is_conflict());
     let mut ancestors = m.ancestors("child");
     ancestors.sort_unstable();
-    assert_eq!(ancestors, vec!["p1", "p2"]);
+    assert_eq!(ancestors, vec!["p1", "p2", "root"]);
     assert_eq!((m.children("p1"), m.children("p2")), (vec!["child"], vec!["child"]));
+    assert_eq!(m.progress("root"), Some(Progress { done: 0, canceled: 0, total: 1 }));
 }
 
 #[test]
@@ -352,6 +357,11 @@ fn canceled_leaves_leave_the_count_and_a_parent_of_nothing_else_reads_canceled()
     set_state(&mut r, "top", ItemState::Canceled, by(6)).unwrap();
     assert!(read(&r).reads_canceled("top") && !read(&r).reads_done("top"));
     assert_eq!(read(&r).progress("top"), Some(Progress { done: 0, canceled: 2, total: 0 }));
+    // The parent's state doesn't turn its completed leaves into canceled work.
+    set_state(&mut r, "a", ItemState::Done, by(7)).unwrap();
+    set_state(&mut r, "b", ItemState::Done, by(7)).unwrap();
+    assert_eq!(read(&r).progress("top"), Some(Progress { done: 2, canceled: 0, total: 2 }));
+    assert!(read(&r).reads_canceled("top") && !read(&r).reads_done("top"));
     // A state in conflict between done and canceled is neither.
     let (mut left, mut right) = pair(&["c"]);
     set_state(&mut left, "c", ItemState::Done, by(3)).unwrap();

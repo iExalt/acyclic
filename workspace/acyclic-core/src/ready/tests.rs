@@ -536,6 +536,34 @@ fn a_done_stored_on_a_part_hides_none_of_its_claimed_work_from_above() {
     assert_eq!(rolled.stage, Some(Stage::InProgress));
 }
 
+#[test]
+fn a_parked_parent_with_done_leaves_stays_parked_until_cleared() {
+    let mut r = replica("a");
+    items(&mut r, &["goal", "leaf", "dependent"]);
+    set_parent(&mut r, "leaf", Some("goal"), by(2)).unwrap();
+    link(&mut r, "dependent", "goal", by(2)).unwrap();
+    done_with(&mut r, "leaf", None);
+    set_state(&mut r, "goal", ItemState::Parked, by(3)).unwrap();
+
+    let parked = Model::read(&r.state).unwrap();
+    assert_eq!(parked.progress("goal"), Some(model::Progress { done: 1, canceled: 0, total: 1 }));
+    assert!(!parked.reads_done("goal"));
+    assert_eq!(rollup(&r, "goal").stage, Some(Stage::Parked));
+    assert_eq!(status(&r, "dependent"), waiting_on(&[("goal", Wait::Open)]));
+
+    set_state(&mut r, "goal", ItemState::Backlog, by(4)).unwrap();
+    let cleared = Model::read(&r.state).unwrap();
+    assert!(cleared.reads_done("goal"));
+    assert_eq!(rollup(&r, "goal").stage, Some(Stage::Done));
+    assert_eq!(status(&r, "dependent"), Readiness::Ready);
+
+    set_state(&mut r, "goal", ItemState::Canceled, by(5)).unwrap();
+    let canceled = Model::read(&r.state).unwrap();
+    assert!(canceled.reads_canceled("goal") && !canceled.reads_done("goal"));
+    assert_eq!(rollup(&r, "goal").stage, Some(Stage::Canceled));
+    assert_eq!(canceled.progress("goal"), Some(model::Progress { done: 1, canceled: 0, total: 1 }));
+}
+
 fn stage(r: &Replica, id: &str) -> Option<Stage> {
     let model = Model::read(&r.state).unwrap();
     ReadinessEvaluator::new(&r.state, &model, NOW).stage(id).unwrap()

@@ -242,6 +242,14 @@ struct Tally {
     total: usize,
 }
 
+/// A leaf beneath a parent, with set-aside state inherited from its ancestors.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Leaf<'a> {
+    pub(crate) item: &'a Item,
+    pub(crate) parked: bool,
+    pub(crate) canceled: bool,
+}
+
 /// A link as read: `from` waits for `to`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Link {
@@ -595,39 +603,57 @@ impl Model {
         if self.children(id).is_empty() {
             return None;
         }
-        let mut tally = Tally::default();
-        let canceled = self.items[id].state == Value::One(ItemState::Canceled);
-        self.tally(id, canceled, &mut BTreeSet::from([id]), &mut tally);
-        Some(Progress { done: tally.done, canceled: tally.canceled, total: tally.total })
+        Some(Self::progress_from_leaves(&self.leaves_under(id)))
     }
 
-    /// Counts the leaves under `id`, each item once, so a parent cycle ends the walk. The open leaves of a part
-    /// canceled by hand count as canceled.
-    fn tally<'a>(
-        &'a self,
-        id: &'a str,
-        canceled: bool,
-        seen: &mut BTreeSet<&'a str>,
-        tally: &mut Tally,
-    ) {
-        for child in self.children(id) {
-            if !seen.insert(child) {
-                continue;
-            }
-            let Some(item) = self.items.get(child) else { continue };
-            if self.children(child).is_empty() {
-                if item.is_canceled() || (canceled && !item.is_done()) {
-                    tally.canceled += 1;
-                } else {
-                    tally.total += 1;
-                    tally.done += usize::from(item.is_done());
-                }
+    /// Counts a previously collected set of leaves structurally, without consulting readiness or time.
+    pub(crate) fn progress_from_leaves(leaves: &[Leaf<'_>]) -> Progress {
+        let mut tally = Tally::default();
+        for leaf in leaves {
+            if leaf.item.is_canceled() || (leaf.canceled && !leaf.item.is_done()) {
+                tally.canceled += 1;
             } else {
-                // A parent's stored done is ignored: its leaves say whether it is done.
-                let cancels = canceled || item.state == Value::One(ItemState::Canceled);
-                self.tally(child, cancels, seen, tally);
+                tally.total += 1;
+                tally.done += usize::from(leaf.item.is_done());
             }
         }
+        Progress { done: tally.done, canceled: tally.canceled, total: tally.total }
+    }
+
+    /// The leaves under `id`, each item once, so a parent cycle ends the walk.
+    ///
+    /// A leaf inherits parked and canceled only from parent items; its own state remains on `item`.
+    pub(crate) fn leaves_under(&self, id: &str) -> Vec<Leaf<'_>> {
+        let mut seen = BTreeSet::from([id.to_owned()]);
+        let mut found = Vec::new();
+        let root = self.items.get(id);
+        let mut stack: Vec<_> = self
+            .children(id)
+            .into_iter()
+            .rev()
+            .map(|child| {
+                (
+                    child,
+                    root.is_some_and(|item| item.state == Value::One(ItemState::Parked)),
+                    root.is_some_and(|item| item.state == Value::One(ItemState::Canceled)),
+                )
+            })
+            .collect();
+        while let Some((at, parked, canceled)) = stack.pop() {
+            if !seen.insert(at.to_owned()) {
+                continue;
+            }
+            let Some(item) = self.items.get(at) else { continue };
+            let children = self.children(at);
+            if children.is_empty() {
+                found.push(Leaf { item, parked, canceled });
+            } else {
+                let parked = parked || item.state == Value::One(ItemState::Parked);
+                let canceled = canceled || item.state == Value::One(ItemState::Canceled);
+                stack.extend(children.into_iter().rev().map(|child| (child, parked, canceled)));
+            }
+        }
+        found
     }
 
     /// Whether an item reads as done: a leaf by its own state, a parent once every leaf under it that isn't canceled
