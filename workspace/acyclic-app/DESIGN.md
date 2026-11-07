@@ -145,7 +145,9 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
   initiative gets a row before any takes a second, so the one in context need not fill the list first.
 - **The Overview, wide:** Needs you beside In progress, with Up next under it, once the Overview is 680 px wide, a 976
   px window beside the sidebar (each at least 320 px, each up to eight rows; five for Needs you under 700 px, where they
-  stack), the projects across the page below them in columns of rows; an open panel keeps its width clear. From 1,280 px
+  stack), the projects across the page below them in columns of rows; an open panel keeps its width clear. On the Map,
+  the drawn area ends at the same pane edge, so the panel does not cover the plan. These wide panes are 360 px; below
+  900 px they become sheets over the Map. From 1,280 px
   with no panel open, Up next takes a third column of its own, the user's call: "allow three columns for the overview on
   wide screens"; an Up next at most half as long as the longest list beside it stays under In progress, and the projects
   take the third column instead, one row under another. (A single 960 px column left most of a desktop empty, and a

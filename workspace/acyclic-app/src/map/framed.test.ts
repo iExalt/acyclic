@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { CALM_FRAMES, FRESH_WATCH, type FrameWatch, intentsPending, stepFrame } from "./framed";
+import {
+  CALM_FRAMES,
+  FRESH_WATCH,
+  type FrameWatch,
+  intentsPending,
+  type SuppressionOwner,
+  sameSuppressionOwner,
+  stepFrame,
+} from "./framed";
 
 const none = { shown: null, parked: null, anchor: false, toFrame: false, tapReveals: 0 };
 
@@ -60,5 +68,28 @@ describe("intentsPending", () => {
     const request = {};
     expect(intentsPending({ ...none, shown: request, parked: request })).toBe(false);
     expect(intentsPending({ ...none, shown: {}, parked: request })).toBe(true);
+  });
+});
+
+describe("sameSuppressionOwner", () => {
+  const owner: SuppressionOwner = {
+    model: {},
+    view: {},
+    source: "source",
+    thread: "thread",
+    selected: "selected",
+  };
+  const cases: [string, SuppressionOwner | null, boolean][] = [
+    ["same fields", { ...owner }, true],
+    ["missing owner", null, false],
+    ["different model", { ...owner, model: {} }, false],
+    ["different view", { ...owner, view: {} }, false],
+    ["different source", { ...owner, source: "other" }, false],
+    ["different thread", { ...owner, thread: "other" }, false],
+    ["different selection", { ...owner, selected: "other" }, false],
+  ];
+
+  it.each(cases)("compares %s", (_name, current, expected) => {
+    expect(sameSuppressionOwner(current, owner)).toBe(expected);
   });
 });

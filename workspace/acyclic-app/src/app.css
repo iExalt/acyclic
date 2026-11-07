@@ -1935,8 +1935,16 @@ input[aria-invalid="true"] + .hint,
 }
 /* Wide, an open panel keeps its width clear. */
 @media (min-width: 900px) {
+  :root {
+    --wide-pane-width: 360px;
+  }
+
+  .stage:has(> .inspector, > .sheet.add) > .map {
+    right: var(--wide-pane-width);
+  }
+
   .stage:has(> .inspector, > .sheet.add) > :is(.overview, .needs-view) {
-    padding-right: calc(360px + 24px);
+    padding-right: calc(var(--wide-pane-width) + 24px);
   }
 }
 /* The badge in a column as wide as a two-digit one, so every row's title starts at the same edge. */
@@ -2037,7 +2045,7 @@ button.more {
   .inspector,
   .sheet.add {
     inset: 0 0 0 auto;
-    width: 360px;
+    width: var(--wide-pane-width);
     max-height: none;
     border-top: none;
     border-left: 1px solid var(--rule);
