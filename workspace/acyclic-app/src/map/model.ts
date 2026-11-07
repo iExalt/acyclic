@@ -2,7 +2,6 @@
 // must come first to the item that waits. Pure functions, tested without a browser.
 
 import type { Counts, Item, Stage } from "../api";
-import { type DoneBox, noteOf } from "./fold";
 
 /** A wait that leaves the initiative drawn: the item waited for, and the initiative it is in, named. */
 export interface Crossing {
@@ -41,7 +40,7 @@ export interface Model {
 }
 
 /** A canonical key for layout-relevant source structure, before the user's local fold toggles. */
-export function sourceKey(model: Model, doneBoxes: ReadonlyMap<string, DoneBox> = new Map()): string {
+export function sourceKey(model: Model): string {
   return JSON.stringify(
     [...model.items.values()]
       .map(({ id, title, parent, thread, state, stage, progress, waitsFor, outside }) => ({
@@ -52,7 +51,6 @@ export function sourceKey(model: Model, doneBoxes: ReadonlyMap<string, DoneBox> 
         state,
         stage,
         progress,
-        doneBox: doneBoxes.get(id) ?? null,
         waitsFor: [...waitsFor].sort(),
         // Each takes a line of a tile's height, so it is part of the layout's source.
         outside,
@@ -182,9 +180,6 @@ export interface VisibleNode {
   progress: Counts | null;
   /** The waits it, or what it hides, has outside the plan drawn: a tile's or a folded box's, which show them as stubs. */
   outside: Crossing[];
-  /** For a done box (see `fold.ts`), what it is and the words under its name; else absent. */
-  doneBox?: DoneBox;
-  note?: string;
 }
 
 /** An edge from the item that must come first to the one that waits for it, between visible nodes. */
@@ -250,7 +245,7 @@ export function impliedWithin(model: Model, shown: (id: string) => boolean) {
  * lift to their nearest visible ancestor. Edges that end up inside one node, or between a box and something it contains, are dropped: the box already
  * says the one holds the other.
  */
-export function visible(model: Model, state: ViewState, doneBoxes: ReadonlyMap<string, DoneBox> = new Map()): View {
+export function visible(model: Model, state: ViewState): View {
   // The visible item standing in for each item.
   const stand = new Map<string, string>();
   const nodes: VisibleNode[] = [];
@@ -278,7 +273,6 @@ export function visible(model: Model, state: ViewState, doneBoxes: ReadonlyMap<s
       thread: item.thread,
       progress: item.progress,
       outside: [],
-      ...doneBoxOf(doneBoxes.get(id), item.progress),
     });
     for (const child of kids) walk(child, id, collapsed ? id : null);
   };
@@ -332,11 +326,6 @@ export function visible(model: Model, state: ViewState, doneBoxes: ReadonlyMap<s
 /** Crossings in the order a stub names them: by initiative, then title, then id. */
 export const byCrossing = (a: Crossing, b: Crossing) =>
   a.initiative.localeCompare(b.initiative) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id);
-
-/** A done box's fields on its node, or none for an item. */
-function doneBoxOf(doneBox: DoneBox | undefined, progress: Counts | null): { doneBox?: DoneBox; note?: string } {
-  return doneBox === undefined ? {} : { doneBox, note: noteOf(doneBox, progress?.leaves ?? 0) };
-}
 
 /**
  * A stage for a tile core gives none: a parent with no leaves to count, drawn as a tile. Its own state says what it can: done, parked, canceled or started, and nothing otherwise.

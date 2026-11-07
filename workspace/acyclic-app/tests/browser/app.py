@@ -1928,7 +1928,7 @@ def map_journey(page, view, plan, name, failures, hint=None):
     thread, _ = Counter(
         row["thread"] for row in plan.items.values() if row["thread"]
     ).most_common(1)[0]
-    # Picked with none of its items in view, the nearest comes into view, clear of the panel the pick opens.
+    # Picking a thread frames every visible member, including boxes hiding members, clear of its panel.
     # In braces, so the renderer itself isn't sent back: serialising it takes seconds.
     page.get_by_test_id("map").evaluate(
         "m => { m.cy.pan({ x: 2 * m.clientWidth, y: 2 * m.clientHeight }); }"
@@ -1939,19 +1939,21 @@ def map_journey(page, view, plan, name, failures, hint=None):
         arg=plan.lit(thread),
     )
     page.locator("[data-testid=thread-panel]:not([aria-busy])").wait_for()
+    settled_map(page)
     if not page.get_by_test_id("map").evaluate(
         """m => {
             const r = m.getBoundingClientRect();
             const sheet = m.parentElement.querySelector('.inspector')?.getBoundingClientRect();
             const across = sheet && sheet.width >= r.width * 0.9;
             const open = { x2: sheet && !across ? sheet.left - r.left : r.width, y2: sheet && across ? sheet.top - r.top : r.height };
-            return m.cy.nodes('.lit').some(n => {
+            const members = m.cy.nodes('.lit');
+            return members.length > 0 && members.every(n => {
                 const b = n.renderedBoundingBox({ includeLabels: false });
-                return b.x2 > 0 && b.y2 > 0 && b.x1 < open.x2 && b.y1 < open.y2;
+                return b.x1 >= -0.5 && b.y1 >= -0.5 && b.x2 <= open.x2 + 0.5 && b.y2 <= open.y2 + 0.5;
             });
         }"""
     ):
-        failures.append(f"{name}: picking {thread} left all of its items out of view")
+        failures.append(f"{name}: picking {thread} left a member outside the visible Map")
     framed = fit_occlusion(page, lit_only=True)
     if framed is None:
         failures.append(f"{name}: the framed thread has no Fit control to keep clear")
@@ -2159,7 +2161,7 @@ def outline_journey(page, view, plan, name, failures):
             page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: opening {leaf} under {title} left the address {page.url}, not its own initiative")
-    # Pick unfinished work: done leaves can stay folded inside Done after their parent opens.
+    # Pick unfinished work so later write journeys can still act on it.
     picked = next(
         id
         for id in sorted(plan.items)
@@ -3547,63 +3549,47 @@ def thread_journey(page, env, plan, thread, name, failures):
 
 
 @timed
-def fold_journey(page, view, env, plan, name, failures):
-    """A thread's done items fold while it still has work left; search opens every box above a done item."""
+def membership_journey(page, view, env, plan, name, failures):
+    """Completed members stay beside unfinished work under their real parent, with thread labels."""
     box = min(id for id in plan.items if plan.depth(id) == 0 and plan.children(id))
-    thread = json.loads(run(env, "thread", "add", "--title", "Folded away"))["data"]["thread"]
-    unfinished = json.loads(run(env, "item", "add", "--title", "Still to finish", "--parent", box, "--thread", thread))["data"]["item"]
+    thread = json.loads(run(env, "thread", "add", "--title", "Membership"))["data"]["thread"]
     items = []
-    for title in ("Fold the first", "Fold the second"):
+    for title in ("Member first", "Member second", "Member remaining"):
         added = json.loads(run(env, "item", "add", "--title", title, "--parent", box, "--thread", thread))
         items.append(added["data"]["item"])
-        run(env, "item", "done", items[-1], "--evidence", "folded by a journey")
+    for id in items[:2]:
+        run(env, "item", "done", id, "--evidence", "finished by a journey")
     to_map(page)
     refresh(page)
-    folded = f"~thread {box} {thread}"
-    # Folded as a box of its own, or with the box's other finished work in its Done box.
+    settled_map(page)
+    # This is a positive control: all three records, completed ones included, must be drawn as real tasks.
     page.wait_for_function(
-        "([folded, done]) => { const m = document.querySelector('[data-testid=map]');"
-        " return m?.dataset.state === 'drawn' && (m.cy.getElementById(folded).nonempty()"
-        " || m.cy.getElementById(done).nonempty()); }",
-        arg=[folded, f"~done {box}"],
-        timeout=20_000,
+        """ids => {
+            const m = document.querySelector('[data-testid=map]');
+            return m?.dataset.settled === 'true' && ids.every(id => m.cy.getElementById(id).nonempty());
+        }""",
+        arg=items, timeout=20_000,
     )
-    page.wait_for_function(
-        "id => { const m = document.querySelector('[data-testid=map]');"
-        " return m?.dataset.state === 'drawn' && m.cy.getElementById(id).nonempty(); }",
-        arg=unfinished,
-        timeout=10_000,
+    result = page.get_by_test_id("map").evaluate(
+        """(m, [ids, parent]) => ({
+            tasks: ids.map(id => {
+                const n = m.cy.getElementById(id);
+                return { parent: n.data('owner'), label: n.data('label'), kind: n.data('kind') };
+            }),
+            synthetic: m.cy.nodes().filter(n => n.id().startsWith('~')).length,
+        })""",
+        [items, box],
     )
-    drawn = page.get_by_test_id("map").evaluate(
-        "(m, ids) => ids.filter(id => m.cy.getElementById(id).nonempty())", items
-    )
-    if drawn:
-        failures.append(f"{name}: a thread's done items {drawn} were drawn rather than folded")
-    menu = page.get_by_test_id("command-menu")
-    if view.get("has_touch"):
-        page.locator("[data-action=search]").tap()
-    else:
-        page.keyboard.press("ControlOrMeta+k")
-    menu.wait_for(timeout=5_000)
-    page.keyboard.type("Fold the first")
-    row = page.locator(f".command-row[data-command='item:{items[0]}']")
-    row.wait_for(timeout=5_000)
-    row.tap() if view.get("has_touch") else row.click()
-    try:
-        page.wait_for_function(
-            "id => { const m = document.querySelector('[data-testid=map]');"
-            " return m?.dataset.state === 'drawn' && m.cy.getElementById(id).nonempty(); }",
-            arg=items[0],
-            timeout=10_000,
-        )
-        page.screenshot(path=SHOTS / f"app-{name}-fold.png")
-        print(f"{name}: a partial thread folded its done items, and the command menu unfolded it to {items[0]}")
-    except PlaywrightTimeout:
-        failures.append(f"{name}: the command menu's folded item {items[0]} wasn't unfolded into view")
-    finally:
-        # Reopened, so the views after, which count every item the plan holds, draw them as tiles.
-        for id in items:
-            run(env, "item", "reopen", id)
+    if result["synthetic"] or any(
+        row["parent"] != box or row["kind"] != "leaf" or "Thread: Membership" not in row["label"]
+        for row in result["tasks"]
+    ):
+        failures.append(f"{name}: thread membership changed the item hierarchy or lost its label: {result}")
+    page.screenshot(path=SHOTS / f"app-{name}-membership.png")
+    print(f"{name}: completed and unfinished thread members retain their real parent and membership labels")
+    # Leave the fixture open for the subsequent journeys' item counts.
+    for id in items[:2]:
+        run(env, "item", "reopen", id)
 
 
 @timed
@@ -4017,7 +4003,9 @@ def labels_journey(browser, link, ids, titles):
         assert "Ready" not in long["label"] and "Ready" not in ready["label"], found
         assert "…" in long["label"], long
         assert abs(long["body"]["w"] - ready["body"]["w"]) < 0.5, found
-        assert abs(long["body"]["h"] - ready["body"]["h"]) < 0.5, found
+        # The named task keeps the same title body and adds its membership footer.
+        assert "Thread:" not in long["label"] and ready["label"].endswith("Thread: Label proof"), found
+        assert abs(ready["body"]["h"] - long["body"]["h"] - 32.5) < 0.5, found
         assert root["header"] > 72, root
         assert all(
             child["body"]["y1"] >= root["body"]["y1"] + root["header"] - 1
@@ -4355,7 +4343,7 @@ def shard_run(shard):
                         failed_add_journey(page, errors, name, failures)
                         thread_journey(page, env, plan, plan.first_thread, name, failures)
                         needs_journey(page, env, plan, plan.first_thread, name, failures)
-                        fold_journey(page, view, env, plan, name, failures)
+                        membership_journey(page, view, env, plan, name, failures)
                         plan = Plan(env)
                         guarded_undo_race(page, view, env, plan, name, failures, errors)
                         plan = Plan(env)

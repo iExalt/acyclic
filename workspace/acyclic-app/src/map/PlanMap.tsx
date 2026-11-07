@@ -14,7 +14,6 @@ import { onChevron, STRIP } from "./chevron";
 import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf, land, prefersReducedMotion, settle, settledBox } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
-import { foldDone, isDoneBox } from "./fold";
 import { FRESH_WATCH, intentsPending, stepFrame } from "./framed";
 import { createGesture } from "./gesture";
 import { metricsOf, TILE_WIDTH } from "./labelmetrics";
@@ -23,12 +22,11 @@ import { buildModel, type Crossing, collapsedWith, type Model, sourceKey, topOf,
 import { busy, subscribe, track } from "./motion";
 import {
   firstView,
+  fitAll,
   fitPlan,
   focusReveal,
-  frame,
   framesAll,
   headed,
-  nearest,
   newlyCovered,
   READABLE,
   type RevealIntent,
@@ -110,8 +108,6 @@ export interface PlanMapProps {
   framed?: Framed | undefined;
   /** Set while an edit waits for a target: a tap picks an item, or the background (null), and toggles nothing. */
   onPick: ((item: string | null) => void) | null;
-  /** A finished thread's box tapped: its thread is picked, as the sidebar picks one. */
-  onThread?: (thread: string) => void;
   /** The waits each item has on items outside `items`, drawn as stubs on its tile. */
   outside?: ReadonlyMap<string, Crossing[]> | undefined;
   /** A stub tapped: the item it names is opened, in its own initiative. */
@@ -140,7 +136,6 @@ export default function PlanMap({
   focus,
   framed,
   onPick,
-  onThread,
   outside,
   onOpen,
   active,
@@ -148,15 +143,13 @@ export default function PlanMap({
   const host = useRef<HTMLDivElement>(null);
   const cy = useRef<Core | null>(null);
   const layouts = useMemo(browserLayouts, []);
-  // The threads' names, which name their doneBoxes of finished work; as a key, so a new palette doesn't fold afresh.
-  const names = JSON.stringify([...lines].map(([id, line]) => [id, line.name]));
-  // The plan as drawn, each box's finished work folded into doneBoxes, which only the Map holds.
-  const { model, doneBoxes } = useMemo(() => {
-    const named = new Map<string, string>(JSON.parse(names));
-    return foldDone(buildModel(items, outside), (thread) => named.get(thread) ?? null);
-  }, [items, names, outside]);
-  // The folded source model carries geometry changes but not the Map's local chevron toggles.
-  const source = useMemo(() => sourceKey(model, doneBoxes), [model, doneBoxes]);
+  const model = useMemo(() => buildModel(items, outside), [items, outside]);
+  // Only named threads have a membership label. Palette changes do not change layout.
+  const names = JSON.stringify(
+    [...lines].filter(([, line]) => line.task === null).map(([id, line]) => [id, line.name]),
+  );
+  const named = useMemo(() => new Map<string, string>(JSON.parse(names)), [names]);
+  const source = useMemo(() => `${sourceKey(model)}:${names}`, [model, names]);
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [hovered, setHovered] = useState<string | null>(null);
@@ -279,11 +272,20 @@ export default function PlanMap({
     drawn: Scene;
   } | null>(null);
   const collapsed = useMemo(() => collapsedWith(model, toggles), [model, toggles]);
-  const view = useMemo(() => visible(model, { collapsed }, doneBoxes), [model, collapsed, doneBoxes]);
+  const view = useMemo(() => visible(model, { collapsed }), [model, collapsed]);
   const fonts = useMemo(() => (fontFamily === null ? UNMEASURED : measuring(fontFamily)), [fontFamily]);
   const labelMetrics = useMemo(
-    () => new Map(view.nodes.map((node) => [node.id, metricsOf(node, fonts, TILE_WIDTH)] as const)),
-    [view, fonts],
+    () =>
+      new Map(
+        view.nodes.map(
+          (node) =>
+            [
+              node.id,
+              metricsOf(node, fonts, TILE_WIDTH, node.thread === null ? null : (named.get(node.thread) ?? null)),
+            ] as const,
+        ),
+      ),
+    [view, fonts, named],
   );
   const viewNow = useRef(view);
   viewNow.current = view;
@@ -771,8 +773,7 @@ export default function PlanMap({
   // "true"; and the Map becoming active, since the watch stops while it is not, and a Map drawn then is unsettled.
   useEffect(kickFramed, [model, view, aspect, source, fontFamily, framed, thread, focus, selected, active]);
 
-  // A thread picked with none of its items in view brings the nearest in, clear of the panel the pick opens; one the
-  // user came to the Map for is framed instead.
+  // A picked thread frames every visible member, clear of the panel the pick opens.
   const sought = useRef<string | null>(null);
   const toFrame = useRef(framed);
   const framedSeen = useRef(framed);
@@ -807,7 +808,7 @@ export default function PlanMap({
       STRIP,
     );
     const titlesFit = framesAll(titled, open);
-    const view = frame(titlesFit ? titled : lit, core.nodes().boundingBox({ includeLabels: false }), open, 1);
+    const view = fitAll(titlesFit ? titled : lit, open, 1);
     if (view !== null) {
       core.viewport(view);
       if (!titlesFit) {
@@ -847,20 +848,19 @@ export default function PlanMap({
     if (focus?.id === selected) return;
     const lit = drawn.nodes.flatMap((node) => {
       const drawnNode = core.getElementById(node.id);
-      return node.lit && drawnNode.nonempty() ? [settledBox(core, node.id)] : [];
+      return node.lit && drawnNode.nonempty() ? [drawnNode.boundingBox({ includeLabels: false })] : [];
     });
     const open = openPart(element);
-    const target = nearest(lit, open);
-    if (target !== null) {
+    const fitted = fitAll(lit, open, 1);
+    if (fitted !== null) {
       cancelViewIntent();
-      const pan = reveal(target, open);
-      if (pan !== null) core.panBy(pan);
+      core.viewport(fitted);
     }
   }, [thread, drawn, focus, selected]);
 
   // The latest handlers, so the tap listener is added once.
-  const handlers = useRef({ onSelect, onPick, onThread, onOpen });
-  handlers.current = { onSelect, onPick, onThread, onOpen };
+  const handlers = useRef({ onSelect, onPick, onOpen });
+  handlers.current = { onSelect, onPick, onOpen };
   /** Counts taps, so a tap's late reveal gives way to a newer tap's. */
   const taps = useRef(0);
   function cancelViewIntent() {
@@ -872,7 +872,7 @@ export default function PlanMap({
     const core = cy.current;
     if (core === null) return;
     const tap = (event: cytoscape.EventObject) => {
-      const { onSelect, onPick, onThread, onOpen } = handlers.current;
+      const { onSelect, onPick, onOpen } = handlers.current;
       const now = ++taps.current;
       const target = event.target as cytoscape.NodeSingular | Core;
       let node = target !== core && "isNode" in target && target.isNode() ? target : null;
@@ -897,14 +897,8 @@ export default function PlanMap({
       }
       const id = node.id();
       const kind = node.data("kind") as string;
-      const doneBox = isDoneBox(id);
-      const thread = doneBox ? ((node.data("thread") as string | null) ?? null) : null;
       const action = tapAction({
         picking: onPick !== null,
-        doneBox,
-        kind,
-        // Without a way to pick a thread, a finished thread's box folds and unfolds as the Done box does.
-        thread: onThread === undefined ? null : thread,
         chevron: onChevron(
           kind,
           { ...node.boundingBox({ includeLabels: false }), header: Number(node.data("header") ?? STRIP) },
@@ -912,15 +906,10 @@ export default function PlanMap({
           core.zoom(),
         ),
       });
-      if (action === "ignore") return;
       shown.current = null;
       anchor.current = null;
       if (action === "pick") {
         onPick?.(id);
-        return;
-      }
-      if (action === "thread") {
-        if (thread !== null) onThread?.(thread);
         return;
       }
       if (action === "toggle") {

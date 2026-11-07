@@ -33,7 +33,7 @@ needs-you list as `parent-missing`, which doesn't notify.
 An item with no children, whatever its role.
 
 **Member**:
-An item belonging to a thread, including an item with children.
+A task belonging to a thread. An item with children carries no thread membership.
 
 **Evidence**:
 What `item done` records to show an item was finished: the commit that completed it, or a line of text.
@@ -153,12 +153,6 @@ _Avoid_: card, node (in the app's words)
 **Box**:
 How the Map draws an item with children, holding their tiles and boxes; folded, it is drawn as a tile.
 _Avoid_: group (for this), container, lane
-
-**Done box**:
-A box the Map makes of finished work, which holds no item of its own: a thread's done items in a box, named after
-the thread, or the box's other finished work that no link ties to anything left there, named Done, last in its
-columns. Done items can fold while their thread still has work left. Canceled work stays out of the Done box.
-_Avoid_: pile, group, archive
 
 **State**:
 What is set by hand on an item: `open`, `parked`, `done` or `canceled`. An unset state reads as `open`. State is

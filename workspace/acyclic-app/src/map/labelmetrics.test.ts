@@ -76,23 +76,29 @@ describe("map label metrics", () => {
     expect(measured.lines.every((line) => fonts.bold(line.trimEnd()) <= measured.textWidth)).toBe(true);
   });
 
-  it("keeps folded-thread names and the full done note", () => {
-    const measured = metricsOf(
-      {
-        title: "A finished thread with a long name",
-        kind: "collapsed",
-        hidden: 0,
-        stage: "done",
-        progress: null,
-        doneBox: { kind: "thread", thread: "release" },
-        note: "12 done",
-      },
-      fonts,
-    );
-    expect(normalized(measured.lines.join(""))).toContain(normalized("A finished thread with a long name"));
-    expect(measured.lines).not.toContain("Done");
-    expect(normalized(measured.lines.join(""))).toContain(normalized("12 done"));
-    expect(measured.lines.every((line) => fonts.bold(line.trimEnd()) <= measured.textWidth)).toBe(true);
+  it("adds a named-thread footer without changing title wrapping or its stub", () => {
+    const leaf = {
+      title: "A long task title ".repeat(8),
+      kind: "leaf",
+      hidden: 0,
+      stage: "done",
+      progress: null,
+    } as const;
+    for (const outside of [[], [{ id: "g", title: "Gate", initiative: "Lab" }]]) {
+      const plain = metricsOf({ ...leaf, outside }, fonts);
+      const named = metricsOf({ ...leaf, outside }, fonts, 200, "Release");
+      expect(named.lines.slice(0, -2)).toEqual(plain.lines);
+      expect(named.lines.at(-1)).toBe("Thread: Release");
+      expect(named.height).toBe(plain.height + 32.5);
+      expect(named.reserve).toBe(plain.reserve);
+      expect(named.stub).toEqual(plain.stub);
+      expect(named.lines.length * 16.25 + 20 + named.reserve).toBeLessThanOrEqual(named.height);
+    }
+    const long = metricsOf({ ...leaf, title: "Short" }, fonts, 200, "가".repeat(50));
+    expect(long.lines.at(-1)?.endsWith("…")).toBe(true);
+    expect(fonts.regular(long.lines.at(-1) ?? "")).toBeLessThanOrEqual(long.textWidth);
+    const parent = metricsOf({ ...leaf, kind: "collapsed" }, fonts, 200, "Release");
+    expect(parent.lines.join(" ")).not.toContain("Thread:");
   });
 
   it("keeps a short box header and grows it to fit every title line", () => {
