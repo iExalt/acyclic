@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.9.0](https://github.com/iExalt/acyclic/compare/v0.8.0...v0.9.0) (2026-11-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* deletion functions return `acyclic_core::model::WriteError` instead of `acyclic_core::delete::DeleteError`. Match deletion variants directly; the nested `Write` wrapper is removed. Exhaustive `WriteError` matches must handle the added deletion variants. Persisted tracker data is unchanged.
+
+### Features
+
+* add explicit tracker compaction ([#236](https://github.com/iExalt/acyclic/issues/236)) ([d45a759](https://github.com/iExalt/acyclic/commit/d45a759198c23183c2bdc4c78ca0e13823ed9677))
+* **ci:** add rootless OCI image build helpers ([#233](https://github.com/iExalt/acyclic/issues/233)) ([66c8ae3](https://github.com/iExalt/acyclic/commit/66c8ae324bbc49389a3e1ebb195a2fe3aec1bf74))
+
+
+### Bug Fixes
+
+* **app:** keep keyboard focus after removing links ([#235](https://github.com/iExalt/acyclic/issues/235)) ([e841c7c](https://github.com/iExalt/acyclic/commit/e841c7ce41f8dd13070e277a78bc4130cedb143b))
+* **app:** reserve Map space for desktop panes ([#241](https://github.com/iExalt/acyclic/issues/241)) ([b0223e7](https://github.com/iExalt/acyclic/commit/b0223e7d14954d5a1896aa430a04412f403fdb44))
+* **app:** show empty threads and waits on open boxes ([#238](https://github.com/iExalt/acyclic/issues/238)) ([dc8a2da](https://github.com/iExalt/acyclic/commit/dc8a2da4536f4327dbaf3041ed0393618a13201d))
+* **app:** show thread membership without nesting tasks ([#225](https://github.com/iExalt/acyclic/issues/225)) ([746bcc4](https://github.com/iExalt/acyclic/commit/746bcc43b316fb84cb7094dbe80bc562f6cb0915))
+* **core:** count canceled shared descendants consistently ([#237](https://github.com/iExalt/acyclic/issues/237)) ([f1302ec](https://github.com/iExalt/acyclic/commit/f1302ec12c1eb022f0982a157b2099c610557f45))
+* **core:** report originless commit evidence as unchecked ([#239](https://github.com/iExalt/acyclic/issues/239)) ([350a546](https://github.com/iExalt/acyclic/commit/350a546b99aac77032405074148ad260cef74b94))
+* correct tracker waits, rollups, and write handling ([#234](https://github.com/iExalt/acyclic/issues/234)) ([c59f2f6](https://github.com/iExalt/acyclic/commit/c59f2f6977ae217b7c17f50b33f7e9eee52d5c65))
+
+
+### Performance Improvements
+
+* skip unchanged map zoom floor style updates ([1fb5f13](https://github.com/iExalt/acyclic/commit/1fb5f13aa4dd3a95cecde5ca666cbedc669f4062))
+
 ## [0.8.0](https://github.com/iExalt/acyclic/compare/v0.7.2...v0.8.0) (2026-11-06)
 
 
