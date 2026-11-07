@@ -30,7 +30,6 @@ import time
 from collections import Counter
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from itertools import pairwise
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -418,28 +417,6 @@ def labels_import():
 
 
 
-def add_thread_cycles(env):
-    """Two cycles of two threads waiting on each other, in a project of their own, so Needs you names two. In each
-    thread, a leaf waits on a leaf the other holds, which waits for nothing, so no cycle of items closes. Made apart
-    from the fixture's items, which journeys add to and link, and which a seed's threads never form a cycle among."""
-
-    def add(*args):
-        return json.loads(run(env, *args))["data"]
-
-    project = add("item", "add", "--title", "Cycles")["item"]
-    for cycle in ("A", "B"):
-        threads = [add("thread", "add", "--title", f"Cycle {cycle}{n}")["thread"] for n in (1, 2)]
-        held = [
-            add("item", "add", "--title", f"Cycle {cycle}{n} holds", "--parent", project, "--thread", thread)["item"]
-            for n, thread in enumerate(threads, 1)
-        ]
-        for n, thread in enumerate(threads, 1):
-            add(
-                "item", "add", "--title", f"Cycle {cycle}{n} waits", "--parent", project, "--thread", thread,
-                "--waits-for", held[n % 2],
-            )
-
-
 # Trackers below this many items are the small ones: they sync with an origin, so a second clone can write a conflict,
 # and hold the cycles of threads Needs you names. The large one needs neither.
 SMALL_TRACKER = 1000
@@ -447,13 +424,10 @@ SMALL_TRACKER = 1000
 
 @timed
 def tracker(directory, env, items, remote=None, cycles=False):
-    """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it, and
-    two cycles of threads if `cycles`."""
+    """A tracker holding the seeded fixture, synced to `remote` if given, so a second clone can write apart from it."""
     plan = directory / f"plan-{items}.json"
-    # Any seed's threads come in many waves, so arrows skip waves, and none makes threads wait on each other in a
-    # cycle; the cycles Needs you names are made below.
     with detail(f"tracker {items}: generate"):
-        data = json.loads(
+        seed = json.loads(
             subprocess.run(
                 [FIXTURES, "--items", str(items), "--seed", "3"],
                 capture_output=True,
@@ -461,42 +435,13 @@ def tracker(directory, env, items, remote=None, cycles=False):
                 check=True,
             ).stdout
         )
+    data, _ = compose_seeded_import(seed, cycles)
     plan.write_text(json.dumps(data))
 
     remote_args = [] if remote is None else ["--remote", str(remote)]
     run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "mac", *remote_args)
     with detail(f"tracker {items}: import"):
         run(env, "import", str(plan))
-    # A root's parent is the plan's initiative, which is no item: the roots are the items with no parent here.
-    ids = {item["id"] for item in data["items"]}
-    parent = {item["id"]: item.get("parent") if item.get("parent") in ids else None for item in data["items"]}
-    waits = {item["id"]: item.get("waits_for") for item in data["items"]}
-
-    def line(id):
-        while id is not None:
-            yield id
-            id = parent.get(id)
-
-    if cycles:
-        add_thread_cycles(env)
-    # Done work waiting on open work, so Needs you holds an entry that names items. The open leaf and everything above
-    # it wait for nothing, so the link closes no cycle.
-    done = next(item["id"] for item in data["items"] if item.get("state") == "done")
-    unwaiting = next(
-        item["id"]
-        for item in data["items"]
-        if item.get("state") != "done"
-        and item["id"] not in parent.values()
-        and not any(waits[one] for one in line(item["id"]))
-    )
-    run(env, "item", "edit", done, "--waits-for", unwaiting)
-    # A long path in backticks in the notes of the item the link journeys open, which the panel must wrap.
-    first = min(
-        item["id"]
-        for item in data["items"]
-        if parent.get(item["id"]) is not None and parent.get(parent[item["id"]]) is None
-    )
-    run(env, "item", "edit", first, "--notes", f"Kept in `{LONG_CODE}` for good.")
     if remote is not None:
         run(env, "sync")
     with detail(f"tracker {items}: final read"):
@@ -3657,6 +3602,9 @@ def form_journey(page, view, env, remote, id, name, failures):
         str(remote),
     )
     run(other, "sync")
+    assert json.loads(run(env, "item", "show", id))["data"] == json.loads(
+        run(other, "item", "show", id)
+    )["data"], f"{name}: target item differs before the second clone writes"
     run(other, "item", "edit", id, "--title", "Title from the other clone")
     run(env, "item", "edit", id, "--title", "Title from this clone")
     run(other, "sync")
@@ -4332,22 +4280,6 @@ def shard_run(shard):
                 remote = directory / f"origin-{items}.git"
                 subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
             plan = tracker(directory, env, items, remote, cycles=items < SMALL_TRACKER)
-            # A second initiative, so the switcher has a row to choose. The small tracker, which the Overview's journey runs on,
-            # gives it ready work, so Up next has two populated initiatives.
-            second = json.loads(run(env, "initiative", "add", "--title", "Second initiative"))["data"]["initiative"]
-            if items < SMALL_TRACKER:
-                epic = json.loads(run(env, "item", "add", "--title", "Second epic", "--parent", second))["data"]["item"]
-                # In a thread of its own, as a task alone would be picked by the Threads journey, whose panel it opens no thread's.
-                thread = json.loads(run(env, "thread", "add", "--title", "Second work"))["data"]["thread"]
-                tasks = [
-                    json.loads(run(env, "item", "add", "--title", f"Second task {number}", "--parent", epic, "--thread", thread))["data"]["item"]
-                    for number in (1, 2)
-                ]
-                # One wait leaves the initiative, for the Map's stub: on an item of the fixture's that has work left and is
-                # drawn in its default view, so following it opens no box.
-                far = next(id for id in plan.default() if not plan.children(id) and plan.items[id]["stage"] == "ready")
-                run(env, "item", "edit", tasks[0], "--waits-for", far)
-                plan = Plan(env)
             server = subprocess.Popen(
                 [ACYCLIC, "up", "--port", "0"],
                 env=env,
@@ -4367,21 +4299,12 @@ def shard_run(shard):
                 "ACYCLIC_TRACKER": str(directory / "tracker-shrink"),
                 "ACYCLIC_ACTOR": "session/browser",
             }
+            data, scenario = shrink_import()
+            plan = directory / "plan-shrink.json"
+            plan.write_text(json.dumps(data))
             run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "browser")
-            run(env, "initiative", "add", "--title", "Home")
-            run(env, "thread", "add", "--title", "Shrink proof")
-            project = json.loads(run(env, "item", "add", "--title", "Tall chain"))["data"]["item"]
-            other = json.loads(run(env, "item", "add", "--title", "Other root"))["data"]["item"]
-            run(env, "item", "add", "--title", "Other child", "--parent", other)
-            run(env, "item", "add", "--title", "Any time", "--parent", project)
-            chain = [
-                json.loads(
-                    run(env, "item", "add", "--title", f"Chain step {index}", "--parent", project)
-                )["data"]["item"]
-                for index in range(7)
-            ]
-            for before, after in pairwise(chain):
-                run(env, "item", "edit", after, "--waits-for", before)
+            run(env, "import", str(plan))
+            project, other, chain = scenario["project"], scenario["other"], scenario["chain"]
             server = subprocess.Popen(
                 [ACYCLIC, "up", "--port", "0"],
                 env=env,
@@ -4401,41 +4324,11 @@ def shard_run(shard):
                 "ACYCLIC_TRACKER": str(directory / "tracker-labels"),
                 "ACYCLIC_ACTOR": "session/browser",
             }
+            data, ids, titles = labels_import()
+            plan = directory / "plan-labels.json"
+            plan.write_text(json.dumps(data))
             run(env, "init", env["ACYCLIC_TRACKER"], "--replica", "browser")
-            run(env, "initiative", "add", "--title", "Home")
-            thread = json.loads(run(env, "thread", "add", "--title", "Label proof"))[
-                "data"
-            ]["thread"]
-            titles = [
-                "Keep the whole project title readable while its header grows",
-                "Read every word including 🧑🏽‍🚀 and "
-                + "supercalifragilisticexpialidocious" * 2,
-                "Ordinary item",
-            ]
-            # The Map orders boxes that nothing links by id, in natural order, which for random ids differs from run to run: the
-            # phone's first view holds only the left of the two children, so these ids put the one with the long title there.
-            ids = [f"00000000-0000-7000-8000-00000000000{number}" for number in (1, 2, 3)]
-            root = json.loads(run(env, "item", "add", "--id", ids[0], "--title", titles[0]))["data"][
-                "item"
-            ]
-            long = json.loads(
-                run(env, "item", "add", "--id", ids[1], "--title", titles[1], "--parent", root)
-            )["data"]["item"]
-            ready = json.loads(
-                run(
-                    env,
-                    "item",
-                    "add",
-                    "--id",
-                    ids[2],
-                    "--title",
-                    titles[2],
-                    "--parent",
-                    root,
-                    "--thread",
-                    thread,
-                )
-            )["data"]["item"]
+            run(env, "import", str(plan))
             server = subprocess.Popen(
                 [ACYCLIC, "up", "--port", "0"],
                 env=env,
@@ -4443,7 +4336,7 @@ def shard_run(shard):
                 text=True,
             )
             servers.append(server)
-            return server_origin(server), [root, long, ready], titles
+            return server_origin(server), ids, titles
 
         try:
             if shard == "small":
