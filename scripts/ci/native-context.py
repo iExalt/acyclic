@@ -21,6 +21,13 @@ RELEASES = {
     "noble-updates": "a8b0e257fdb119466303e9cd8c24dc068b17559383eb80b8519d598153da952e",
     "noble-security": "155c4944df938253ac14a34c80d320fb1cea84c0c661bb6d2cbd540003f966ed",
 }
+CA_CORE = {
+    "version": "20240203",
+    "architecture": "all",
+    "filename": "pool/main/c/ca-certificates/ca-certificates_20240203_all.deb",
+    "size": 159378,
+    "sha256": "641de77d8f142cfd62a1a6f964ba67b20754d3337c480efb529d086075a06c9a",
+}
 BASES = {
     "amd64": "sha256:78d4744ead1f5b19b04d0df558ab182a5300903900755e515b2ca4d10eb2044d",
     "arm64": "sha256:19cad59657037cffa0ac9a48107019b768900ff1071140965827513ac866bd5e",
@@ -163,6 +170,14 @@ def ca_bootstrap(release: bytes, arch: str) -> tuple[bytes, dict[str, str | int]
         raise RuntimeError("ca-certificates stanza has an invalid package size")
     if not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum):
         raise RuntimeError("ca-certificates stanza has an invalid SHA256")
+    if (
+        version != CA_CORE["version"]
+        or filename != CA_CORE["filename"]
+        or architecture != CA_CORE["architecture"]
+        or int(size) != CA_CORE["size"]
+        or checksum != CA_CORE["sha256"]
+    ):
+        raise RuntimeError("ca-certificates package disagrees with source pin")
     package_url = f"https://snapshot.ubuntu.com/ubuntu/{SNAPSHOT}/{filename}"
     deb = fetch(package_url)
     if len(deb) != int(size) or digest(deb) != checksum:

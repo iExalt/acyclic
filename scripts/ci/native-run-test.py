@@ -58,6 +58,13 @@ class AdapterTests(unittest.TestCase):
             helper.write_text("synthetic helper " + name)
             self.helpers.append(helper)
         release, index, deb = fixtures.bootstrap_fixture()
+        synthetic_ca = {
+            "version": "20240203",
+            "architecture": "all",
+            "filename": "pool/main/c/ca-certificates/ca-certificates_20240203_all.deb",
+            "size": len(deb),
+            "sha256": hashlib.sha256(deb).hexdigest(),
+        }
         self.prepared = self.root / "context"
         with (
             patch.object(
@@ -71,6 +78,11 @@ class AdapterTests(unittest.TestCase):
                 context,
                 "RELEASES",
                 {s: hashlib.sha256(release).hexdigest() for s in context.RELEASES},
+            ),
+            patch.object(
+                context,
+                "CA_CORE",
+                synthetic_ca,
             ),
         ):
             self.fp = context.stage(
@@ -95,6 +107,15 @@ class AdapterTests(unittest.TestCase):
         self.cleanup_fails = False
         self.timeout_create = False
         self.addCleanup(patch.stopall)
+        patch.dict(
+            runner.SOURCE,
+            {
+                "RELEASES": {
+                    s: hashlib.sha256(release).hexdigest() for s in context.RELEASES
+                },
+                "CA_CORE": synthetic_ca,
+            },
+        ).start()
         patch.dict(
             os.environ,
             {
@@ -193,6 +214,78 @@ class AdapterTests(unittest.TestCase):
         with self.assertRaises(runner.RunnerError):
             self.invoke("stale-helper")
         self.assertFalse(any(c[0] in ("docker", "skopeo") for c in self.calls))
+
+    def test_rejects_rewritten_ca_with_matching_manifest(self):
+        package = self.prepared / runner.BOOTSTRAP_CA
+        package.write_bytes(package.read_bytes() + b" changed")
+        path = self.prepared / "native-inputs.json"
+        manifest = json.loads(path.read_text())
+        checksum = hashlib.sha256(package.read_bytes()).hexdigest()
+        manifest["files"][runner.BOOTSTRAP_CA] = checksum
+        manifest["policy"]["bootstrap_ca"]["sha256"] = checksum
+        manifest["policy"]["bootstrap_ca"]["size"] = package.stat().st_size
+        canonical = {
+            key: manifest[key]
+            for key in ("platform", "policy", "files", "snapshot_files")
+        }
+        manifest["fingerprint"] = hashlib.sha256(
+            json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(runner.RunnerError, "CA bootstrap metadata"):
+            runner.load_context(self.prepared)
+        self.assertEqual(self.calls, [])
+
+    def test_rejects_self_declared_index_receipt(self):
+        path = self.prepared / "native-inputs.json"
+        manifest = json.loads(path.read_text())
+        manifest["policy"]["releases"]["noble"]["indexes"][0]["sha256"] = "e" * 64
+        canonical = {
+            key: manifest[key]
+            for key in ("platform", "policy", "files", "snapshot_files")
+        }
+        manifest["fingerprint"] = hashlib.sha256(
+            json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(runner.RunnerError, "index receipt"):
+            runner.load_context(self.prepared)
+
+    def test_rejects_self_declared_release_bytes(self):
+        release = self.prepared / "snapshot/noble/InRelease"
+        release.write_bytes(release.read_bytes() + b"extra header\n")
+        path = self.prepared / "native-inputs.json"
+        manifest = json.loads(path.read_text())
+        checksum = hashlib.sha256(release.read_bytes()).hexdigest()
+        manifest["snapshot_files"]["snapshot/noble/InRelease"] = checksum
+        manifest["policy"]["releases"]["noble"]["sha256"] = checksum
+        canonical = {
+            key: manifest[key]
+            for key in ("platform", "policy", "files", "snapshot_files")
+        }
+        manifest["fingerprint"] = hashlib.sha256(
+            json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(runner.RunnerError, "Release digest"):
+            runner.load_context(self.prepared)
+
+    def test_rejects_ca_filename_unrelated_to_pinned_version(self):
+        path = self.prepared / "native-inputs.json"
+        manifest = json.loads(path.read_text())
+        manifest["policy"]["bootstrap_ca"]["filename"] = (
+            "pool/main/c/ca-certificates/ca-certificates_20240204_all.deb"
+        )
+        canonical = {
+            key: manifest[key]
+            for key in ("platform", "policy", "files", "snapshot_files")
+        }
+        manifest["fingerprint"] = hashlib.sha256(
+            json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(runner.RunnerError, "CA bootstrap metadata"):
+            runner.load_context(self.prepared)
 
     def test_host_guard_and_missing_artifacts_never_call_engine(self):
         with (

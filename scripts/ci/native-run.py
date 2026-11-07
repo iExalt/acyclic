@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import signal
 import subprocess
 import sys
@@ -21,6 +22,7 @@ FIXTURE = "scripts/ci/native-musl-readiness.sh"
 BOOTSTRAP_CA = "bootstrap/ca-certificates.deb"
 SUITES = {"noble", "noble-updates", "noble-security"}
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+SOURCE = runpy.run_path(str(Path(__file__).with_name("native-context.py")))
 
 
 class RunnerError(RuntimeError):
@@ -114,6 +116,8 @@ def load_context(context: Path) -> tuple[dict[str, Any], str, str, str]:
     releases = policy.get("releases")
     if not isinstance(releases, dict) or set(releases) != SUITES:
         raise RunnerError("native snapshot release set is invalid")
+    if policy.get("snapshot") != SOURCE["SNAPSHOT"]:
+        raise RunnerError("native snapshot disagrees with source pin")
     arch = platform.split("/")[1]
     expected_indexes = {
         f"{component}/binary-{arch}/Packages.xz" for component in ("main", "universe")
@@ -123,6 +127,7 @@ def load_context(context: Path) -> tuple[dict[str, Any], str, str, str]:
         if (
             not isinstance(release, dict)
             or release.get("sha256") != snapshots[f"snapshot/{suite}/InRelease"]
+            or release["sha256"] != SOURCE["RELEASES"][suite]
         ):
             raise RunnerError("snapshot Release digest disagrees with staged bytes")
         indexes = release.get("indexes")
@@ -132,14 +137,16 @@ def load_context(context: Path) -> tuple[dict[str, Any], str, str, str]:
             or {item.get("path") for item in indexes} != expected_indexes
         ):
             raise RunnerError("snapshot package index set is invalid")
-        if any(
-            not isinstance(item.get("sha256"), str)
-            or not SHA256.fullmatch(item["sha256"])
-            or not isinstance(item.get("size"), int)
-            or item["size"] < 0
-            for item in indexes
-        ):
-            raise RunnerError("snapshot package index receipt is invalid")
+        try:
+            expected = SOURCE["index_hashes"](
+                regular_file(context, f"snapshot/{suite}/InRelease").read_bytes(), arch
+            )
+        except (UnicodeDecodeError, ValueError, RuntimeError) as exc:
+            raise RunnerError("snapshot package index receipt is invalid") from exc
+        if indexes != expected:
+            raise RunnerError(
+                "snapshot package index receipt disagrees with staged bytes"
+            )
     ca = policy.get("bootstrap_ca")
     ca_index_path = f"main/binary-{arch}/Packages.xz"
     ca_index_sha = next(
@@ -172,6 +179,7 @@ def load_context(context: Path) -> tuple[dict[str, Any], str, str, str]:
         or ca["size"] != regular_file(context, BOOTSTRAP_CA).stat().st_size
         or ca.get("index_path") != ca_index_path
         or ca.get("index_sha256") != ca_index_sha
+        or any(ca.get(key) != value for key, value in SOURCE["CA_CORE"].items())
     ):
         raise RunnerError("CA bootstrap metadata disagrees with authenticated inputs")
     expected_files = allowed | {"native-inputs.json"}

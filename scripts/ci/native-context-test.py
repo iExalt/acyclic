@@ -86,10 +86,23 @@ class ContextStageTests(unittest.TestCase):
             ),
         )
         self.hash_patch = patch.object(native_context, "RELEASES", self.releases)
+        self.ca_patch = patch.object(
+            native_context,
+            "CA_CORE",
+            {
+                "version": "20240203",
+                "architecture": "all",
+                "filename": "pool/main/c/ca-certificates/ca-certificates_20240203_all.deb",
+                "size": len(self.deb),
+                "sha256": hashlib.sha256(self.deb).hexdigest(),
+            },
+        )
         self.fetch_patch.start()
         self.hash_patch.start()
+        self.ca_patch.start()
         self.addCleanup(self.fetch_patch.stop)
         self.addCleanup(self.hash_patch.stop)
+        self.addCleanup(self.ca_patch.stop)
         for name in (".git/config", ".env", "private-source.rs", "workspace/secret.rs"):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -228,6 +241,29 @@ class ContextStageTests(unittest.TestCase):
                 self.assertRaises(RuntimeError),
             ):
                 self.stage(f"bad-ca-{number}")
+
+    def test_rejects_rewritten_ca_with_matching_signed_metadata(self):
+        forged = self.deb + b" changed"
+        release, index, _ = bootstrap_fixture(
+            {"SHA256": hashlib.sha256(forged).hexdigest(), "Size": str(len(forged))}
+        )
+        with (
+            patch.object(
+                native_context,
+                "RELEASES",
+                {s: hashlib.sha256(release).hexdigest() for s in self.releases},
+            ),
+            patch.object(
+                native_context,
+                "fetch",
+                side_effect=partial(
+                    fixture_fetch, release=release, index=index, deb=forged
+                ),
+            ),
+            self.assertRaisesRegex(RuntimeError, "source pin"),
+        ):
+            self.stage("forged-ca")
+        self.assertFalse((self.root / "forged-ca").exists())
 
     def test_corrupt_ca_index_or_package_fails_before_staging(self):
         for suffix, bad in (("Packages.xz", b"corrupt index"), (".deb", self.deb[:-1])):
