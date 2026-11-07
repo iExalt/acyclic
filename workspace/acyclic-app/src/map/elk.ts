@@ -8,7 +8,6 @@
 import type { ElkNode } from "elkjs/lib/elk-api.js";
 import { natural } from "../natural";
 import { STRIP } from "./chevron";
-import { isRest } from "./fold";
 import { type BoxLayout, type LayBox, LEAF, ROOT, type Size, scopes } from "./layout";
 import { type Model, visible } from "./model";
 import { pack } from "./pack";
@@ -195,13 +194,9 @@ export function elkLayBox(engine: Engine): LayBox {
             }),
             input.edges,
           );
-    // The Done box last, after what can start.
+    // Items with no links in this box stand beside its graph.
     const aside = input.children.filter((child) => !linked.has(child.id));
-    const box = beside(
-      graph,
-      [...aside.filter((child) => !isRest(child.id)), ...aside.filter((child) => isRest(child.id))],
-      header,
-    );
+    const box = beside(graph, aside, header);
     return { ...box, width: Math.max(box.width, input.minWidth ?? 200) };
   };
 }

@@ -36,17 +36,17 @@ describe("markSvg", () => {
   it("keeps every box stage at the right and clear of reserved space", () => {
     for (const stage of STAGES) {
       for (const width of [200, 300]) {
-        const closed = boxMarkSvg("collapsed", stage, width, 100, DARK, thread, 52, 20);
+        const closed = boxMarkSvg("collapsed", stage, width, 100, DARK, 52, 20);
         expect(closed).toContain(`translate(${width - 28} 32)`);
-        expect(closed).toContain('<rect width="6" height="100" fill="#4ec695"/>');
-        const open = boxMarkSvg("box", stage, width, 400, DARK, null, 100);
+        expect(closed).not.toContain("<rect");
+        const open = boxMarkSvg("box", stage, width, 400, DARK, 100);
         expect(open).toContain(`translate(${width - 28} 18)`);
       }
     }
   });
 
   it("keeps the chevron inside its hit area when a full box header grows", () => {
-    const svg = boxMarkSvg("box", "waiting", 300, 400, DARK, null, 100);
+    const svg = boxMarkSvg("box", "waiting", 300, 400, DARK, 100);
     expect(svg).toContain('height="100"');
     expect(svg).toContain("translate(12 20)");
     expect(onChevron("box", { x1: 0, y1: 0, x2: 300, y2: 400, header: 100 }, { x: 18, y: 24 }, 1)).toBe(true);

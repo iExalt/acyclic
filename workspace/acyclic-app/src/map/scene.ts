@@ -153,8 +153,7 @@ export function scene(
       kind: node.kind,
       // A box's, where its work stands as a whole, as core tells it.
       stage: node.stage,
-      // A finished thread's box carries its thread, as its stripe shows and a tap on it picks.
-      thread: node.kind === "leaf" || node.doneBox?.kind === "thread" ? node.thread : null,
+      thread: node.kind === "leaf" ? node.thread : null,
       x: at.x + at.width / 2,
       y: at.y + at.height / 2,
       width: at.width,

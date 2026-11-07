@@ -51,10 +51,10 @@ export function textWidth(kind: Kind, width: number): number {
 }
 
 export function metricsOf(
-  node: Pick<VisibleNode, "title" | "kind" | "hidden" | "stage" | "progress" | "note" | "doneBox"> &
-    Partial<Pick<VisibleNode, "outside">>,
+  node: Pick<VisibleNode, "title" | "kind" | "hidden" | "stage" | "progress"> & Partial<Pick<VisibleNode, "outside">>,
   fonts: LabelFonts,
   width = TILE_WIDTH,
+  threadName: string | null = null,
 ): LabelMetrics {
   const available = textWidth(node.kind, width);
   const title = node.title.replace(/`([^`]+)`/g, "$1");
@@ -65,17 +65,21 @@ export function metricsOf(
     node.kind === "leaf"
       ? clampTitle(title, available, titleLines, fonts.regular)
       : boxLines(node, title, available, fonts.bold);
+  const membership = node.kind === "leaf" && threadName !== null;
+  const footerWidth = width - MARKS_LEFT - 8;
+  if (membership)
+    lines.push("", ...clampTitle(`Thread: ${threadName.replace(/\s+/g, " ")}`, footerWidth, 1, fonts.regular));
   const header = node.kind === "leaf" ? 0 : Math.max(BASE_HEADER, Math.ceil(lines.length * LINE_HEIGHT + 16));
   return {
     width,
     height:
       node.kind === "leaf"
-        ? ITEM_HEIGHT
+        ? ITEM_HEIGHT + (membership ? 2 * LINE_HEIGHT : 0)
         : Math.max(MIN_NODE_HEIGHT, Math.ceil(lines.length * LINE_HEIGHT + 20)) + reserve,
     reserve,
     stub,
     header,
-    textWidth: available,
+    textWidth: membership ? footerWidth : available,
     lines,
   };
 }
@@ -110,17 +114,13 @@ export function stubOf(
 }
 
 function boxLines(
-  node: Pick<VisibleNode, "kind" | "hidden" | "progress" | "note" | "doneBox" | "stage">,
+  node: Pick<VisibleNode, "kind" | "hidden" | "progress" | "stage">,
   title: string,
   width: number,
   measure: Measure,
 ): string[] {
-  const hidden = node.kind === "collapsed" && node.note === undefined ? ` (+${node.hidden})` : "";
-  const named =
-    node.kind === "collapsed" && node.doneBox?.kind === "thread"
-      ? wrap(title, width, measure)
-      : wrap(title + hidden, width, measure);
-  if (node.note !== undefined) return [...named, ...wrap(node.note, width, measure)];
+  const hidden = node.kind === "collapsed" ? ` (+${node.hidden})` : "";
+  const named = wrap(title + hidden, width, measure);
   return node.progress === null ? named : [...named, ...wrap(countsText(node.progress), width, measure)];
 }
 

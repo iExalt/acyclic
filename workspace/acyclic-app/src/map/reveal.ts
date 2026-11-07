@@ -187,6 +187,11 @@ function fitOf(boxes: readonly Box[], open: Box, padding: number): number {
   );
 }
 
+/** Frame every selected member, including visible boxes standing in for hidden tasks. */
+export function fitAll(boxes: readonly Box[], open: Box, most: number) {
+  return boxes.length === 0 ? null : fitPlan(spanOf(boxes), open, most);
+}
+
 /** The viewport that fits the whole plan in `open`, even below the usual readable zoom. */
 export function fitPlan(
   plan: Box,

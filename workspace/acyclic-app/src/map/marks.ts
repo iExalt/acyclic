@@ -59,7 +59,6 @@ export function boxMarkSvg(
   width: number,
   height: number,
   palette: Palette,
-  thread: Thread | null = null,
   header = STRIP,
   reserve = 0,
 ): string {
@@ -70,8 +69,6 @@ export function boxMarkSvg(
   const stroke = `fill="none" stroke="${palette.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
   const parts = [`<path transform="translate(${left} ${middle - CHEVRON / 2})" d="${CHEVRONS[kind]}" ${stroke}/>`];
   if (stage !== null) parts.push(iconAt(stage, width - 12 - ICON, middle, palette));
-  // A finished thread's box: its thread's stripe down the left, as its items carry it.
-  if (thread !== null) parts.push(`<rect width="${STRIPE}" height="${tall}" fill="${thread.colour}"/>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${tall}" viewBox="0 0 ${width} ${tall}">${parts.join("")}</svg>`;
 }
 
@@ -109,7 +106,6 @@ export function boxMarkOf(
   width: number,
   height: number,
   palette: Palette,
-  thread: Thread | null = null,
   header = STRIP,
   reserve = 0,
 ): string {
@@ -124,11 +120,10 @@ export function boxMarkOf(
     stage,
     width,
     kind === "box" ? 0 : height,
-    thread,
     kind === "box" ? header : 0,
     kind === "box" ? 0 : reserve,
   ]);
-  return once(mine, key, () => boxMarkSvg(kind, stage, width, height, palette, thread, header, reserve));
+  return once(mine, key, () => boxMarkSvg(kind, stage, width, height, palette, header, reserve));
 }
 
 function once(mine: Map<string, string>, key: string, svg: () => string): string {

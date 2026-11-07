@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   firstOf,
   firstView,
+  fitAll,
   fitPlan,
   focusReveal,
   frame,
@@ -298,5 +299,26 @@ describe("framesAll", () => {
     expect(framesAll([{ x1: 0, y1: 0, x2: 300, y2: 300 }], open)).toBe(true);
     expect(framesAll([{ x1: 0, y1: 0, x2: 1000, y2: 300 }], open)).toBe(false);
     expect(framesAll([], open)).toBe(false);
+  });
+});
+
+describe("fitting every selected member", () => {
+  it("fits wide-spread members beside a pane below the default reading floor, and handles no members", () => {
+    const boxes = [
+      { x1: 0, y1: 0, x2: 200, y2: 100 },
+      { x1: 1600, y1: 600, x2: 1800, y2: 700 },
+    ];
+    const open = { x1: 0, y1: 50, x2: 600, y2: 800 };
+    const fitted = fitAll(boxes, open, 1);
+    expect(fitted).not.toBeNull();
+    if (fitted === null) throw new Error("missing fitted view");
+    expect(fitted.zoom).toBeLessThan(0.85);
+    for (const box of boxes) {
+      expect(box.x1 * fitted.zoom + fitted.pan.x).toBeGreaterThanOrEqual(open.x1);
+      expect(box.x2 * fitted.zoom + fitted.pan.x).toBeLessThanOrEqual(open.x2);
+      expect(box.y1 * fitted.zoom + fitted.pan.y).toBeGreaterThanOrEqual(open.y1);
+      expect(box.y2 * fitted.zoom + fitted.pan.y).toBeLessThanOrEqual(open.y2);
+    }
+    expect(fitAll([], open, 1)).toBeNull();
   });
 });

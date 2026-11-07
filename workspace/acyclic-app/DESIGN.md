@@ -386,7 +386,7 @@ before what went wrong.
   that stripe and the stage icon on the right, including on collapsed done and parked boxes. The icon shows the stage
   without a repeated word below the title. Canceled is a circle struck through, in the quiet ink.
 - **A project tells where it stands.** An open box's chevron stays at the left and its stage icon at the right of the
-  first 52 px strip; its full title, counts, hidden count and done-box note wrap below or beside them as
+  first 52 px strip; its full title, counts and hidden count wrap below or beside them as
   needed. Its header grows to fit, and the child content starts below it. The stage is the work's whole stage, as core
   tells it (done once all of it is; else in progress once work under it has started and some of what is left isn't
   parked; else stalled, else ready, else waiting, else parked; canceled leaves are left out, and a box with only those
@@ -450,16 +450,13 @@ before what went wrong.
   still reflow inside their parent; the animation adds no overshoot beyond their old and new layout positions. New
   contents appear immediately when their growing frames finish, with no fade. Collapse removes the contents immediately,
   then shrinks the frame. Reduced motion changes both at once.
-- **Finished work folds away** (`src/map/fold.ts`), so what is left reads first (the user: "it's hard to tell what's
-  done and what's not done"). In a box, a thread's done items, two or more, are one done box named after the
-  thread, its stripe in the thread's colour, its name on two lines over how many are done; finished work that no link
-  ties, through other finished work, to anything left in the box goes into one box, Done, last in its columns ("37
-  done in 5 threads"), when it holds two or more and something stands beside it. Done boxes open folded and fold as
-  boxes do; unfolded, a thread's done box is a frame around its items with its name and chevron, the user's pick over a
-  Fold button in the thread's panel or a Fold tile. A tap on a thread's done box anywhere but its chevron picks the
-  thread; a tap on Done folds or unfolds it, as it holds no one thing to pick. A move or a link never takes a done box
-  as its target. Finding a folded item, or opening a link to it, unfolds every box above it. Done items fold even
-  while their thread has work left, but canceled work isn't folded: it stays beside the Done box as a quiet tile.
+- **Threads are membership, not hierarchy.** Only real parent items make boxes. Task tiles retain their thread's
+  stripe and name it in a `Thread: …` footer; unnamed threads of one and missing thread records add no label.
+  Membership takes its own room without shrinking or rewrapping the task title, above any cross-initiative stub.
+  Selecting a thread highlights its tasks and fits every visible member, including a real folded box standing in for
+  hidden members, beside the inspector or above a phone sheet. This explicit selection may zoom below the normal
+  opening view's readable floor; the opening view and whole-plan Fit keep their own behavior.
+  Completed tasks stay in their actual parent, with their stage icon and quiet tint; real parent boxes still fold.
 - **Canceled work** reads as dropped, not delivered: a struck-through circle in the muted ink on a notch-greyer tint (a
   restrained default). The item form's State select sets it and Open undoes it, and Undo of a cancel sets the state
   back. A box counts its canceled leaves apart ("2 canceled").
@@ -468,12 +465,12 @@ before what went wrong.
 - **A pinch stops at the floor and keeps panning.** The furthest zoom out is the floor whichever way it is reached. Past
   it, a pinch holds the zoom there about the fingers' midpoint and still follows the fingers, where Cytoscape on its
   own drops each step that would pass it, pan and all, so the plan stuck short of the floor and then jumped.
-- **Map labels fit their words.** Tiles are 200 px wide and 86 px high; titles wrap to four lines, or two when a
-  wait outside the initiative takes room at the foot, with an ellipsis for overflow. Box labels wrap the full title,
-  counts, hidden count or done-box note. An open box's header grows to fit those lines while its chevron and stage
-  glyph stay in the first strip, keeping the fold target stable. Backticks, which set code in the panels, are dropped
-  on the canvas. Tiles are drawn over every box, and a link across boxes between the two, so it never runs through a
-  title.
+- **Map labels fit their words.** Tiles are 200 px wide with an 86 px body and 32.5 px more for a named-thread footer;
+  titles wrap to four lines, or two when a wait outside the initiative takes room at the foot, with an ellipsis for
+  overflow. Box labels wrap the full title, counts and hidden count. An open box's header grows to fit those lines
+  while its chevron and stage glyph stay in the first strip, keeping the fold target stable. Backticks, which set code
+  in the panels, are dropped on the canvas. Tiles are drawn over every box, and a link across boxes between the two,
+  so it never runs through a title.
 
 ## Decision log
 

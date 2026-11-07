@@ -979,7 +979,6 @@ export function App() {
             palette={palette}
             selected={selected}
             onSelect={(id) => go({ kind: "tap", id })}
-            onThread={toThread}
             outside={outsideWaits}
             onOpen={openOutside}
             focus={requests.focus}
