@@ -1,0 +1,78 @@
+name: Native builder validation
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/native-builder.yml
+      - containers/ci-native/**
+      - scripts/ci/native-*
+      - scripts/build-ci-image.sh
+      - scripts/validate-ci-image.py
+      - scripts/with-ci-buildkit.sh
+      - scripts/ci-image-test.py
+      - mise.toml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-builder-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # Only Python and its environment bootstrap are host prerequisites.
+  MISE_DISABLE_TOOLS: rust,ruff,cargo:cargo-edit,cargo:cargo-generate,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,aqua:rvben/rumdl,github:EmbarkStudios/cargo-about,aqua:rhysd/actionlint,aqua:koalaman/shellcheck,node,pnpm
+
+jobs:
+  native:
+    name: native builder ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { platform: linux/amd64, runner: ubuntu-24.04 }
+          - { platform: linux/arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+      - name: Check existing native rootless prerequisites
+        run: |
+          for tool in rootlesskit slirp4netns newuidmap newgidmap skopeo docker; do
+            command -v "$tool" >/dev/null || { echo "missing existing rootless/runtime prerequisite: $tool" >&2; exit 1; }
+          done
+          uname -m
+          python --version
+      - name: Check common and native input boundaries
+        run: |
+          python scripts/ci-image-test.py
+          python scripts/ci/native-context-test.py
+          python scripts/ci/native-run-test.py
+      - name: Stage and build the source-free candidate without publication
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          fingerprint=$(python scripts/ci/native-context.py --platform "$PLATFORM" \
+            --helper scripts/build-ci-image.sh --helper scripts/validate-ci-image.py --helper scripts/with-ci-buildkit.sh \
+            --output-dir "$RUNNER_TEMP/native-context")
+          timeout --signal=TERM --kill-after=15s 900 \
+            sh scripts/with-ci-buildkit.sh "$RUNNER_TEMP/native-tools" \
+            sh scripts/build-ci-image.sh "$RUNNER_TEMP/native-context" native "$PLATFORM" "$fingerprint" "$RUNNER_TEMP/native-image"
+      - name: Execute the exact candidate and pinned local reference
+        run: |
+          python scripts/ci/native-run.py "$RUNNER_TEMP/native-image" "$RUNNER_TEMP/native-context" "$PWD" "$RUNNER_TEMP/native-candidate" candidate
+          python scripts/ci/native-run.py "$RUNNER_TEMP/native-image" "$RUNNER_TEMP/native-context" "$PWD" "$RUNNER_TEMP/native-pinned" pinned
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: native-builder-${{ strategy.job-index }}
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/native-image/manifest.json
+            ${{ runner.temp }}/native-candidate/receipt.json
+            ${{ runner.temp }}/native-candidate/run.log
+            ${{ runner.temp }}/native-pinned/receipt.json
+            ${{ runner.temp }}/native-pinned/run.log
