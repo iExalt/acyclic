@@ -259,6 +259,15 @@ pub struct Link {
     pub to: String,
 }
 
+/// A waits-for edge after expanding its holder and target to structural leaves.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct EffectiveWaitEdge {
+    pub(crate) from: String,
+    pub(crate) to: String,
+    pub(crate) holder: String,
+    pub(crate) target: String,
+}
+
 /// An initiative as read: a long-lived body of work, a record of its own that items sit under. It is never work, so it
 /// has no state, evidence, thread or links.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -795,12 +804,72 @@ impl Model {
         self.thread_value(item).one().map(String::as_str)
     }
 
-    /// The cycles among waits-for links, each sorted.
+    /// The structural cycles among effective waits-for links between leaves, regardless of leaf state, each sorted.
     #[must_use]
     pub fn waits_for_cycles(&self) -> Vec<Vec<String>> {
-        let edges: Vec<(String, String)> =
-            self.links.iter().map(|link| (link.from.clone(), link.to.clone())).collect();
-        graph::cycles(&edges)
+        Self::cycle_ids(self.effective_wait_edges())
+    }
+
+    /// Cycles among waits for unfinished structural leaves, as reads see them.
+    #[must_use]
+    pub fn read_wait_cycles(&self) -> Vec<Vec<String>> {
+        Self::cycle_ids(self.wait_edges(true))
+    }
+
+    fn cycle_ids(edges: Vec<EffectiveWaitEdge>) -> Vec<Vec<String>> {
+        let edges: BTreeSet<(String, String)> =
+            edges.into_iter().map(|edge| (edge.from, edge.to)).collect();
+        graph::cycles(&edges.into_iter().collect::<Vec<_>>())
+    }
+
+    /// Waits-for links after expanding each holder and target to its structural leaves.
+    pub(crate) fn effective_wait_edges(&self) -> Vec<EffectiveWaitEdge> {
+        self.wait_edges(false)
+    }
+
+    fn wait_edges(&self, unfinished_only: bool) -> Vec<EffectiveWaitEdge> {
+        let mut leaves_by_item: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut finished_by_leaf = BTreeMap::new();
+        let mut edges = BTreeSet::new();
+        for link in &self.links {
+            for endpoint in [&link.from, &link.to] {
+                leaves_by_item.entry(endpoint.clone()).or_insert_with(|| {
+                    let leaves = if !self.items.contains_key(endpoint) {
+                        Vec::new()
+                    } else if self.children(endpoint).is_empty() {
+                        vec![endpoint.to_owned()]
+                    } else {
+                        self.leaves_under(endpoint)
+                            .into_iter()
+                            .map(|leaf| leaf.item.id.clone())
+                            .collect()
+                    };
+                    if unfinished_only {
+                        leaves
+                            .into_iter()
+                            .filter(|id| {
+                                !*finished_by_leaf
+                                    .entry(id.clone())
+                                    .or_insert_with(|| self.reads_finished(id))
+                            })
+                            .collect()
+                    } else {
+                        leaves
+                    }
+                });
+            }
+            for from in &leaves_by_item[&link.from] {
+                for to in &leaves_by_item[&link.to] {
+                    edges.insert(EffectiveWaitEdge {
+                        from: from.clone(),
+                        to: to.clone(),
+                        holder: link.from.clone(),
+                        target: link.to.clone(),
+                    });
+                }
+            }
+        }
+        edges.into_iter().collect()
     }
 
     /// A path of blocks links from `from` to `to`, both included; a single item when they are the same.

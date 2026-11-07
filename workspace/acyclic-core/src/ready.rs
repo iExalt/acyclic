@@ -53,7 +53,7 @@ pub enum Readiness {
         /// The holders, winner first.
         holders: Vec<String>,
     },
-    /// On a cycle of links or parents, which pauses it.
+    /// On a cycle of effective waits-for links among unfinished leaves or parents, which pauses it.
     InCycle,
     /// Its state or thread holds conflicting values.
     Conflicted {
@@ -315,7 +315,7 @@ impl<'a> ReadinessEvaluator<'a> {
     #[must_use]
     pub fn new(state: &'a State, model: &'a Model, now: Millis) -> Self {
         let cyclic =
-            model.waits_for_cycles().into_iter().chain(model.parent_cycles()).flatten().collect();
+            model.read_wait_cycles().into_iter().chain(model.parent_cycles()).flatten().collect();
         let mut links_from: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for link in &model.links {
             links_from.entry(link.from.clone()).or_default().push(link.to.clone());
@@ -621,11 +621,15 @@ impl<'a> ReadinessEvaluator<'a> {
             stages.add(stage, 1);
         }
         let claimed = self.claimed_under(id, &mut BTreeSet::from([id]))?;
-        let stage = match &item.state {
-            Value::One(ItemState::Canceled) => Some(Stage::Canceled),
-            Value::One(ItemState::Parked) => Some(Stage::Parked),
-            _ => stages.rolled_up(claimed),
-        };
+        let rolled = stages.rolled_up(claimed);
+        let stage =
+            if item.state == Value::One(ItemState::Canceled) || rolled == Some(Stage::Canceled) {
+                Some(Stage::Canceled)
+            } else if item.state == Value::One(ItemState::Parked) {
+                Some(Stage::Parked)
+            } else {
+                rolled
+            };
         Ok(Some(Rollup { stages, stage }))
     }
 

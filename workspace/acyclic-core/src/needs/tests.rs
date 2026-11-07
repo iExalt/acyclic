@@ -1,8 +1,11 @@
 use crate::state::Key;
+use std::collections::BTreeMap;
+
 use serde_json::json;
 
 use super::*;
-use crate::model::{By, ItemState, add_item, item_key, link, set_parent};
+use crate::model::{By, ItemState, add_item, item_key, link, set_parent, set_state};
+use crate::ready::{Readiness, Wait};
 use crate::schema::{item as field, repository, thread};
 use crate::scope::{ScopeEdit, USER, edit};
 use crate::state::{CLOCK_SKEW_MS, Replica, ReplicaId};
@@ -31,6 +34,45 @@ fn every_entry(r: &Replica) -> Vec<Entry> {
     let model = Model::read(&r.state).unwrap();
     let readiness = ReadinessEvaluator::new(&r.state, &model, NOW);
     needs_you(&r.state, &model, &readiness, NOW).unwrap()
+}
+
+#[test]
+fn inherited_leaf_cycles_are_needs_and_only_their_members_read_in_cycle() {
+    let mut a = replica("a");
+    for id in ["p", "d", "x", "upstream"] {
+        add_item(&mut a, id, id, user(1)).unwrap();
+    }
+    set_parent(&mut a, "d", Some("p"), user(2)).unwrap();
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+
+    link(&mut a, "p", "x", user(3)).unwrap();
+    link(&mut a, "upstream", "d", user(3)).unwrap();
+    link(&mut b, "x", "d", user(3)).unwrap();
+    a.join(&b.state).unwrap();
+
+    let model = Model::read(&a.state).unwrap();
+    let readiness = ReadinessEvaluator::new(&a.state, &model, NOW);
+    assert!(
+        needs_you(&a.state, &model, &readiness, NOW)
+            .unwrap()
+            .contains(&Entry::WaitsForCycle { items: vec!["d".into(), "x".into()] })
+    );
+    assert_eq!(readiness.of("d").unwrap(), Some(Readiness::InCycle));
+    assert_eq!(readiness.of("x").unwrap(), Some(Readiness::InCycle));
+    assert_eq!(
+        readiness.of("upstream").unwrap(),
+        Some(Readiness::Waiting { waiting: BTreeMap::from([("d".into(), Wait::Open)]) })
+    );
+    set_state(&mut a, "d", ItemState::Done, user(4)).unwrap();
+    let model = Model::read(&a.state).unwrap();
+    let readiness = ReadinessEvaluator::new(&a.state, &model, NOW);
+    assert!(
+        !needs_you(&a.state, &model, &readiness, NOW)
+            .unwrap()
+            .iter()
+            .any(|entry| matches!(entry, Entry::WaitsForCycle { .. }))
+    );
 }
 
 #[test]

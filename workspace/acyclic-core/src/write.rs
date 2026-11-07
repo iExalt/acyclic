@@ -11,7 +11,8 @@ use serde_json::Value as Json;
 
 use crate::import::is_object_id;
 use crate::model::{
-    self, By, Evidence, Initiative, Item, ItemState, Model, Repository, Thread, Value, WriteError,
+    self, By, EffectiveWaitEdge, Evidence, Initiative, Item, ItemState, Model, Repository, Thread,
+    Value, WriteError,
 };
 use crate::place::{Inherited, Placement, placement};
 use crate::ready::{Readiness, ReadinessEvaluator, Stage};
@@ -1258,8 +1259,9 @@ impl Judging<'_, '_> {
         // Cycles and lineage links are walks of the whole tracker, and only a write of a parent or a link can change
         // them, so a change set with none (a title, a state, notes) has nothing new to find.
         if steps.iter().any(|step| writes_graph(&step.write)) {
-            found.extend(new_cycles(self.before, after, steps));
-            found.extend(new_lineage_links(self.before, after, steps));
+            let lineage = new_lineage_links(self.before, after, steps);
+            found.extend(new_cycles(self.before, after, steps, &lineage));
+            found.extend(lineage);
         }
         found.extend(taken_names(after, steps));
         found.extend(taken_titles(after, changes, steps));
@@ -1408,56 +1410,216 @@ fn cancel_rules(before: &Model, steps: &[Step]) -> Vec<Violation> {
         .collect()
 }
 
-/// Cycles of parents or waits-for the change set closes: one already there stays the user's to break.
-fn new_cycles(before: &Model, after: &Model, steps: &[Step]) -> Vec<Violation> {
+/// Parent or effective waits-for cycles the change set adds or explicitly chooses.
+fn new_cycles(
+    before: &Model,
+    after: &Model,
+    steps: &[Step],
+    lineage: &[Violation],
+) -> Vec<Violation> {
     let mut found = Vec::new();
-    // Cycles are judged whole: one already there stays the user's to break, and only a new one is refused, or one a
-    // write chooses an edge of, as settling a conflicted parent on the value that closes a cycle would.
-    let closes = |parents: bool, cycle: &[String]| {
-        steps.iter().any(|step| {
-            let (id, to) = match &step.write {
-                Written::Assign(Assign::Item(id, ItemAssign::Parent(to))) if parents => (id, to),
-                Written::Assign(Assign::Item(id, ItemAssign::WaitsFor(to, true))) if !parents => {
-                    (id, to)
-                },
-                _ => return false,
-            };
-            cycle.contains(id) && cycle.contains(to)
-        })
-    };
-    let cycles = |model: &Model| -> BTreeSet<(bool, Vec<String>)> {
-        model
-            .parent_cycles()
-            .into_iter()
-            .map(|cycle| (true, cycle))
-            .chain(model.waits_for_cycles().into_iter().map(|cycle| (false, cycle)))
-            .collect()
-    };
-    let old = cycles(before);
-    for (parents, cycle) in cycles(after).into_iter().filter(|(parents, cycle)| {
-        !old.contains(&(*parents, cycle.clone())) || closes(*parents, cycle)
-    }) {
-        let change = steps.iter().find(|step| match &step.write {
-            Written::Assign(Assign::Item(id, ItemAssign::Parent(_))) if parents => {
-                cycle.contains(id)
-            },
-            Written::Assign(Assign::Item(id, ItemAssign::WaitsFor(_, true))) if !parents => {
-                cycle.contains(id)
-            },
-            _ => false,
+    // A cycle already present stays for the user to break. Removing an edge can split it and is always allowed.
+    let old_parent_edges = parent_edges(before);
+    let new_parent_edges = parent_edges(after);
+    let added_parent_edges: BTreeSet<_> =
+        new_parent_edges.difference(&old_parent_edges).cloned().collect();
+    for cycle in after.parent_cycles() {
+        let members: BTreeSet<&str> = cycle.iter().map(String::as_str).collect();
+        let chosen = steps.iter().find(|step| {
+            matches!(&step.write, Written::Assign(Assign::Item(id, ItemAssign::Parent(to)))
+                if members.contains(id.as_str()) && members.contains(to.as_str()))
         });
-        // Named at the write that closed it, so a refusal names the item moved or made to wait.
-        let at = change.and_then(|step| match &step.write {
+        let added = added_parent_edges
+            .iter()
+            .find(|(from, to)| members.contains(from.as_str()) && members.contains(to.as_str()));
+        let change = added
+            .and_then(|(from, to)| {
+                steps.iter().find(|step| {
+                matches!(&step.write, Written::Assign(Assign::Item(id, ItemAssign::Parent(parent)))
+                    if id == from && parent == to)
+            })
+            })
+            .or(chosen);
+        let Some(change) = change else { continue };
+        let at = match &change.write {
             Written::Assign(assign) => Some(assign.at()),
             _ => None,
-        });
-        found.push(Violation {
-            change: change.map(|step| step.change),
-            at,
-            rule: if parents { Rule::ParentCycle(cycle) } else { Rule::WaitsForCycle(cycle) },
-        });
+        };
+        found.push(Violation { change: Some(change.change), at, rule: Rule::ParentCycle(cycle) });
+    }
+
+    let before_edges = before.effective_wait_edges();
+    let after_edges = after.effective_wait_edges();
+    let old_edges: BTreeSet<EffectiveWaitEdge> = before_edges.into_iter().collect();
+    let new_edges: BTreeSet<EffectiveWaitEdge> = after_edges.iter().cloned().collect();
+    let old_pairs: BTreeSet<(String, String)> =
+        old_edges.iter().map(|edge| (edge.from.clone(), edge.to.clone())).collect();
+    let pairs: BTreeSet<(String, String)> =
+        new_edges.iter().map(|edge| (edge.from.clone(), edge.to.clone())).collect();
+    let added_pairs: BTreeSet<(String, String)> = pairs.difference(&old_pairs).cloned().collect();
+    let graph_edges: Vec<(String, String)> = pairs.iter().cloned().collect();
+    let cycles = crate::graph::cycles(&graph_edges);
+    if cycles.is_empty() {
+        return found;
+    }
+    let after_paths = endpoint_paths(after, &new_edges);
+    for cycle in cycles {
+        let members: BTreeSet<&str> = cycle.iter().map(String::as_str).collect();
+        let mut cause = None;
+        for edge in new_edges.iter().filter(|edge| {
+            members.contains(edge.from.as_str()) && members.contains(edge.to.as_str())
+        }) {
+            let is_lineage = lineage.iter().any(|violation| {
+                matches!(&violation.rule, Rule::LineageLink { from, to }
+                    if from == &edge.holder && to == &edge.target)
+            });
+            if is_lineage {
+                continue;
+            }
+            let link = link_step(edge, steps);
+            let parent = parent_step_for_edge(edge, steps, before, after, &after_paths);
+            let added = added_pairs.contains(&(edge.from.clone(), edge.to.clone()));
+            if !added && link.is_none() && parent.is_none() {
+                continue;
+            }
+            let step = match (link, parent) {
+                (Some(link), Some(parent)) => {
+                    if step_index(steps, link) > step_index(steps, parent) {
+                        Some(link)
+                    } else {
+                        Some(parent)
+                    }
+                },
+                (Some(step), None) | (None, Some(step)) => Some(step),
+                (None, None) => None,
+            };
+            if let Some(step) = step {
+                cause = Some(step);
+                break;
+            }
+        }
+        let Some(change) = cause else { continue };
+        let at = match &change.write {
+            Written::Assign(assign) => Some(assign.at()),
+            _ => None,
+        };
+        found.push(Violation { change: Some(change.change), at, rule: Rule::WaitsForCycle(cycle) });
     }
     found
+}
+
+fn step_index(steps: &[Step], candidate: &Step) -> usize {
+    steps.iter().position(|step| std::ptr::eq(step, candidate)).unwrap_or(0)
+}
+
+fn parent_edges(model: &Model) -> BTreeSet<(String, String)> {
+    model
+        .items
+        .values()
+        .flat_map(|item| {
+            item.parent.all().into_iter().map(|parent| (item.id.clone(), parent.clone()))
+        })
+        .collect()
+}
+
+type ParentPaths = BTreeMap<(String, String), BTreeSet<(String, String)>>;
+
+/// The parent edges on every structural leaf-to-link-holder or leaf-to-target path.
+fn endpoint_paths(model: &Model, edges: &BTreeSet<EffectiveWaitEdge>) -> ParentPaths {
+    let mut paths = BTreeMap::new();
+    for edge in edges {
+        for (leaf, endpoint) in [(&edge.from, &edge.holder), (&edge.to, &edge.target)] {
+            let key = (leaf.clone(), endpoint.clone());
+            paths.entry(key).or_insert_with(|| parent_path_edges(model, leaf, endpoint));
+        }
+    }
+    paths
+}
+
+/// Parent edges on at least one path from `leaf` to `endpoint`, stopping at the endpoint.
+fn parent_path_edges(model: &Model, leaf: &str, endpoint: &str) -> BTreeSet<(String, String)> {
+    if leaf == endpoint {
+        return BTreeSet::new();
+    }
+    let mut outgoing: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut seen = BTreeSet::from([leaf.to_owned()]);
+    let mut stack = vec![leaf];
+    while let Some(at) = stack.pop() {
+        if at == endpoint {
+            continue;
+        }
+        let Some(item) = model.items.get(at) else { continue };
+        for parent in item.parent.all() {
+            outgoing.entry(at.to_owned()).or_default().push(parent.clone());
+            if seen.insert(parent.clone()) {
+                stack.push(parent.as_str());
+            }
+        }
+    }
+    if !seen.contains(endpoint) {
+        return BTreeSet::new();
+    }
+    let mut incoming: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (child, parents) in &outgoing {
+        for parent in parents {
+            incoming.entry(parent.clone()).or_default().push(child.clone());
+        }
+    }
+    let mut reaches = BTreeSet::from([endpoint.to_owned()]);
+    let mut stack = vec![endpoint];
+    while let Some(at) = stack.pop() {
+        for child in incoming.get(at).into_iter().flatten() {
+            if reaches.insert(child.clone()) {
+                stack.push(child);
+            }
+        }
+    }
+    outgoing
+        .into_iter()
+        .flat_map(|(child, parents)| {
+            parents
+                .into_iter()
+                .filter(|parent| reaches.contains(parent))
+                .map(move |parent| (child.clone(), parent))
+        })
+        .collect()
+}
+
+/// An explicit link write chooses this effective edge, even when its endpoint pair was already present another way.
+fn link_step<'a>(edge: &EffectiveWaitEdge, steps: &'a [Step]) -> Option<&'a Step> {
+    steps.iter().find(|step| {
+        matches!(&step.write, Written::Assign(Assign::Item(from, ItemAssign::WaitsFor(to, true)))
+            if from == &edge.holder && to == &edge.target)
+    })
+}
+
+/// A parent move caused this edge when it changed whether a leaf sits under its link holder or target.
+fn parent_step_for_edge<'a>(
+    edge: &EffectiveWaitEdge,
+    steps: &'a [Step],
+    before: &Model,
+    after: &Model,
+    paths: &ParentPaths,
+) -> Option<&'a Step> {
+    let source_path = paths.get(&(edge.from.clone(), edge.holder.clone()));
+    let target_path = paths.get(&(edge.to.clone(), edge.target.clone()));
+    let source_was_parent = !before.children(&edge.holder).is_empty();
+    let source_is_leaf = after.children(&edge.holder).is_empty();
+    let target_was_parent = !before.children(&edge.target).is_empty();
+    let target_is_leaf = after.children(&edge.target).is_empty();
+    steps.iter().find(|step| {
+        let Written::Assign(Assign::Item(id, ItemAssign::Parent(parent))) = &step.write else {
+            return false;
+        };
+        source_path.is_some_and(|path| path.contains(&(id.clone(), parent.clone())))
+            || target_path.is_some_and(|path| path.contains(&(id.clone(), parent.clone())))
+            || (source_was_parent
+                && source_is_leaf
+                && before.children(&edge.holder).contains(&id.as_str()))
+            || (target_was_parent
+                && target_is_leaf
+                && before.children(&edge.target).contains(&id.as_str()))
+    })
 }
 
 /// Waits-for links between an item and one above or below it that the change set makes, by a link or by a move:
