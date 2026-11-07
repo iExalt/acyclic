@@ -3,6 +3,7 @@
 //! where a typo or an unmerged commit is caught.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use acyclic_core::merged::{Check, GitAncestry};
 use acyclic_core::model::Model;
@@ -14,6 +15,30 @@ use crate::error::CliError;
 
 /// One commit evidence: the item it finishes, its repository record and the commit.
 type Commit = (String, String, String);
+
+/// A clone and branch selection that a write's commit evidence was checked against.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Identity {
+    clone: Option<PathBuf>,
+    branch: Option<String>,
+}
+
+#[derive(Clone)]
+enum PriorCheck {
+    Merged,
+    Unchecked,
+    Refreshed(Result<(), String>),
+}
+
+#[derive(Clone)]
+struct Candidate {
+    identity: Identity,
+    prior: PriorCheck,
+}
+
+/// Refreshes completed before the store batch, keyed by each added evidence record.
+#[derive(Default)]
+pub(crate) struct Prepared(BTreeMap<Commit, Candidate>);
 
 /// Every commit evidence in `model`.
 pub(crate) fn commits(model: &Model) -> BTreeSet<Commit> {
@@ -28,12 +53,45 @@ pub(crate) fn commits(model: &Model) -> BTreeSet<Commit> {
         .collect()
 }
 
-/// Checks the commits `after` holds that `before` didn't. Returns those this machine can't check, as JSON for the
-/// result, and refuses the batch when one is unmerged or unknown, even after fetching its repository's default branch.
+/// Fetches any default branches needed to check commits a prospective write adds, before its store batch.
+pub(crate) fn preflight(env: &Env, candidates: &BTreeSet<Commit>, model: &Model) -> Prepared {
+    let mut prepared = Prepared::default();
+    let Ok(clones) = context::clones(env) else { return prepared };
+    let ancestry = GitAncestry::new(&clones);
+    let mut refreshed: BTreeMap<(PathBuf, String), Result<(), String>> = BTreeMap::new();
+    for candidate in candidates {
+        let Some(record) = model.repositories.get(&candidate.1) else { continue };
+        let id = identity(&clones, record);
+        let prior = match ancestry.check(record, &candidate.2) {
+            Check::Merged => PriorCheck::Merged,
+            Check::Unchecked(_) => PriorCheck::Unchecked,
+            Check::NotMerged | Check::UnknownCommit | Check::NoBranch(_) => {
+                let refresh = match (&id.clone, &id.branch) {
+                    (Some(clone), Some(branch)) => Some(
+                        refreshed
+                            .entry((clone.clone(), branch.clone()))
+                            .or_insert_with(|| ancestry.refresh(record))
+                            .clone(),
+                    ),
+                    _ => None,
+                };
+                PriorCheck::Refreshed(refresh.unwrap_or_else(|| {
+                    Err("no clone or single default branch is mapped".to_owned())
+                }))
+            },
+        };
+        prepared.0.insert(candidate.clone(), Candidate { identity: id, prior });
+    }
+    prepared
+}
+
+/// Checks the commits `after` holds that `before` didn't, without fetching: refreshes needed by the candidate write
+/// have already run before the store batch. Returns commits this machine can't check, and refuses unmerged evidence.
 pub(crate) fn check(
     env: &Env,
     before: &BTreeSet<Commit>,
     after: &Model,
+    prepared: &Prepared,
 ) -> Result<Vec<Json>, CliError> {
     let added: Vec<Commit> = commits(after).difference(before).cloned().collect();
     if added.is_empty() {
@@ -47,32 +105,69 @@ pub(crate) fn check(
     let clones = match context::clones(env) {
         Ok(clones) => clones,
         Err(error) => {
-            return Ok(added
-                .iter()
-                .map(|(item, repository, commit)| {
-                    unchecked(item, repository, commit, &error.message)
-                })
-                .collect());
+            let mut found = Vec::new();
+            for (item, repository, commit) in &added {
+                let candidate = (item.clone(), repository.clone(), commit.clone());
+                if prepared
+                    .0
+                    .get(&candidate)
+                    .is_some_and(|candidate| !matches!(&candidate.prior, PriorCheck::Unchecked))
+                {
+                    return Err(stale_preflight(after, (item, repository, commit)));
+                }
+                found.push(unchecked(item, repository, commit, &error.message));
+            }
+            return Ok(found);
         },
     };
-    let ancestry = GitAncestry::new(clones);
-    let mut refreshed: BTreeMap<&str, Result<(), String>> = BTreeMap::new();
+    let ancestry = GitAncestry::new(&clones);
     let mut found = Vec::new();
     for (item, repository, commit) in &added {
         let Some(record) = after.repositories.get(repository) else {
             found.push(unchecked(item, repository, commit, "no such repository record"));
             continue;
         };
-        let mut checked = ancestry.check(record, commit);
-        if matches!(checked, Check::NotMerged | Check::UnknownCommit | Check::NoBranch(_)) {
-            // A squash commit merged a moment ago isn't in the clone until it fetches.
-            let fetched = refreshed.entry(repository).or_insert_with(|| ancestry.refresh(record));
-            if let Err(reason) = fetched {
-                let mut refused = refusal(after, (item, repository, commit), "fetch-failed");
-                refused.details["fetch_error"] = reason.clone().into();
-                return Err(refused);
+        let candidate = (item.clone(), repository.clone(), commit.clone());
+        let current_identity = identity(&clones, record);
+        let prepared_candidate = prepared.0.get(&candidate);
+        let checked = ancestry.check(record, commit);
+        if !matches!(&checked, Check::Merged) {
+            if let Some(candidate) = prepared_candidate {
+                if candidate.identity != current_identity {
+                    return Err(stale_preflight(after, (item, repository, commit)));
+                }
+                match (&candidate.prior, &checked) {
+                    (PriorCheck::Unchecked, Check::Unchecked(_)) => {},
+                    (PriorCheck::Merged | PriorCheck::Unchecked, _)
+                    | (PriorCheck::Refreshed(Ok(())), Check::NoBranch(_) | Check::Unchecked(_)) => {
+                        return Err(stale_preflight(after, (item, repository, commit)));
+                    },
+                    (PriorCheck::Refreshed(Err(reason)), _) => {
+                        let mut refused =
+                            refusal(after, (item, repository, commit), "fetch-failed");
+                        refused.details["fetch_error"] = reason.clone().into();
+                        return Err(refused);
+                    },
+                    (PriorCheck::Refreshed(Ok(())), Check::NotMerged) => {
+                        return Err(refusal(after, (item, repository, commit), "not-merged"));
+                    },
+                    (PriorCheck::Refreshed(Ok(())), Check::UnknownCommit) => {
+                        return Err(refusal(after, (item, repository, commit), "unknown-commit"));
+                    },
+                    (PriorCheck::Refreshed(Ok(())), Check::Merged) => unreachable!(),
+                }
+            } else {
+                match &checked {
+                    Check::Unchecked(reason) => {
+                        if current_identity.clone.is_none() || current_identity.branch.is_none() {
+                            found.push(unchecked(item, repository, commit, reason));
+                            continue;
+                        }
+                        return Err(stale_preflight(after, (item, repository, commit)));
+                    },
+                    _ => return Err(stale_preflight(after, (item, repository, commit))),
+                }
             }
-            checked = ancestry.check(record, commit);
         }
         match checked {
             Check::Merged => {},
@@ -88,6 +183,27 @@ pub(crate) fn check(
         }
     }
     Ok(found)
+}
+
+fn identity(
+    clones: &impl Fn(&acyclic_core::model::Repository) -> Option<PathBuf>,
+    repository: &acyclic_core::model::Repository,
+) -> Identity {
+    Identity { clone: clones(repository), branch: repository.default_branch.one().cloned() }
+}
+
+fn stale_preflight(model: &Model, evidence: (&str, &str, &str)) -> CliError {
+    let (item, repository, commit) = evidence;
+    CliError::refused(
+        "changed-since",
+        "the repository clone mapping or default branch changed while checking commit evidence; retry the write",
+    )
+    .with(json!({
+        "item": item,
+        "repository": name_of(model, repository),
+        "commit": commit,
+        "reason": "stale-preflight",
+    }))
 }
 
 /// A repository record's `owner/name`, or its id when it has none.
@@ -157,3 +273,6 @@ pub(crate) fn audit(env: &Env, model: &Model) -> Json {
     }
     json!({"checked": checked, "unchecked": unchecked, "unmerged": unmerged})
 }
+
+#[cfg(test)]
+mod tests;

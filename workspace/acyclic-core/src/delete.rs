@@ -92,67 +92,6 @@ impl fmt::Display for Reason {
     }
 }
 
-/// A refused deletion.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DeleteError {
-    /// The model layer refused, such as for an item that doesn't exist.
-    Write(WriteError),
-    /// The item is in use.
-    InUse {
-        /// The item.
-        item: String,
-        /// Why not.
-        reasons: Vec<Reason>,
-    },
-    /// No such initiative, or it was deleted.
-    NoInitiative(String),
-    /// The initiative holds items.
-    InitiativeInUse {
-        /// The initiative.
-        initiative: String,
-        /// Why not.
-        reasons: Vec<Reason>,
-    },
-    /// No such thread, or it was deleted.
-    NoThread(String),
-    /// The thread is in use.
-    ThreadInUse {
-        /// The thread.
-        thread: String,
-        /// Why not.
-        reasons: Vec<Reason>,
-    },
-}
-
-impl fmt::Display for DeleteError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Write(err) => err.fmt(f),
-            Self::InUse { item: id, reasons }
-            | Self::ThreadInUse { thread: id, reasons }
-            | Self::InitiativeInUse { initiative: id, reasons } => {
-                write!(f, "{id} can't be deleted: {}", crate::say::list(reasons, "; "))
-            },
-            Self::NoInitiative(id) => write!(f, "no initiative {id}"),
-            Self::NoThread(id) => write!(f, "no thread {id}"),
-        }
-    }
-}
-
-impl std::error::Error for DeleteError {}
-
-impl From<WriteError> for DeleteError {
-    fn from(err: WriteError) -> Self {
-        Self::Write(err)
-    }
-}
-
-impl From<Error> for DeleteError {
-    fn from(err: Error) -> Self {
-        Self::Write(WriteError::State(err))
-    }
-}
-
 /// Why `actor` can't delete `id` in `model`; empty when it can. The actor's own claim on the item's thread is no
 /// reason.
 ///
@@ -196,7 +135,7 @@ pub fn reasons(
 /// # Errors
 ///
 /// Fails when the item doesn't exist, when it is in use, or when the state layer refuses.
-pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, DeleteError> {
+pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, WriteError> {
     let key = model::item_key(id)?;
     if model::is_deleted(&replica.state, &key) {
         return Ok(false);
@@ -205,7 +144,7 @@ pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, 
     let model = Model::read(&replica.state)?;
     let reasons = reasons(replica, &model, id, by.actor, by.at)?;
     if !reasons.is_empty() {
-        return Err(DeleteError::InUse { item: id.to_owned(), reasons });
+        return Err(WriteError::InUse { item: id.to_owned(), reasons });
     }
     model::put(replica, &key, field::DELETED, Some(&true), by)?;
     // The actor's own claim on the task's thread of one goes with it, unless others share that thread: the thread
@@ -226,18 +165,18 @@ pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, 
 /// # Errors
 ///
 /// Fails when the initiative doesn't exist, when an item is under it, or when the state layer refuses.
-pub fn delete_initiative(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, DeleteError> {
+pub fn delete_initiative(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, WriteError> {
     let key = Key::new(kind::INITIATIVE, id).map_err(WriteError::from)?;
     if model::is_deleted(&replica.state, &key) {
         return Ok(false);
     }
     let model = Model::read(&replica.state)?;
     if !model.initiatives.contains_key(id) {
-        return Err(DeleteError::NoInitiative(id.to_owned()));
+        return Err(WriteError::NoInitiative(id.to_owned()));
     }
     let items: Vec<String> = model.children(id).into_iter().map(str::to_owned).collect();
     if !items.is_empty() {
-        return Err(DeleteError::InitiativeInUse {
+        return Err(WriteError::InitiativeInUse {
             initiative: id.to_owned(),
             reasons: vec![Reason::HoldsItems { items }],
         });
@@ -253,10 +192,10 @@ pub fn delete_initiative(replica: &mut Replica, id: &str, by: By<'_>) -> Result<
 ///
 /// Fails when the thread has no record, when an item is in it or anyone holds a live claim on it, or when the state
 /// layer refuses.
-pub fn delete_thread(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, DeleteError> {
+pub fn delete_thread(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, WriteError> {
     let key = claim::thread_key(id)?;
     if crate::ids::task_of_one(id).is_some() {
-        return Err(DeleteError::ThreadInUse {
+        return Err(WriteError::ThreadInUse {
             thread: id.to_owned(),
             reasons: vec![Reason::TaskThread],
         });
@@ -266,7 +205,7 @@ pub fn delete_thread(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool
     }
     let model = Model::read(&replica.state)?;
     if !model.threads.contains_key(id) {
-        return Err(DeleteError::NoThread(id.to_owned()));
+        return Err(WriteError::NoThread(id.to_owned()));
     }
     let mut reasons = Vec::new();
     // Every item that names it, a conflicted one included, so none is left in a thread that is gone.
@@ -283,7 +222,7 @@ pub fn delete_thread(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool
         reasons.push(Reason::Claimed { holder: held.holder });
     }
     if !reasons.is_empty() {
-        return Err(DeleteError::ThreadInUse { thread: id.to_owned(), reasons });
+        return Err(WriteError::ThreadInUse { thread: id.to_owned(), reasons });
     }
     model::put(replica, &key, field::DELETED, Some(&true), by)?;
     Ok(true)

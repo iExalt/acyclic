@@ -536,6 +536,88 @@ fn a_done_stored_on_a_part_hides_none_of_its_claimed_work_from_above() {
     assert_eq!(rolled.stage, Some(Stage::InProgress));
 }
 
+#[test]
+fn readiness_cycles_only_include_unfinished_leaves_and_keep_canceled_waits_distinct() {
+    let mut r = replica("a");
+    items(&mut r, &["p", "d", "u", "x"]);
+    set_parent(&mut r, "d", Some("p"), by(2)).unwrap();
+    set_parent(&mut r, "u", Some("p"), by(2)).unwrap();
+    link(&mut r, "p", "x", by(3)).unwrap();
+    link(&mut r, "x", "d", by(3)).unwrap();
+    assert_eq!(status(&r, "d"), Readiness::InCycle);
+    assert_eq!(status(&r, "x"), Readiness::InCycle);
+
+    set_state(&mut r, "d", ItemState::Done, by(4)).unwrap();
+    assert_eq!(status(&r, "d"), Readiness::Done);
+    assert_eq!(status(&r, "x"), Readiness::Ready);
+    set_state(&mut r, "d", ItemState::Canceled, by(5)).unwrap();
+    assert_eq!(status(&r, "x"), waiting_on(&[("d", Wait::Canceled)]));
+    set_state(&mut r, "d", ItemState::Backlog, by(6)).unwrap();
+    assert_eq!(status(&r, "d"), Readiness::InCycle);
+    assert_eq!(status(&r, "x"), Readiness::InCycle);
+
+    set_state(&mut r, "p", ItemState::Canceled, by(7)).unwrap();
+    set_state(&mut r, "d", ItemState::Done, by(8)).unwrap();
+    let model = Model::read(&r.state).unwrap();
+    assert!(model.reads_finished("d") && !model.reads_canceled("d"));
+    assert!(model.reads_finished("u") && model.reads_canceled("u"));
+    assert_eq!(model.read_wait_cycles(), Vec::<Vec<String>>::new());
+    assert_eq!(status(&r, "d"), Readiness::Done);
+    assert_eq!(status(&r, "u"), Readiness::Canceled);
+    assert_eq!(status(&r, "x"), Readiness::Ready);
+}
+
+#[test]
+fn a_parked_parent_with_done_leaves_stays_parked_until_cleared() {
+    let mut r = replica("a");
+    items(&mut r, &["goal", "leaf", "dependent"]);
+    set_parent(&mut r, "leaf", Some("goal"), by(2)).unwrap();
+    link(&mut r, "dependent", "goal", by(2)).unwrap();
+    done_with(&mut r, "leaf", None);
+    set_state(&mut r, "goal", ItemState::Parked, by(3)).unwrap();
+
+    let parked = Model::read(&r.state).unwrap();
+    assert_eq!(parked.progress("goal"), Some(model::Progress { done: 1, canceled: 0, total: 1 }));
+    assert!(!parked.reads_done("goal"));
+    assert_eq!(rollup(&r, "goal").stage, Some(Stage::Parked));
+    assert_eq!(status(&r, "dependent"), waiting_on(&[("goal", Wait::Open)]));
+
+    set_state(&mut r, "goal", ItemState::Backlog, by(4)).unwrap();
+    let cleared = Model::read(&r.state).unwrap();
+    assert!(cleared.reads_done("goal"));
+    assert_eq!(rollup(&r, "goal").stage, Some(Stage::Done));
+    assert_eq!(status(&r, "dependent"), Readiness::Ready);
+
+    set_state(&mut r, "goal", ItemState::Canceled, by(5)).unwrap();
+    let canceled = Model::read(&r.state).unwrap();
+    assert!(canceled.reads_canceled("goal") && !canceled.reads_done("goal"));
+    assert_eq!(rollup(&r, "goal").stage, Some(Stage::Canceled));
+    assert_eq!(canceled.progress("goal"), Some(model::Progress { done: 1, canceled: 0, total: 1 }));
+}
+
+#[test]
+fn a_parked_parent_keeps_canceled_rollups_canceled_and_done_rollups_parked() {
+    let mut r = replica("a");
+    items(&mut r, &["p", "d"]);
+    set_parent(&mut r, "d", Some("p"), by(2)).unwrap();
+    set_state(&mut r, "p", ItemState::Parked, by(3)).unwrap();
+    set_state(&mut r, "d", ItemState::Canceled, by(4)).unwrap();
+    let model = Model::read(&r.state).unwrap();
+    assert!(model.reads_canceled("p"));
+    assert_eq!(
+        ReadinessEvaluator::new(&r.state, &model, NOW).progress("p").unwrap().unwrap().stage,
+        Some(Stage::Canceled)
+    );
+
+    set_state(&mut r, "d", ItemState::Done, by(5)).unwrap();
+    let model = Model::read(&r.state).unwrap();
+    assert!(!model.reads_done("p"));
+    assert_eq!(
+        ReadinessEvaluator::new(&r.state, &model, NOW).progress("p").unwrap().unwrap().stage,
+        Some(Stage::Parked)
+    );
+}
+
 fn stage(r: &Replica, id: &str) -> Option<Stage> {
     let model = Model::read(&r.state).unwrap();
     ReadinessEvaluator::new(&r.state, &model, NOW).stage(id).unwrap()

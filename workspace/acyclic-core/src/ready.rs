@@ -6,11 +6,12 @@
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use serde::Serialize;
 
 use crate::claim;
-use crate::model::{Item, ItemState, Model, Value};
+use crate::model::{Item, ItemState, Leaf, Model, Progress, Value};
 use crate::natural;
 use crate::state::{Error, Millis, State};
 
@@ -52,7 +53,7 @@ pub enum Readiness {
         /// The holders, winner first.
         holders: Vec<String>,
     },
-    /// On a cycle of links or parents, which pauses it.
+    /// On a cycle of effective waits-for links among unfinished leaves or parents, which pauses it.
     InCycle,
     /// Its state or thread holds conflicting values.
     Conflicted {
@@ -294,6 +295,8 @@ pub struct ReadinessEvaluator<'a> {
     lapsed: RefCell<BTreeMap<String, Option<claim::Claim>>>,
     /// Each item's stage, memoized, since a rollup counts every leaf under every parent.
     stages: RefCell<BTreeMap<String, Option<Stage>>>,
+    /// Each parent's leaves, shared by structural completion and the stage rollup that enriches them.
+    leaf_sets: RefCell<BTreeMap<String, LeafSet<'a>>>,
     /// Whether any item's state holds canceled, found on first use.
     any_canceled: OnceCell<bool>,
     /// The items under a part canceled by hand, built on first use.
@@ -302,12 +305,17 @@ pub struct ReadinessEvaluator<'a> {
     canceled: RefCell<BTreeMap<String, bool>>,
 }
 
+struct LeafSet<'a> {
+    leaves: Rc<[Leaf<'a>]>,
+    progress: Progress,
+}
+
 impl<'a> ReadinessEvaluator<'a> {
     /// Evaluates readiness at `now`.
     #[must_use]
     pub fn new(state: &'a State, model: &'a Model, now: Millis) -> Self {
         let cyclic =
-            model.waits_for_cycles().into_iter().chain(model.parent_cycles()).flatten().collect();
+            model.read_wait_cycles().into_iter().chain(model.parent_cycles()).flatten().collect();
         let mut links_from: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for link in &model.links {
             links_from.entry(link.from.clone()).or_default().push(link.to.clone());
@@ -322,10 +330,37 @@ impl<'a> ReadinessEvaluator<'a> {
             winners: RefCell::default(),
             lapsed: RefCell::default(),
             stages: RefCell::default(),
+            leaf_sets: RefCell::default(),
             any_canceled: OnceCell::new(),
             under_canceled: OnceCell::new(),
             canceled: RefCell::default(),
         }
+    }
+
+    /// The parent's leaves, memoized for this immutable model snapshot.
+    fn leaves_under(&self, id: &str) -> (Rc<[Leaf<'a>]>, Progress) {
+        if let Some(leaf_set) = self.leaf_sets.borrow().get(id) {
+            return (Rc::clone(&leaf_set.leaves), leaf_set.progress);
+        }
+        let leaves: Rc<[Leaf<'a>]> = self.model.leaves_under(id).into();
+        let progress = Model::progress_from_leaves(&leaves);
+        self.leaf_sets
+            .borrow_mut()
+            .insert(id.to_owned(), LeafSet { leaves: Rc::clone(&leaves), progress });
+        (leaves, progress)
+    }
+
+    /// Whether an item reads done, using structural counts that don't depend on readiness or time.
+    fn reads_done(&self, id: &str) -> bool {
+        let Some(item) = self.model.items.get(id) else { return false };
+        if self.model.children(id).is_empty() {
+            return item.is_done();
+        }
+        let progress = self.leaves_under(id).1;
+        progress.done == progress.total
+            && progress.done > 0
+            && item.state != Value::One(ItemState::Parked)
+            && item.state != Value::One(ItemState::Canceled)
     }
 
     /// Whether an item reads canceled, as [`Model::reads_canceled`] says, but built once for every item: the part
@@ -369,9 +404,9 @@ impl<'a> ReadinessEvaluator<'a> {
             true
         } else if under.contains(id) {
             // Under a part canceled by hand, unless every leaf that is left is done.
-            !self.model.reads_done(id)
+            !self.reads_done(id)
         } else {
-            !self.model.reads_done(id) && kids.into_iter().all(|child| self.reads_canceled(child))
+            !self.reads_done(id) && kids.into_iter().all(|child| self.reads_canceled(child))
         };
         self.canceled.borrow_mut().insert(id.to_owned(), reads);
         reads
@@ -572,51 +607,30 @@ impl<'a> ReadinessEvaluator<'a> {
             return Ok(None);
         }
         let mut stages = Stages::default();
-        let parked = item.state == Value::One(ItemState::Parked);
-        let canceled = item.state == Value::One(ItemState::Canceled);
-        self.tally(id, parked, canceled, &mut BTreeSet::from([id]), &mut stages)?;
-        let claimed = self.claimed_under(id, &mut BTreeSet::from([id]))?;
-        // A part canceled by hand reads canceled, whatever its leaves say.
-        let stage = if canceled { Some(Stage::Canceled) } else { stages.rolled_up(claimed) };
-        Ok(Some(Rollup { stages, stage }))
-    }
-
-    /// Counts the leaves under `id` by stage, walking as the model's own tally does: each item once, and the open
-    /// leaves of a part parked by hand as parked, or canceled by hand as canceled.
-    fn tally<'b>(
-        &self,
-        id: &'b str,
-        parked: bool,
-        canceled: bool,
-        seen: &mut BTreeSet<&'b str>,
-        stages: &mut Stages,
-    ) -> Result<(), Error>
-    where
-        'a: 'b,
-    {
-        for child in self.model.children(id) {
-            if !seen.insert(child) {
-                continue;
-            }
-            let Some(item) = self.model.items.get(child) else { continue };
-            if self.model.children(child).is_empty() {
-                let stage = self.stage(child)?.unwrap_or(Stage::Waiting);
-                let open = !matches!(stage, Stage::Done | Stage::Canceled);
-                let stage = if canceled && open {
-                    Stage::Canceled
-                } else if parked && open {
-                    Stage::Parked
-                } else {
-                    stage
-                };
-                stages.add(stage, 1);
+        let (leaves, _) = self.leaves_under(id);
+        for leaf in leaves.iter() {
+            let stage = self.stage(&leaf.item.id)?.unwrap_or(Stage::Waiting);
+            let open = !matches!(stage, Stage::Done | Stage::Canceled);
+            let stage = if leaf.canceled && open {
+                Stage::Canceled
+            } else if leaf.parked && open {
+                Stage::Parked
             } else {
-                let parks = parked || item.state == Value::One(ItemState::Parked);
-                let cancels = canceled || item.state == Value::One(ItemState::Canceled);
-                self.tally(child, parks, cancels, seen, stages)?;
-            }
+                stage
+            };
+            stages.add(stage, 1);
         }
-        Ok(())
+        let claimed = self.claimed_under(id, &mut BTreeSet::from([id]))?;
+        let rolled = stages.rolled_up(claimed);
+        let stage =
+            if item.state == Value::One(ItemState::Canceled) || rolled == Some(Stage::Canceled) {
+                Some(Stage::Canceled)
+            } else if item.state == Value::One(ItemState::Parked) {
+                Some(Stage::Parked)
+            } else {
+                rolled
+            };
+        Ok(Some(Rollup { stages, stage }))
     }
 
     /// Whether a live claim holds the thread of an open leaf under `id`. What is parked, or under a parked part, isn't

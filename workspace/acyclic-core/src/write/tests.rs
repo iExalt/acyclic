@@ -382,12 +382,12 @@ fn waiting_between_an_item_and_one_above_or_below_it_is_refused_however_it_comes
     commit_ok(&mut r, 3, vec![add("other", vec![])]);
     let lineage = |from: &str, to: &str| Rule::LineageLink { from: from.into(), to: to.into() };
     let waits = |from: &str, to: &str| item(from, ItemAssign::WaitsFor(to.into(), true));
-    assert!(refused(&r, vec![waits("leaf", "root")]).contains(&lineage("leaf", "root")));
-    assert!(refused(&r, vec![waits("root", "leaf")]).contains(&lineage("root", "leaf")));
+    assert_eq!(refused(&r, vec![waits("leaf", "root")]), [lineage("leaf", "root")]);
+    assert_eq!(refused(&r, vec![waits("root", "leaf")]), [lineage("root", "leaf")]);
     // A move that puts two linked items in one line is refused too.
     commit_ok(&mut r, 4, vec![waits("other", "mid")]);
     let moved = refused(&r, vec![item("mid", ItemAssign::Parent("other".into()))]);
-    assert!(moved.contains(&lineage("other", "mid")), "{moved:?}");
+    assert_eq!(moved, [lineage("other", "mid")]);
     // One a sync brought holds no other write back.
     let mut synced = done_tree();
     commit_ok(&mut synced, 3, vec![add("x", vec![])]);
@@ -398,6 +398,127 @@ fn waiting_between_an_item_and_one_above_or_below_it_is_refused_however_it_comes
     synced.join(&apart.state).unwrap();
     assert!(read(&synced).ancestors("leaf").contains(&"x"));
     commit_ok(&mut synced, 5, vec![item("mid", ItemAssign::Title("Mid".into()))]);
+}
+
+#[test]
+fn inherited_wait_cycles_are_refused_and_parent_moves_name_the_changed_parent() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![add("p", vec![]), add("u", vec![]), add("d", vec![]), add("x", vec![])],
+    );
+    commit_ok(
+        &mut r,
+        2,
+        vec![
+            item("p", ItemAssign::WaitsFor("x".into(), true)),
+            item("x", ItemAssign::WaitsFor("d".into(), true)),
+        ],
+    );
+
+    let changes = ChangeSet(vec![
+        item("p", ItemAssign::Parent("u".into())),
+        item("d", ItemAssign::Parent("p".into())),
+    ]);
+    let violations = judge(&read(&r), &changes, by(3), None).unwrap_err();
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert_eq!(violations[0].rule, Rule::WaitsForCycle(vec!["d".into(), "x".into()]));
+    assert_eq!(violations[0].change, Some(1));
+    assert_eq!(violations[0].at.as_ref().unwrap().record, Record::Item("d".into()));
+    assert_eq!(violations[0].at.as_ref().unwrap().field, FieldName::Parent);
+}
+
+#[test]
+fn choosing_a_retained_conflicted_parent_path_is_refused_but_choosing_the_other_is_allowed() {
+    let mut a = replica("a");
+    commit_ok(
+        &mut a,
+        1,
+        vec![add("p", vec![]), add("q", vec![]), add("d", vec![]), add("x", vec![])],
+    );
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    commit_ok(
+        &mut a,
+        2,
+        vec![item("d", under("p")), item("p", ItemAssign::WaitsFor("x".into(), true))],
+    );
+    commit_ok(
+        &mut b,
+        2,
+        vec![item("d", under("q")), item("x", ItemAssign::WaitsFor("d".into(), true))],
+    );
+    a.join(&b.state).unwrap();
+    assert!(read(&a).items["d"].parent.is_conflict());
+
+    let retained =
+        judge(&read(&a), &ChangeSet(vec![item("d", under("p"))]), by(3), None).unwrap_err();
+    assert_eq!(retained.len(), 1, "{retained:?}");
+    assert_eq!(retained[0].rule, Rule::WaitsForCycle(vec!["d".into(), "x".into()]));
+    assert_eq!(retained[0].change, Some(0));
+    assert_eq!(retained[0].at.as_ref().unwrap().record, Record::Item("d".into()));
+    assert_eq!(retained[0].at.as_ref().unwrap().field, FieldName::Parent);
+
+    commit_ok(&mut a, 3, vec![item("d", under("q"))]);
+    assert_eq!(read(&a).waits_for_cycles(), Vec::<Vec<String>>::new());
+}
+
+#[test]
+fn moving_the_last_child_can_create_a_cycle_on_the_new_leaf_parent() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![add("p", vec![]), add("d", vec![under("p")]), add("u", vec![]), add("x", vec![])],
+    );
+    let mut b = replica("b");
+    b.join(&r.state).unwrap();
+    commit_ok(&mut r, 2, vec![item("p", ItemAssign::WaitsFor("x".into(), true))]);
+    commit_ok(&mut b, 2, vec![item("x", ItemAssign::WaitsFor("p".into(), true))]);
+    r.join(&b.state).unwrap();
+    assert_eq!(read(&r).waits_for_cycles(), vec![vec!["d".to_owned(), "x".to_owned()]]);
+
+    let violations =
+        judge(&read(&r), &ChangeSet(vec![item("d", under("u"))]), by(3), None).unwrap_err();
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert_eq!(violations[0].rule, Rule::WaitsForCycle(vec!["p".into(), "x".into()]));
+    assert_eq!(violations[0].change, Some(0));
+    assert_eq!(violations[0].at.as_ref().unwrap().record, Record::Item("d".into()));
+    assert_eq!(violations[0].at.as_ref().unwrap().field, FieldName::Parent);
+}
+
+#[test]
+fn an_indirect_cycle_through_a_done_leaf_is_still_refused() {
+    for state in [ItemState::Done, ItemState::Parked, ItemState::Canceled] {
+        let mut r = replica("a");
+        commit_ok(&mut r, 1, vec![add("p", vec![]), add("d", vec![under("p")]), add("x", vec![])]);
+        crate::model::set_state(&mut r, "d", state, by(2)).unwrap();
+        commit_ok(&mut r, 3, vec![item("p", ItemAssign::WaitsFor("x".into(), true))]);
+        let rules = refused(&r, vec![item("x", ItemAssign::WaitsFor("d".into(), true))]);
+        assert_eq!(rules, [Rule::WaitsForCycle(vec!["d".into(), "x".into()])], "{state:?}");
+    }
+}
+
+#[test]
+fn a_direct_lineage_rule_does_not_hide_an_independent_effective_cycle() {
+    let mut r = done_tree();
+    commit_ok(&mut r, 3, vec![add("p", vec![]), add("d", vec![under("p")]), add("x", vec![])]);
+    let rules = refused(
+        &r,
+        vec![
+            item("leaf", ItemAssign::WaitsFor("root".into(), true)),
+            item("p", ItemAssign::WaitsFor("x".into(), true)),
+            item("x", ItemAssign::WaitsFor("d".into(), true)),
+        ],
+    );
+    assert_eq!(
+        rules,
+        [
+            Rule::LineageLink { from: "leaf".into(), to: "root".into() },
+            Rule::WaitsForCycle(vec!["d".into(), "x".into()]),
+        ]
+    );
 }
 
 fn thread_of(r: &Replica, id: &str) -> Option<String> {
@@ -522,6 +643,64 @@ fn only_violations_the_change_set_introduces_are_refused() {
     commit_ok(&mut a, 6, vec![add("s", vec![ItemAssign::WaitsFor("p".into(), true)])]);
     let rules = refused(&a, vec![item("p", ItemAssign::WaitsFor("s".into(), true))]);
     assert!(matches!(rules.as_slice(), [Rule::WaitsForCycle(_)]), "{rules:?}");
+}
+
+#[test]
+fn removing_an_edge_that_splits_a_synced_cycle_is_allowed() {
+    let mut a = replica("a");
+    commit_ok(&mut a, 1, vec![add("a", vec![]), add("b", vec![]), add("c", vec![])]);
+    let mut b = replica("b");
+    b.join(&a.state).unwrap();
+    commit_ok(
+        &mut a,
+        2,
+        vec![
+            item("a", ItemAssign::WaitsFor("b".into(), true)),
+            item("b", ItemAssign::WaitsFor("c".into(), true)),
+        ],
+    );
+    commit_ok(
+        &mut b,
+        2,
+        vec![
+            item("c", ItemAssign::WaitsFor("a".into(), true)),
+            item("c", ItemAssign::WaitsFor("b".into(), true)),
+        ],
+    );
+    a.join(&b.state).unwrap();
+    assert_eq!(
+        read(&a).waits_for_cycles(),
+        vec![vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]]
+    );
+
+    commit_ok(&mut a, 3, vec![item("a", ItemAssign::WaitsFor("b".into(), false))]);
+    assert_eq!(read(&a).waits_for_cycles(), vec![vec!["b".to_owned(), "c".to_owned()]]);
+}
+
+#[test]
+fn moving_out_of_a_synced_parent_cycle_can_split_it() {
+    let mut a = replica("a");
+    commit_ok(
+        &mut a,
+        1,
+        vec![add("a", vec![]), add("b", vec![]), add("c", vec![]), add("outside", vec![])],
+    );
+    let mut b = replica("b");
+    let mut c = replica("c");
+    b.join(&a.state).unwrap();
+    c.join(&a.state).unwrap();
+    commit_ok(&mut a, 2, vec![item("a", under("b")), item("b", under("c"))]);
+    commit_ok(&mut b, 2, vec![item("c", under("a"))]);
+    commit_ok(&mut c, 2, vec![item("c", under("b"))]);
+    a.join(&b.state).unwrap();
+    a.join(&c.state).unwrap();
+    assert_eq!(
+        read(&a).parent_cycles(),
+        vec![vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]]
+    );
+
+    commit_ok(&mut a, 3, vec![item("a", under("outside"))]);
+    assert_eq!(read(&a).parent_cycles(), vec![vec!["b".to_owned(), "c".to_owned()]]);
 }
 
 #[test]

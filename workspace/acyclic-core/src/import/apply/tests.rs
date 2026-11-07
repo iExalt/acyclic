@@ -195,7 +195,8 @@ fn a_document_closing_cycles_of_its_own_is_refused_naming_each_once() {
     for n in [13, 14] {
         doc.items.push(item(n, None, Some(9)));
     }
-    // 10 and 11 under each other; 11 and 12 waiting for each other; 13 and 14 likewise.
+    // 10 and 11 parent each other. 11 and 12 wait for each other, but through that parent cycle only leaf 12 is in
+    // the effective cycle, even though it is done. 13 and 14 wait for each other independently.
     doc.items[0].parent = Some(id(11));
     doc.items[2].waits_for = Some(vec![id(11)]);
     doc.items[3].waits_for = Some(vec![id(14)]);
@@ -204,7 +205,7 @@ fn a_document_closing_cycles_of_its_own_is_refused_naming_each_once() {
         panic!("cycles accepted")
     };
     cycles.sort();
-    assert_eq!(cycles, [[id(10), id(11)], [id(11), id(12)], [id(13), id(14)]]);
+    assert_eq!(cycles, vec![vec![id(10), id(11)], vec![id(12)], vec![id(13), id(14)]]);
 }
 
 #[test]
@@ -224,6 +225,27 @@ fn a_cycle_closed_with_what_the_tracker_holds_is_refused() {
         ApplyError::Cycles(cycles).to_string(),
         format!("the import would close 1 cycle: {} -> {}", id(11), id(12))
     );
+}
+
+#[test]
+fn an_inherited_wait_cycle_maps_to_cycles_and_leaves_replica_state_unchanged() {
+    let mut doc = Import::new();
+    doc.initiatives.push(crate::import::Initiative {
+        id: id(9),
+        title: "Initiative".into(),
+        notes: None,
+    });
+    doc.items = vec![item(10, None, Some(9)), item(11, None, Some(10)), item(12, None, Some(9))];
+    doc.items[0].waits_for = Some(vec![id(12)]);
+    doc.items[2].waits_for = Some(vec![id(11)]);
+    let mut r = replica();
+    let before = r.state.clone();
+
+    assert_eq!(
+        apply(&doc, &mut r, by(USER, 1)),
+        Err(ApplyError::Cycles(vec![vec![id(11), id(12)]]))
+    );
+    assert_eq!(r.state, before);
 }
 
 #[test]

@@ -32,7 +32,7 @@ pub enum Entry {
         /// The remote.
         remote: String,
     },
-    /// Waits-for links form a cycle.
+    /// Effective waits-for links form a cycle among unfinished leaves.
     WaitsForCycle {
         /// The items on it.
         items: Vec<String>,
@@ -315,7 +315,7 @@ pub fn needs_you(
             field: field.to_owned(),
         });
     }
-    for items in model.waits_for_cycles() {
+    for items in model.read_wait_cycles() {
         entries.insert(Entry::WaitsForCycle { items });
     }
     for items in model.parent_cycles() {

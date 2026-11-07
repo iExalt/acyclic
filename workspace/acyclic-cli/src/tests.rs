@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use acyclic_core::delete::DeleteError;
+use acyclic_core::delete::Reason;
 use acyclic_core::import::{ApplyError, ParseError, ValidationError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::WriteError;
@@ -99,6 +99,74 @@ fn an_internal_import_error_keeps_each_violation_in_its_details() {
 }
 
 #[test]
+fn deletion_write_errors_keep_their_cli_message_and_details() {
+    let cases = [
+        (
+            WriteError::InUse {
+                item: "item".into(),
+                reasons: vec![
+                    Reason::HasChildren { children: vec!["kid".into()] },
+                    Reason::Claimed { holder: "session/other".into() },
+                ],
+            },
+            CliError::refused(
+                "in-use",
+                "item can't be deleted: it has children (kid); session/other holds a claim on its thread",
+            )
+            .with(json!({
+                "item": "item",
+                "reasons": [
+                    {"why": "has-children", "children": ["kid"]},
+                    {"why": "claimed", "holder": "session/other"}
+                ]
+            })),
+        ),
+        (
+            WriteError::NoInitiative("init".into()),
+            CliError::new("not-found", exit::NOT_FOUND, "no initiative init"),
+        ),
+        (
+            WriteError::InitiativeInUse {
+                initiative: "init".into(),
+                reasons: vec![Reason::HoldsItems { items: vec!["kid".into()] }],
+            },
+            CliError::refused("in-use", "init can't be deleted: items are under it (kid)")
+                .with(json!({
+                    "initiative": "init",
+                    "reasons": [{"why": "holds-items", "items": ["kid"]}]
+                })),
+        ),
+        (
+            WriteError::NoThread("thread".into()),
+            CliError::new("not-found", exit::NOT_FOUND, "no thread thread"),
+        ),
+        (
+            WriteError::ThreadInUse {
+                thread: "thread".into(),
+                reasons: vec![
+                    Reason::HasMembers { members: vec!["item".into()] },
+                    Reason::TaskThread,
+                ],
+            },
+            CliError::refused(
+                "in-use",
+                "thread can't be deleted: items are in it (item); it is a task's own thread, which goes when the task does",
+            )
+            .with(json!({
+                "thread": "thread",
+                "reasons": [
+                    {"why": "has-members", "members": ["item"]},
+                    {"why": "task-thread"}
+                ]
+            })),
+        ),
+    ];
+    for (write_error, expected) in cases {
+        assert_eq!(CliError::from(write_error), expected);
+    }
+}
+
+#[test]
 fn every_error_has_a_stable_code_and_exit() {
     let key = Key::new("item", "a1").unwrap();
     // One of each variant, so a renamed code shows here.
@@ -118,7 +186,7 @@ fn every_error_has_a_stable_code_and_exit() {
         WriteError::ParentCycle("a1".into()).into(),
         WriteError::WaitsForCycle(vec!["a1".into()]).into(),
         WriteError::SelfLink("a1".into()).into(),
-        DeleteError::InUse { item: "a1".into(), reasons: vec![] }.into(),
+        WriteError::InUse { item: "a1".into(), reasons: vec![] }.into(),
         StoreError::Git("failed".into()).into(),
         StoreError::Conflict.into(),
         StoreError::Duplicate(id()).into(),
@@ -141,8 +209,10 @@ fn every_error_has_a_stable_code_and_exit() {
         .into(),
         ApplyError::Cycles(vec![]).into(),
         ApplyError::Internal(vec![]).into(),
-        DeleteError::ThreadInUse { thread: "t".into(), reasons: vec![] }.into(),
-        DeleteError::NoThread("t".into()).into(),
+        WriteError::NoInitiative("i".into()).into(),
+        WriteError::InitiativeInUse { initiative: "i".into(), reasons: vec![] }.into(),
+        WriteError::NoThread("t".into()).into(),
+        WriteError::ThreadInUse { thread: "t".into(), reasons: vec![] }.into(),
         // Raised by the commands themselves.
         CliError::refused("not-ready", ""),
         CliError::refused("changed-since", ""),

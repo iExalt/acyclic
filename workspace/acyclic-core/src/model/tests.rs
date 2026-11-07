@@ -90,11 +90,74 @@ fn a_parent_cycle_made_by_a_join_is_reported_and_every_walk_ends() {
     assert_eq!(m.ancestors("x"), vec!["y"]);
     assert_eq!(m.subtree("x").len(), 2);
     assert_eq!(m.role("x"), Role::Task);
+    link(&mut a, "x", "y", by(3)).unwrap();
+    assert_eq!(model(&a).waits_for_cycles(), Vec::<Vec<String>>::new());
+}
+
+#[test]
+fn waits_for_cycles_expand_parent_links_to_structural_leaf_cycles() {
+    let mut r = replica("a");
+    items(&mut r, &["p", "d", "x", "upstream"]);
+    set_parent(&mut r, "d", Some("p"), by(2)).unwrap();
+    link(&mut r, "p", "x", by(3)).unwrap();
+    link(&mut r, "x", "d", by(3)).unwrap();
+    link(&mut r, "upstream", "d", by(3)).unwrap();
+
+    assert_eq!(model(&r).waits_for_cycles(), vec![vec!["d".to_owned(), "x".to_owned()]]);
+
+    let mut r = replica("b");
+    items(&mut r, &["q", "a", "b", "x"]);
+    set_parent(&mut r, "a", Some("q"), by(2)).unwrap();
+    set_parent(&mut r, "b", Some("q"), by(2)).unwrap();
+    link(&mut r, "x", "q", by(3)).unwrap();
+    link(&mut r, "a", "x", by(3)).unwrap();
+    // The target parent expands to both leaves, but only `a` points back at x.
+    assert_eq!(model(&r).waits_for_cycles(), vec![vec!["a".to_owned(), "x".to_owned()]]);
+}
+
+#[test]
+fn waits_for_cycles_include_finished_parked_and_canceled_leaves() {
+    let mut r = replica("a");
+    items(&mut r, &["p", "d", "x"]);
+    set_parent(&mut r, "d", Some("p"), by(2)).unwrap();
+    link(&mut r, "p", "x", by(3)).unwrap();
+    link(&mut r, "x", "d", by(3)).unwrap();
+    let expected = vec![vec!["d".to_owned(), "x".to_owned()]];
+    let mut snapshot = model(&r);
+    for state in [ItemState::Done, ItemState::Parked, ItemState::Canceled] {
+        snapshot.items.get_mut("d").unwrap().state = Value::One(state);
+        assert_eq!(snapshot.waits_for_cycles(), expected);
+    }
+}
+
+#[test]
+fn read_wait_cycles_exclude_finished_leaves_but_keep_parked_and_conflicted_ones() {
+    let mut r = replica("a");
+    items(&mut r, &["p", "d", "x"]);
+    set_parent(&mut r, "d", Some("p"), by(2)).unwrap();
+    link(&mut r, "p", "x", by(3)).unwrap();
+    link(&mut r, "x", "d", by(3)).unwrap();
+    let expected = vec![vec!["d".to_owned(), "x".to_owned()]];
+    let mut snapshot = model(&r);
+    assert_eq!(snapshot.read_wait_cycles(), expected);
+    snapshot.items.get_mut("d").unwrap().state = Value::One(ItemState::Parked);
+    assert_eq!(snapshot.read_wait_cycles(), expected);
+    snapshot.items.get_mut("d").unwrap().state =
+        Value::Conflict(vec![Some(ItemState::Backlog), Some(ItemState::Done)]);
+    assert_eq!(snapshot.read_wait_cycles(), expected);
+    snapshot.items.get_mut("d").unwrap().state = Value::One(ItemState::Done);
+    assert_eq!(snapshot.read_wait_cycles(), Vec::<Vec<String>>::new());
+    snapshot.items.get_mut("d").unwrap().state = Value::One(ItemState::Canceled);
+    assert_eq!(snapshot.read_wait_cycles(), Vec::<Vec<String>>::new());
 }
 
 #[test]
 fn a_conflicted_parent_counts_as_each_of_its_values() {
-    let (mut a, mut b) = pair(&["p1", "p2", "child"]);
+    let (mut a, mut b) = pair(&["root", "p1", "p2", "child", "x"]);
+    for replica in [&mut a, &mut b] {
+        set_parent(replica, "p1", Some("root"), by(2)).unwrap();
+        set_parent(replica, "p2", Some("root"), by(2)).unwrap();
+    }
     set_parent(&mut a, "child", Some("p1"), by(2)).unwrap();
     set_parent(&mut b, "child", Some("p2"), by(2)).unwrap();
     a.join(&b.state).unwrap();
@@ -102,8 +165,12 @@ fn a_conflicted_parent_counts_as_each_of_its_values() {
     assert!(m.items["child"].parent.is_conflict());
     let mut ancestors = m.ancestors("child");
     ancestors.sort_unstable();
-    assert_eq!(ancestors, vec!["p1", "p2"]);
+    assert_eq!(ancestors, vec!["p1", "p2", "root"]);
     assert_eq!((m.children("p1"), m.children("p2")), (vec!["child"], vec!["child"]));
+    assert_eq!(m.progress("root"), Some(Progress { done: 0, canceled: 0, total: 1 }));
+    link(&mut a, "root", "x", by(3)).unwrap();
+    link(&mut a, "x", "child", by(3)).unwrap();
+    assert_eq!(model(&a).waits_for_cycles(), vec![vec!["child".to_owned(), "x".to_owned()]]);
 }
 
 #[test]
@@ -352,6 +419,11 @@ fn canceled_leaves_leave_the_count_and_a_parent_of_nothing_else_reads_canceled()
     set_state(&mut r, "top", ItemState::Canceled, by(6)).unwrap();
     assert!(read(&r).reads_canceled("top") && !read(&r).reads_done("top"));
     assert_eq!(read(&r).progress("top"), Some(Progress { done: 0, canceled: 2, total: 0 }));
+    // The parent's state doesn't turn its completed leaves into canceled work.
+    set_state(&mut r, "a", ItemState::Done, by(7)).unwrap();
+    set_state(&mut r, "b", ItemState::Done, by(7)).unwrap();
+    assert_eq!(read(&r).progress("top"), Some(Progress { done: 2, canceled: 0, total: 2 }));
+    assert!(read(&r).reads_canceled("top") && !read(&r).reads_done("top"));
     // A state in conflict between done and canceled is neither.
     let (mut left, mut right) = pair(&["c"]);
     set_state(&mut left, "c", ItemState::Done, by(3)).unwrap();

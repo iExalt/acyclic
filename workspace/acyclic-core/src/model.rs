@@ -242,6 +242,14 @@ struct Tally {
     total: usize,
 }
 
+/// A leaf beneath a parent, with set-aside state inherited from its ancestors.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Leaf<'a> {
+    pub(crate) item: &'a Item,
+    pub(crate) parked: bool,
+    pub(crate) canceled: bool,
+}
+
 /// A link as read: `from` waits for `to`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Link {
@@ -249,6 +257,15 @@ pub struct Link {
     pub from: String,
     /// The id of the item it depends on.
     pub to: String,
+}
+
+/// A waits-for edge after expanding its holder and target to structural leaves.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct EffectiveWaitEdge {
+    pub(crate) from: String,
+    pub(crate) to: String,
+    pub(crate) holder: String,
+    pub(crate) target: String,
 }
 
 /// An initiative as read: a long-lived body of work, a record of its own that items sit under. It is never work, so it
@@ -595,39 +612,57 @@ impl Model {
         if self.children(id).is_empty() {
             return None;
         }
-        let mut tally = Tally::default();
-        let canceled = self.items[id].state == Value::One(ItemState::Canceled);
-        self.tally(id, canceled, &mut BTreeSet::from([id]), &mut tally);
-        Some(Progress { done: tally.done, canceled: tally.canceled, total: tally.total })
+        Some(Self::progress_from_leaves(&self.leaves_under(id)))
     }
 
-    /// Counts the leaves under `id`, each item once, so a parent cycle ends the walk. The open leaves of a part
-    /// canceled by hand count as canceled.
-    fn tally<'a>(
-        &'a self,
-        id: &'a str,
-        canceled: bool,
-        seen: &mut BTreeSet<&'a str>,
-        tally: &mut Tally,
-    ) {
-        for child in self.children(id) {
-            if !seen.insert(child) {
-                continue;
-            }
-            let Some(item) = self.items.get(child) else { continue };
-            if self.children(child).is_empty() {
-                if item.is_canceled() || (canceled && !item.is_done()) {
-                    tally.canceled += 1;
-                } else {
-                    tally.total += 1;
-                    tally.done += usize::from(item.is_done());
-                }
+    /// Counts a previously collected set of leaves structurally, without consulting readiness or time.
+    pub(crate) fn progress_from_leaves(leaves: &[Leaf<'_>]) -> Progress {
+        let mut tally = Tally::default();
+        for leaf in leaves {
+            if leaf.item.is_canceled() || (leaf.canceled && !leaf.item.is_done()) {
+                tally.canceled += 1;
             } else {
-                // A parent's stored done is ignored: its leaves say whether it is done.
-                let cancels = canceled || item.state == Value::One(ItemState::Canceled);
-                self.tally(child, cancels, seen, tally);
+                tally.total += 1;
+                tally.done += usize::from(leaf.item.is_done());
             }
         }
+        Progress { done: tally.done, canceled: tally.canceled, total: tally.total }
+    }
+
+    /// The leaves under `id`, each item once, so a parent cycle ends the walk.
+    ///
+    /// A leaf inherits parked and canceled only from parent items; its own state remains on `item`.
+    pub(crate) fn leaves_under(&self, id: &str) -> Vec<Leaf<'_>> {
+        let mut seen = BTreeSet::from([id.to_owned()]);
+        let mut found = Vec::new();
+        let root = self.items.get(id);
+        let mut stack: Vec<_> = self
+            .children(id)
+            .into_iter()
+            .rev()
+            .map(|child| {
+                (
+                    child,
+                    root.is_some_and(|item| item.state == Value::One(ItemState::Parked)),
+                    root.is_some_and(|item| item.state == Value::One(ItemState::Canceled)),
+                )
+            })
+            .collect();
+        while let Some((at, parked, canceled)) = stack.pop() {
+            if !seen.insert(at.to_owned()) {
+                continue;
+            }
+            let Some(item) = self.items.get(at) else { continue };
+            let children = self.children(at);
+            if children.is_empty() {
+                found.push(Leaf { item, parked, canceled });
+            } else {
+                let parked = parked || item.state == Value::One(ItemState::Parked);
+                let canceled = canceled || item.state == Value::One(ItemState::Canceled);
+                stack.extend(children.into_iter().rev().map(|child| (child, parked, canceled)));
+            }
+        }
+        found
     }
 
     /// Whether an item reads as done: a leaf by its own state, a parent once every leaf under it that isn't canceled
@@ -769,12 +804,72 @@ impl Model {
         self.thread_value(item).one().map(String::as_str)
     }
 
-    /// The cycles among waits-for links, each sorted.
+    /// The structural cycles among effective waits-for links between leaves, regardless of leaf state, each sorted.
     #[must_use]
     pub fn waits_for_cycles(&self) -> Vec<Vec<String>> {
-        let edges: Vec<(String, String)> =
-            self.links.iter().map(|link| (link.from.clone(), link.to.clone())).collect();
-        graph::cycles(&edges)
+        Self::cycle_ids(self.effective_wait_edges())
+    }
+
+    /// Cycles among waits for unfinished structural leaves, as reads see them.
+    #[must_use]
+    pub fn read_wait_cycles(&self) -> Vec<Vec<String>> {
+        Self::cycle_ids(self.wait_edges(true))
+    }
+
+    fn cycle_ids(edges: Vec<EffectiveWaitEdge>) -> Vec<Vec<String>> {
+        let edges: BTreeSet<(String, String)> =
+            edges.into_iter().map(|edge| (edge.from, edge.to)).collect();
+        graph::cycles(&edges.into_iter().collect::<Vec<_>>())
+    }
+
+    /// Waits-for links after expanding each holder and target to its structural leaves.
+    pub(crate) fn effective_wait_edges(&self) -> Vec<EffectiveWaitEdge> {
+        self.wait_edges(false)
+    }
+
+    fn wait_edges(&self, unfinished_only: bool) -> Vec<EffectiveWaitEdge> {
+        let mut leaves_by_item: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut finished_by_leaf = BTreeMap::new();
+        let mut edges = BTreeSet::new();
+        for link in &self.links {
+            for endpoint in [&link.from, &link.to] {
+                leaves_by_item.entry(endpoint.clone()).or_insert_with(|| {
+                    let leaves = if !self.items.contains_key(endpoint) {
+                        Vec::new()
+                    } else if self.children(endpoint).is_empty() {
+                        vec![endpoint.to_owned()]
+                    } else {
+                        self.leaves_under(endpoint)
+                            .into_iter()
+                            .map(|leaf| leaf.item.id.clone())
+                            .collect()
+                    };
+                    if unfinished_only {
+                        leaves
+                            .into_iter()
+                            .filter(|id| {
+                                !*finished_by_leaf
+                                    .entry(id.clone())
+                                    .or_insert_with(|| self.reads_finished(id))
+                            })
+                            .collect()
+                    } else {
+                        leaves
+                    }
+                });
+            }
+            for from in &leaves_by_item[&link.from] {
+                for to in &leaves_by_item[&link.to] {
+                    edges.insert(EffectiveWaitEdge {
+                        from: from.clone(),
+                        to: to.clone(),
+                        holder: link.from.clone(),
+                        target: link.to.clone(),
+                    });
+                }
+            }
+        }
+        edges.into_iter().collect()
     }
 
     /// A path of blocks links from `from` to `to`, both included; a single item when they are the same.
@@ -828,8 +923,33 @@ pub enum WriteError {
     InvalidName(String),
     /// The item doesn't exist.
     NoItem(String),
+    /// The item is in use and can't be deleted.
+    InUse {
+        /// The item.
+        item: String,
+        /// Why not.
+        reasons: Vec<crate::delete::Reason>,
+    },
     /// The item or thread was deleted, and its id isn't used again.
     Deleted(String),
+    /// No such initiative, or it was deleted.
+    NoInitiative(String),
+    /// The initiative holds items and can't be deleted.
+    InitiativeInUse {
+        /// The initiative.
+        initiative: String,
+        /// Why not.
+        reasons: Vec<crate::delete::Reason>,
+    },
+    /// No such thread, or it was deleted.
+    NoThread(String),
+    /// The thread is in use and can't be deleted.
+    ThreadInUse {
+        /// The thread.
+        thread: String,
+        /// Why not.
+        reasons: Vec<crate::delete::Reason>,
+    },
     /// The write would put an item under itself or its own descendant.
     ParentCycle(String),
     /// The link would close a cycle of waits-for links, through these items.
@@ -847,7 +967,14 @@ impl fmt::Display for WriteError {
                 "{name:?} is not a valid name: use at most {MAX_ID_LEN} lowercase letters, digits, '-', '_' or '.'"
             ),
             Self::NoItem(id) => write!(f, "no item {id}"),
+            Self::InUse { item, reasons }
+            | Self::ThreadInUse { thread: item, reasons }
+            | Self::InitiativeInUse { initiative: item, reasons } => {
+                write!(f, "{item} can't be deleted: {}", crate::say::list(reasons, "; "))
+            },
             Self::Deleted(id) => write!(f, "{id} was deleted, and its id isn't used again"),
+            Self::NoInitiative(id) => write!(f, "no initiative {id}"),
+            Self::NoThread(id) => write!(f, "no thread {id}"),
             Self::ParentCycle(id) => write!(f, "{id} can't go under itself or its own descendant"),
             Self::WaitsForCycle(path) => {
                 write!(f, "the link would close a cycle through {}", path.join(", "))
