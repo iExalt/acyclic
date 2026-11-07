@@ -124,14 +124,15 @@ describe("a stub for waits outside the plan", () => {
   const leaf = { title: "Fix the map", kind: "leaf", hidden: 0, stage: "ready", progress: null } as const;
   const gate = { id: "g", title: "Reserve the ingress address", initiative: "Home lab" };
 
-  it("takes the room at a tile's foot, and a folded box's, and none for a tile with no wait outside", () => {
+  it("takes room for a tile or box stub, including a row below an open box title band", () => {
     expect(metricsOf(leaf, fonts).stub).toBeNull();
     expect(metricsOf(leaf, fonts).reserve).toBe(0);
     const stubbed = metricsOf({ ...leaf, outside: [gate] }, fonts);
     expect(stubbed).toMatchObject({ reserve: STUB_ROOM, height: 86 });
     expect(metricsOf({ ...leaf, kind: "collapsed", outside: [gate] }, fonts).reserve).toBe(STUB_ROOM);
-    // An open box has no place for one in its title strip.
-    expect(metricsOf({ ...leaf, kind: "box", outside: [gate] }, fonts)).toMatchObject({ reserve: 0, stub: null });
+    const box = metricsOf({ ...leaf, kind: "box", outside: [gate] }, fonts);
+    expect(box).toMatchObject({ reserve: STUB_ROOM, header: 52 + STUB_ROOM, stub: { target: "g" } });
+    expect(box.height).toBe(64 + STUB_ROOM);
   });
 
   it("names the initiative and the item, cut to the chip, with the rest counted and every one in the hover", () => {

@@ -37,6 +37,31 @@ describe("style", () => {
     expect(drawn("box")).toEqual({ ...plain, images: [MARK, MARK] });
     expect(drawn("collapsed")).toEqual({ ...plain, images: [MARK, MARK] });
   });
+
+  it("keeps an open box's one-line and wrapped titles in the title band above its stub row", () => {
+    const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(PALETTES.dark) });
+    const margin = (id: string, label: string, header: number, classes: string) => {
+      const box = core.add({
+        group: "nodes",
+        data: {
+          id,
+          label,
+          width: 200,
+          height: 94,
+          textWidth: 120,
+          layer: 0,
+          mark: MARK,
+          stageMark: MARK,
+          header,
+          reserve: 30,
+        },
+        classes,
+      }) as unknown as { pstyle(name: string): { value: unknown } };
+      return box.pstyle("text-margin-y").value;
+    };
+    expect(margin("one", "Box", 82, "box one-line")).toBe(34);
+    expect(margin("wrapped", "A long\nbox title", 82, "box")).toBe(44);
+  });
 });
 
 describe("a scheme's drawing", () => {

@@ -4,6 +4,7 @@
 import { type Counts, NO_COUNTS, type Threads } from "./api";
 import { NO_INITIATIVE } from "./initiatives";
 import type { Model } from "./map/model";
+import { natural } from "./natural";
 import { type Outline, oneOf } from "./outline";
 
 /** A thread in another initiative that a tile waits on, which the view doesn't show: named by where it is. */
@@ -132,6 +133,7 @@ export function wavesView(
   listed: Threads,
   outline: Outline,
   outside: ReadonlyMap<string, Outside> = new Map(),
+  empty: ReadonlySet<string> = new Set(),
 ): WavesView {
   const counts = new Map(listed.threads.map((thread) => [thread.id, thread.counts]));
   const wave = new Map<string, number>();
@@ -152,5 +154,10 @@ export function wavesView(
       outside: outside.get(id) ?? NOTHING,
     };
   };
-  return { waves: listed.waves.map((ids) => ids.map(tile)), anytime: listed.anytime.map(tile) };
+  const placed = new Set([...listed.waves.flat(), ...listed.anytime]);
+  const unplacedEmpty = listed.threads.filter((one) => empty.has(one.id) && !placed.has(one.id)).map((one) => one.id);
+  return {
+    waves: listed.waves.map((ids) => ids.map(tile)),
+    anytime: [...listed.anytime, ...unplacedEmpty].sort(natural).map(tile),
+  };
 }

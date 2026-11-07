@@ -98,13 +98,33 @@ export function inContext<T extends { initiative: string | null }>(items: readon
   return context === null ? [...items] : items.filter((item) => item.initiative === context);
 }
 
-/** The threads with a task in the initiative in context, in the order given; every thread with none in context. */
+/** The threads with a task in the initiative in context, plus truly empty threads. */
 export function threadsIn<T extends { id: string }>(
   threads: readonly T[],
   ofThread: ReadonlyMap<string, ReadonlySet<string | null>>,
   context: string | null,
 ): T[] {
-  return context === null ? [...threads] : threads.filter((one) => ofThread.get(one.id)?.has(context) === true);
+  return context === null
+    ? [...threads]
+    : threads.filter((one) => {
+        const initiatives = ofThread.get(one.id);
+        return initiatives === undefined || initiatives.size === 0 || initiatives.has(context);
+      });
+}
+
+/** The truly empty threads among `threads`, absent or with no initiatives in the full model's memberships. */
+export function emptyThreadIds<T extends { id: string }>(
+  threads: readonly T[],
+  ofThread: ReadonlyMap<string, ReadonlySet<string | null>>,
+): Set<string> {
+  return new Set(
+    threads
+      .filter((one) => {
+        const initiatives = ofThread.get(one.id);
+        return initiatives === undefined || initiatives.size === 0;
+      })
+      .map((one) => one.id),
+  );
 }
 
 /** What a list needs to put its rows under initiatives. */

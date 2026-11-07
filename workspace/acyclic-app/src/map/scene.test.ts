@@ -196,6 +196,27 @@ describe("scene stubs", () => {
     expect(drawn.nodes.find((node) => node.id === "a")?.reserve).toBeGreaterThan(0);
     expect(drawn.nodes.find((node) => node.id === "b")?.reserve).toBe(0);
   });
+
+  it("draws an open box's own wait in its reserved header row", () => {
+    const boxModel = buildModel(
+      [item("top"), item("box", "top", [], { stage: "waiting" }), item("in", "box")],
+      new Map([["box", [gate]]]),
+    );
+    const opened = visible(boxModel, { collapsed: new Set() });
+    const layout: Placed = {
+      ...placed,
+      nodes: new Map(
+        opened.nodes.map((node, i) => [
+          node.id,
+          { x: i * 300, y: 10, width: 200, height: node.id === "box" ? 94 : 64 },
+        ]),
+      ),
+    };
+    const drawn = scene(opened, layout, { item: null, thread: null }, () => null);
+    expect(drawn.stubs).toHaveLength(1);
+    expect(drawn.stubs[0]).toMatchObject({ node: "box", target: "far", y: 10 + 52 + 30 - 8 - 10 });
+    expect(drawn.nodes.find((node) => node.id === "box")).toMatchObject({ header: 82, reserve: 30 });
+  });
 });
 
 it("draws the root lane divider without a visible root box", () => {

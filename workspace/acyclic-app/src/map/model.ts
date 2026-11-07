@@ -178,7 +178,7 @@ export interface VisibleNode {
   thread: string | null;
   /** A parent's leaves by stage, as its item has them. */
   progress: Counts | null;
-  /** The waits it, or what it hides, has outside the plan drawn: a tile's or a folded box's, which show them as stubs. */
+  /** The waits it, or what it hides, has outside the plan drawn: shown on leaves, open boxes and folded boxes as stubs. */
   outside: Crossing[];
 }
 
@@ -301,8 +301,8 @@ export function visible(model: Model, state: ViewState): View {
     return keys.get(key) ? { source, target, implied: true } : { source, target };
   });
 
-  // A stub is drawn on a tile or a folded box: an open box's own wait has no place in its title strip.
-  const stubbed = new Map(nodes.filter((node) => node.kind !== "box").map((node) => [node.id, node]));
+  // A stub belongs to its visible item, including an open box's own wait; folded descendants lift to their box.
+  const stubbed = new Map(nodes.map((node) => [node.id, node]));
   for (const item of model.items.values()) {
     const node = stubbed.get(stand.get(item.id) ?? "");
     if (node === undefined) continue;

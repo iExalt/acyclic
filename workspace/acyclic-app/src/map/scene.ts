@@ -24,7 +24,7 @@ export interface SceneNode {
   textWidth: number;
   header: number;
   kind: Kind;
-  /** The room at its foot a stub takes, which its label and marks leave clear; 0 with none. */
+  /** The stub's reserved room, below an open box's title band or at a leaf's or folded box's foot. */
   reserve: number;
   /** A tile's stage and thread, which its marks show; null for a box. */
   stage: Stage | null;
@@ -171,7 +171,10 @@ export function scene(
         text: metrics.stub.text,
         full: metrics.stub.full,
         x: at.x + at.width / 2,
-        y: at.y + at.height - STUB_INSET - STUB_CHIP / 2,
+        y:
+          node.kind === "box"
+            ? at.y + metrics.header - STUB_INSET - STUB_CHIP / 2
+            : at.y + at.height - STUB_INSET - STUB_CHIP / 2,
         width,
         height: STUB_CHIP,
         layer: depth + 1,

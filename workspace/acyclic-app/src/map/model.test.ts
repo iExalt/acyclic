@@ -220,9 +220,18 @@ describe("waits outside the plan", () => {
     expect(folded.nodes.find((node) => node.id === "box")?.outside.map((one) => one.id)).toEqual(["far2", "far"]);
   });
 
-  it("has no place for them on an open box, and changes the layout's source, as a stub changes a tile's height", () => {
+  it("keeps an open box's own wait on it, and changes the layout's source", () => {
     const model = buildModel(near, new Map([["box", [gate]]]));
-    expect(visible(model, { collapsed: new Set() }).nodes.find((node) => node.id === "box")?.outside).toEqual([]);
+    expect(visible(model, { collapsed: new Set() }).nodes.find((node) => node.id === "box")?.outside).toEqual([gate]);
     expect(sourceKey(buildModel(near, outside))).not.toBe(sourceKey(buildModel(near)));
+  });
+
+  it("keeps a child's wait on the child while open and aggregates it on the folded box", () => {
+    const model = buildModel(near, new Map([["in", [gate]]]));
+    const open = visible(model, { collapsed: new Set() });
+    expect(open.nodes.find((node) => node.id === "box")?.outside).toEqual([]);
+    expect(open.nodes.find((node) => node.id === "in")?.outside).toEqual([gate]);
+    const folded = visible(model, { collapsed: new Set(["box"]) });
+    expect(folded.nodes.find((node) => node.id === "box")?.outside).toEqual([gate]);
   });
 });

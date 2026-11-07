@@ -38,7 +38,7 @@ export interface LabelFonts {
 export interface LabelMetrics {
   width: number;
   height: number;
-  /** What the foot of a leaf or folded box holds besides its label: the room of its stub, else 0. */
+  /** The room a stub reserves: at a leaf's or folded box's foot, or below an open box's title band. */
   reserve: number;
   stub: StubLine | null;
   header: number;
@@ -58,7 +58,7 @@ export function metricsOf(
 ): LabelMetrics {
   const available = textWidth(node.kind, width);
   const title = node.title.replace(/`([^`]+)`/g, "$1");
-  const stub = node.kind === "box" ? null : stubOf(node.outside ?? [], width, fonts.regular);
+  const stub = stubOf(node.outside ?? [], width, fonts.regular);
   const reserve = stub === null ? 0 : STUB_ROOM;
   const titleLines = Math.floor((ITEM_HEIGHT - reserve - 20) / LINE_HEIGHT);
   const lines =
@@ -69,7 +69,7 @@ export function metricsOf(
   const footerWidth = width - MARKS_LEFT - 8;
   if (membership)
     lines.push("", ...clampTitle(`Thread: ${threadName.replace(/\s+/g, " ")}`, footerWidth, 1, fonts.regular));
-  const header = node.kind === "leaf" ? 0 : Math.max(BASE_HEADER, Math.ceil(lines.length * LINE_HEIGHT + 16));
+  const header = node.kind === "leaf" ? 0 : Math.max(BASE_HEADER, Math.ceil(lines.length * LINE_HEIGHT + 16)) + reserve;
   return {
     width,
     height:
@@ -95,7 +95,7 @@ function clampTitle(title: string, width: number, limit: number, measure: Measur
   return shown;
 }
 
-/** The one line a tile or folded box carries for its waits outside the plan: the first, "+n" for the rest. */
+/** The one line a leaf or box carries for its waits outside the plan: the first, "+n" for the rest. */
 export function stubOf(
   outside: readonly { id: string; title: string; initiative: string }[],
   width: number,

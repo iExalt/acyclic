@@ -29,6 +29,7 @@ import {
   contextOf,
   contextTitle,
   crossingWaits,
+  emptyThreadIds,
   inContext,
   type ListScope,
   needInitiatives,
@@ -319,7 +320,12 @@ export function App() {
       (id) => rowLabel(ofThreads.get(id) ?? none, initiativeTitles, context),
       initiativeTitles,
     );
-    return wavesView(scopeThreads(loaded.threads, keep), scopedOutline, outside);
+    return wavesView(
+      scopeThreads(loaded.threads, keep),
+      scopedOutline,
+      outside,
+      emptyThreadIds(scopedThreads, ofThreads),
+    );
   }, [loaded, scopedOutline, scopedThreads, model, context, ofThreads, initiativeTitles]);
   const working = useMemo(() => new Set(workingThreads(counts)), [counts]);
   worldNow.current = {
