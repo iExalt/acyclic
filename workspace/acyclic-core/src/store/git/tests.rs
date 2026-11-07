@@ -54,6 +54,20 @@ fn repository(hash: &str) -> (TempDir, Git) {
     (dir, store)
 }
 
+#[test]
+fn first_parent_commit_threshold_counts_the_tip_and_stops_at_the_boundary() {
+    let (_dir, store) = repository("sha1");
+    let changes = files(&[("state", Some("same"))]);
+    let tree = store.write_tree(None, &changes).expect("a tree");
+    let first = store.commit(&tree, None, "test", 1, "first").expect("a commit");
+    let second = store.commit(&tree, Some(&first), "test", 2, "second").expect("a commit");
+    let third = store.commit(&tree, Some(&second), "test", 3, "third").expect("a commit");
+
+    assert!(store.first_parent_commits_at_least(&third, 3).expect("the history reads"));
+    assert!(!store.first_parent_commits_at_least(&third, 4).expect("the history reads"));
+    assert!(store.first_parent_commits_at_least(&third, 0).expect("zero is immediate"));
+}
+
 fn files(entries: &[(&str, Option<&str>)]) -> Files {
     entries
         .iter()

@@ -278,11 +278,13 @@ fn parents_joined_into_a_cycle_are_listed_every_walk_ends_and_a_move_clears_it()
 fn squashes_on_both_sides_join_through_tips_the_cache_never_saw() {
     let pair = Pair::new();
     pair.user(&pair.mac, &|r, by| add(r, by, "x", None).map(drop));
+    pair.user(&pair.mac, &set_title("base"));
     pair.spread(&pair.mac);
     // pi holds mac's tip; both squash and write, so pi's next fetch is a forced update to a parentless commit.
-    pair.mac.squash().unwrap();
+    assert!(pair.mac.squash().unwrap().is_some());
     pair.user(&pair.mac, &|r, by| add(r, by, "m", None).map(drop));
-    pair.pi.squash().unwrap();
+    pair.user(&pair.pi, &set_title("peer"));
+    assert!(pair.pi.squash().unwrap().is_some());
     pair.user(&pair.pi, &|r, by| add(r, by, "p", None).map(drop));
     pair.exchange();
     let state = pair.assert_settled();

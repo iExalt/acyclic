@@ -216,6 +216,7 @@ impl<'a> CommandContext<'a> {
             Command::Item(ItemCommand::Show { items }) => self.show(items),
             Command::Needs => self.needs(),
             Command::Sync => self.sync(),
+            Command::Compact => self.compact(),
             Command::Doctor => self.doctor(),
             Command::Item(ItemCommand::Add {
                 id: given,
@@ -769,12 +770,25 @@ impl<'a> CommandContext<'a> {
     fn sync(&self) -> Result<Json, CliError> {
         let remote = self.remote()?;
         let synced = self.tracker.sync(remote)?;
+        // A failed bounded local check must not turn a successful sync into a failure.
+        let compact_suggested = self.tracker.compaction_due().ok();
         Ok(json!({
             "remote": remote,
             "fetched": synced.fetched,
             "joined": synced.joined,
             "pushed": synced.pushed,
             "changed": synced.joined,
+            "compact_suggested": compact_suggested,
+        }))
+    }
+
+    fn compact(&self) -> Result<Json, CliError> {
+        let compacted = self.tracker.compact(self.now)?;
+        let changed = compacted.squashed.is_some() || !compacted.pruned.is_empty();
+        Ok(json!({
+            "changed": changed,
+            "squashed": compacted.squashed,
+            "pruned": compacted.pruned,
         }))
     }
 

@@ -511,6 +511,39 @@ fn a_squashed_ref_holds_the_same_state() {
 }
 
 #[test]
+fn compact_preserves_audit_refs_and_is_idempotent() {
+    let dir = TempDir::new().unwrap();
+    let path = tracker(&dir, "mac");
+    let (tracker, _) = Tracker::open(&path).unwrap();
+    let empty = tracker.compact(NOW).unwrap();
+    assert_eq!(empty.squashed, None);
+    assert!(empty.pruned.is_empty());
+    write_month(&tracker, JULY, 1);
+    let parentless = tracker.compact(NOW).unwrap();
+    assert_eq!(parentless.squashed, None, "one state commit is already parentless");
+    assert!(parentless.pruned.is_empty());
+    write_month(&tracker, AUGUST, 2);
+    let (_, before_state) = tracker.load().unwrap();
+    let before_tree = git(&path, &["rev-parse", "refs/heads/state/mac^{tree}"]);
+    let before_audit =
+        git(&path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/log/"]);
+
+    let compacted = tracker.compact(NOW).unwrap();
+
+    assert!(compacted.squashed.is_some());
+    assert!(compacted.pruned.is_empty(), "compaction retains every audit event");
+    assert_eq!(git(&path, &["rev-parse", "refs/heads/state/mac^{tree}"]), before_tree);
+    assert_eq!(
+        git(&path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/log/"]),
+        before_audit
+    );
+    assert_eq!(tracker.load().unwrap().1, before_state);
+    let again = tracker.compact(NOW).unwrap();
+    assert_eq!(again.squashed, None, "an already parentless state is a no-op");
+    assert!(again.pruned.is_empty());
+}
+
+#[test]
 fn the_cached_state_matches_git_after_batches_squashes_and_joins() {
     let dir = TempDir::new().unwrap();
     let remote = bare_remote(&dir);
@@ -914,7 +947,8 @@ fn sync_joins_every_replica_through_the_remote_and_a_squash_passes_the_ruleset()
     let dir = TempDir::new().unwrap();
     let remote = remote_with_ruleset(&dir);
     let url = remote.to_str().unwrap();
-    let (mac, _) = Tracker::open(&tracker(&dir, "mac")).unwrap();
+    let mac_path = tracker(&dir, "mac");
+    let (mac, _) = Tracker::open(&mac_path).unwrap();
     let pi_path = tracker(&dir, "pi");
     let (pi, _) = Tracker::open(&pi_path).unwrap();
     write(&mac, "x1", "f", json!(1));
@@ -939,8 +973,16 @@ fn sync_joins_every_replica_through_the_remote_and_a_squash_passes_the_ruleset()
     assert!(renamed.is_some());
     assert!(fresh.sync(url).unwrap().joined);
     assert_eq!(entities(&fresh), entities(&mac), "it holds the others' work again");
-    // A squash rewrites the state ref; the lease lets it through, and segments still only fast-forward.
-    mac.squash().unwrap();
+    // Compaction rewrites local state; a later sync propagates it while audit segments only fast-forward.
+    let audit_before =
+        git(&mac_path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/log/"]);
+    let compacted = mac.compact(NOW).unwrap();
+    assert!(compacted.squashed.is_some());
+    assert!(compacted.pruned.is_empty());
+    assert_eq!(
+        git(&mac_path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/log/"]),
+        audit_before
+    );
     write(&mac, "x1", "f", json!(3));
     assert!(mac.sync(url).unwrap().pushed > 0);
     // A replica that joined the old history joins the squashed one, and one that only ever saw the squash agrees.

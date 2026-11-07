@@ -1390,6 +1390,79 @@ fn join_finished<T>(worker: std::thread::JoinHandle<T>, timeout: Duration) -> Op
 }
 
 #[test]
+fn explicit_compaction_is_local_idempotent_and_preserves_audit_refs() {
+    let mut sh = Shell::new();
+    let remote = sh.path().join("remote.git");
+    git(sh.path(), &["init", "--bare", remote.to_str().unwrap()]);
+    sh.init();
+    let tracker = sh.path().join("tracker");
+    sh.run("item add --title Work", AGENT);
+    sh.run("item edit Work --notes changed", AGENT);
+    git(&tracker, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    assert_eq!(sh.run("sync", AGENT), 0);
+
+    let tree_before = git(&tracker, &["rev-parse", "refs/heads/state/mac^{tree}"]);
+    let before =
+        git(&tracker, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/log/"]);
+    assert!(!before.is_empty(), "the setup wrote audit history");
+    let remote_before = git(
+        &remote,
+        &[
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            "refs/heads/state/",
+            "refs/heads/log/",
+        ],
+    );
+    let items_before = sh.output("item list", AGENT).1["data"].clone();
+
+    let (code, first) = sh.output("compact", AGENT);
+    assert_eq!(code, 0, "{}", sh.transcript);
+    assert_eq!(first["data"]["changed"], true);
+    assert!(first["data"]["squashed"].as_str().is_some());
+    assert_eq!(first["data"]["pruned"], json!([]));
+    assert_eq!(git(&tracker, &["rev-parse", "refs/heads/state/mac^{tree}"]), tree_before);
+    assert_eq!(sh.output("item list", AGENT).1["data"], items_before);
+    assert_eq!(
+        git(&tracker, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/log/"],),
+        before
+    );
+    assert_eq!(
+        git(
+            &remote,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/heads/state/",
+                "refs/heads/log/",
+            ],
+        ),
+        remote_before,
+        "compact is local and does not push"
+    );
+
+    let (code, second) = sh.output("compact", AGENT);
+    assert_eq!(code, 0, "{}", sh.transcript);
+    assert_eq!(second["data"], json!({"changed": false, "squashed": null, "pruned": []}));
+}
+
+#[test]
+fn sync_reports_a_below_threshold_compaction_advisory_without_changing_sync_status() {
+    let mut sh = Shell::new();
+    let remote = sh.path().join("remote.git");
+    git(sh.path(), &["init", "--bare", remote.to_str().unwrap()]);
+    sh.init();
+    let tracker = sh.path().join("tracker");
+    git(&tracker, &["remote", "add", "origin", remote.to_str().unwrap()]);
+
+    let (code, out) = sh.output("sync", AGENT);
+    assert_eq!(code, 0, "{}", sh.transcript);
+    assert_eq!(out["data"]["joined"], false);
+    assert_eq!(out["data"]["changed"], false);
+    assert_eq!(out["data"]["compact_suggested"], false);
+}
+
+#[test]
 fn a_commit_is_checked_when_it_is_written_and_never_when_read() {
     let mut sh = Shell::new();
     let (home, work) = code(&sh);
