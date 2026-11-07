@@ -27,6 +27,10 @@ on:
         description: The commit or tag to build
         type: string
         required: true
+      frontend-artifact-id:
+        description: Same-run complete frontend artifact ID; omitted calls produce it once
+        type: string
+        default: ""
       skip-rehearsal:
         description: Skip rehearsing the image's publication
         type: boolean
@@ -47,9 +51,17 @@ env:
   MISE_DISABLE_TOOLS: python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,aqua:rvben/rumdl,aqua:rhysd/actionlint,aqua:koalaman/shellcheck
 
 jobs:
+  frontend:
+    if: inputs.frontend-artifact-id == ''
+    uses: ./.github/workflows/frontend.yml
+    with:
+      ref: ${{ inputs.ref }}
+
   # The Linux builds, which the images need. The macOS build is a job of its own, so that the images and the rehearsal
   # start once these finish, without waiting for it.
   build:
+    needs: frontend
+    if: ${{ always() && (needs.frontend.result == 'success' || (needs.frontend.result == 'skipped' && inputs.frontend-artifact-id != '')) }}
     name: build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -64,13 +76,34 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
-      - uses: ./.github/actions/build-archive
+      - name: Require defining workflow identity
+        id: tooling
+        env:
+          JOB_CONTEXT: ${{ toJSON(job) }}
+        run: |
+          repository=$(jq -er '.workflow_repository | select(type == "string")' <<< "$JOB_CONTEXT")
+          revision=$(jq -er '.workflow_sha | select(type == "string")' <<< "$JOB_CONTEXT")
+          [[ "$repository" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - name: Check out the defining workflow's tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.tooling.outputs.repository }}
+          ref: ${{ steps.tooling.outputs.revision }}
+          path: .build-tooling
+          persist-credentials: false
+      - uses: ./.build-tooling/.github/actions/build-archive
         with:
           target: ${{ matrix.target }}
+          frontend-artifact-id: ${{ inputs.frontend-artifact-id || needs.frontend.outputs.artifact-id }}
           # A build that publishes (publish.yml calls this workflow with a ref) generates the notices afresh.
           reuse-notices: ${{ inputs.ref == '' }}
 
   build-macos:
+    needs: frontend
+    if: ${{ always() && (needs.frontend.result == 'success' || (needs.frontend.result == 'skipped' && inputs.frontend-artifact-id != '')) }}
     name: build aarch64-apple-darwin
     runs-on: macos-15
     env:
@@ -80,9 +113,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
-      - uses: ./.github/actions/build-archive
+      - name: Require defining workflow identity
+        id: tooling
+        env:
+          JOB_CONTEXT: ${{ toJSON(job) }}
+        run: |
+          repository=$(jq -er '.workflow_repository | select(type == "string")' <<< "$JOB_CONTEXT")
+          revision=$(jq -er '.workflow_sha | select(type == "string")' <<< "$JOB_CONTEXT")
+          [[ "$repository" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - name: Check out the defining workflow's tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.tooling.outputs.repository }}
+          ref: ${{ steps.tooling.outputs.revision }}
+          path: .build-tooling
+          persist-credentials: false
+      - uses: ./.build-tooling/.github/actions/build-archive
         with:
           target: aarch64-apple-darwin
+          frontend-artifact-id: ${{ inputs.frontend-artifact-id || needs.frontend.outputs.artifact-id }}
           reuse-notices: ${{ inputs.ref == '' }}
 
   image:
@@ -158,10 +210,12 @@ jobs:
   # passing, so this fails unless every job succeeded, or the rehearsal was skipped because the caller asked.
   ok:
     name: build ok
-    if: ${{ !cancelled() }}
-    needs: [build, build-macos, image, rehearse]
+    if: ${{ always() }}
+    needs: [frontend, build, build-macos, image, rehearse]
     runs-on: ubuntu-24.04
     env:
+      FRONTEND: ${{ needs.frontend.result }}
+      FRONTEND_ARTIFACT_ID: ${{ inputs.frontend-artifact-id }}
       BUILD: ${{ needs.build.result }}
       BUILD_MACOS: ${{ needs.build-macos.result }}
       IMAGE: ${{ needs.image.result }}
@@ -170,7 +224,8 @@ jobs:
     steps:
       - run: |
           echo "build: $BUILD, macOS build: $BUILD_MACOS, image: $IMAGE, rehearse: $REHEARSE"
+          test "$FRONTEND" = success || { test "$FRONTEND" = skipped && test -n "$FRONTEND_ARTIFACT_ID"; } || exit 1
           test "$BUILD" = success
           test "$BUILD_MACOS" = success
           test "$IMAGE" = success
-          test "$REHEARSE" = success || { test "$SKIP_REHEARSAL" = true && test "$REHEARSE" = skipped; }
+          test "$REHEARSE" = success || { test "$SKIP_REHEARSAL" = true && test "$REHEARSE" = skipped; } || exit 1
