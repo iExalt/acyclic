@@ -8,6 +8,7 @@ import importlib.util
 import json
 import lzma
 import tempfile
+import tomllib
 import unittest
 from functools import partial
 from pathlib import Path
@@ -98,6 +99,8 @@ class ContextStageTests(unittest.TestCase):
         output = self.root / name
         fingerprint = native_context.stage(self.root, output, platform, [self.helper])
         manifest = json.loads((output / "native-inputs.json").read_text())
+        tools = tomllib.loads((output / "mise.toml").read_text())["tools"]
+        self.assertEqual(tools["rust"]["profile"], "minimal")
         files = {
             str(path.relative_to(output))
             for path in output.rglob("*")

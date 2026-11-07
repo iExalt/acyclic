@@ -8,8 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     RUSTUP_HOME=/opt/rustup \
     CARGO_HOME=/opt/cargo \
     RUSTUP_TOOLCHAIN=@@RUST_VERSION@@ \
-    RUSTUP_PROFILE=minimal \
-    PATH=/usr/local/bin:/opt/mise/shims:/usr/bin:/bin
+    PATH=/usr/local/bin:/opt/mise/shims:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 
 COPY snapshot/ /tmp/native-snapshot/
 COPY bootstrap/ca-certificates.deb /tmp/native-bootstrap/ca-certificates.deb
@@ -43,7 +42,7 @@ RUN set -eu; \
       printf '%s  %s\n' "$expected" "$list" | sha256sum -c -; \
     done; \
     apt-get -o Acquire::https::CaInfo=/tmp/native-ca-bundle.crt -o Acquire::https::Verify-Peer=true -o Acquire::https::Verify-Host=true install -y --no-remove --no-install-recommends @@PACKAGES@@; \
-    mkdir -p /usr/share/native-ci; \
+    mkdir -p /usr/share/native-ci; chmod 0755 /usr/share/native-ci; \
     LC_ALL=C dpkg-query -W -f='${binary:Package}\t${Version}\t${Architecture}\n' | LC_ALL=C sort > /usr/share/native-ci/dpkg-receipt.tsv; \
     rm -rf /var/lib/apt/lists/* /tmp/native-snapshot /tmp/native-bootstrap /tmp/native-ca /tmp/native-ca-bundle.crt
 
@@ -62,17 +61,20 @@ RUN set -eu; \
     tar -xJOf /tmp/mise.tar.xz mise/bin/mise > /usr/local/bin/mise; chmod 0755 /usr/local/bin/mise; \
     mise install; \
     mise exec -- rustup target add "$rust_target"; \
+    mise exec -- rustup --version > /usr/share/native-ci/rustup-version.txt; \
+    mise exec -- rustup component list --installed | LC_ALL=C sort > /usr/share/native-ci/rust-components.txt; \
     rm -f /tmp/mise.tar.xz; \
-    chmod -R a+rX /opt/mise /opt/rustup /opt/cargo; \
+    chmod 0644 /usr/share/native-ci/*.txt /usr/share/native-ci/*.tsv; \
+    chmod -R a+rX /opt/mise /opt/rustup /opt/cargo /opt/mise-config; \
     for tool in rustc cargo rustup cargo-about; do \
       selected="$(mise which "$tool")"; test -x "$selected"; \
       ln -s "$selected" "/usr/local/bin/$tool"; \
     done
 
 RUN set -eu; \
-    groupadd --gid 10001 builder; useradd --uid 10001 --gid 10001 --create-home --shell /bin/sh builder; \
-    mkdir -p /workspace /output /home/builder/.cargo; chown builder:builder /workspace /output /home/builder /home/builder/.cargo
-USER builder:builder
+    mkdir -p /workspace /output /home/builder/.cargo; chown 10001:10001 /workspace /output /home/builder /home/builder/.cargo; \
+    chmod 0755 /workspace /output; chmod 0700 /home/builder /home/builder/.cargo
+USER 10001:10001
 WORKDIR /workspace
 ENV HOME=/home/builder CC_x86_64_unknown_linux_musl=musl-gcc CC_aarch64_unknown_linux_musl=musl-gcc
 LABEL org.opencontainers.image.title="Acyclic native Rust musl CI builder"

@@ -218,6 +218,12 @@ def load_context(context: Path) -> tuple[dict[str, Any], str, str, str]:
     if not isinstance(tools, dict):
         raise RunnerError("staged Mise tools table is invalid")
     rust = tools.get("rust")
+    if (
+        policy.get("rust_profile") != "minimal"
+        or not isinstance(rust, dict)
+        or rust.get("profile") != "minimal"
+    ):
+        raise RunnerError("staged Rust profile must match the minimal native policy")
     about = tools.get("github:EmbarkStudios/cargo-about")
     selected = (
         rust.get("version") if isinstance(rust, dict) else rust,

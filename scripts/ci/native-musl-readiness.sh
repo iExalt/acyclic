@@ -37,7 +37,7 @@ esac
 [ -n "${EXPECTED_RUST_VERSION:-}" ] || fail 'EXPECTED_RUST_VERSION is missing'
 [ -n "${EXPECTED_CARGO_ABOUT_VERSION:-}" ] || fail 'EXPECTED_CARGO_ABOUT_VERSION is missing'
 
-for tool in rustc cargo rustup ar readelf file tar gzip jq awk grep mktemp cmp id mkdir rm cat uname skopeo; do
+for tool in rustc cargo rustup ar readelf file tar gzip jq awk grep sort mktemp cmp id mkdir rm cat uname skopeo; do
   command -v "$tool" >/dev/null 2>&1 || fail "required tool is missing: $tool"
 done
 [ "$selected_cc" = musl-gcc ] || fail "$cc_name must be musl-gcc"
@@ -69,6 +69,10 @@ esac
 fixture_dir=$(mktemp -d "$fixture_parent") || fail 'could not create fixture directory under OUTPUT_DIR'
 trap 'rm -rf "$fixture_dir"' 0
 trap 'exit 1' HUP INT TERM
+
+rustup component list --installed | LC_ALL=C sort > "$fixture_dir/rust-components"
+printf '%s\n' "cargo-$rustc_host" "rustc-$rustc_host" "rust-std-$rustc_host" "rust-std-$TARGET" | LC_ALL=C sort > "$fixture_dir/expected-components"
+cmp "$fixture_dir/expected-components" "$fixture_dir/rust-components" || fail 'installed Rust components differ from the minimal native set'
 
 metadata_dir=$fixture_dir/metadata
 dependency_dir=$fixture_dir/dependency

@@ -215,6 +215,26 @@ class AdapterTests(unittest.TestCase):
             self.invoke("missing-ca-metadata")
         self.assertEqual(self.calls, [])
 
+    def test_nonminimal_staged_profile_is_rejected_even_with_valid_hashes(self):
+        config = self.prepared / "mise.toml"
+        config.write_text(
+            config.read_text().replace('profile = "minimal"', 'profile = "default"')
+        )
+        path = self.prepared / "native-inputs.json"
+        manifest = json.loads(path.read_text())
+        manifest["files"]["mise.toml"] = hashlib.sha256(config.read_bytes()).hexdigest()
+        canonical = {
+            key: manifest[key]
+            for key in ("platform", "policy", "files", "snapshot_files")
+        }
+        manifest["fingerprint"] = hashlib.sha256(
+            json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(runner.RunnerError, "profile"):
+            self.invoke("wrong-profile")
+        self.assertEqual(self.calls, [])
+
     def test_wrong_loaded_config_never_starts_a_payload(self):
         self.bad_loaded_id = True
         with self.assertRaises(runner.RunnerError):

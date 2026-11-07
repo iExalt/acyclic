@@ -325,9 +325,9 @@ def stage(source: Path, output: Path, platform: str, helpers: list[Path]) -> str
         )
     files["Containerfile"] = rendered.encode()
     files["mise.toml"] = (
-        '[tools]\nrust = "'
+        '[tools]\nrust = { version = "'
         + rust_version
-        + '"\n"github:EmbarkStudios/cargo-about" = "'
+        + '", profile = "minimal" }\n"github:EmbarkStudios/cargo-about" = "'
         + about_version
         + '"\n'
     ).encode()
