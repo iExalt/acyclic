@@ -189,3 +189,15 @@ as `unmerged`, `--force` or not, and nothing is written. With no clone mapped, n
 mapped clone with neither an `origin` remote nor refs for that branch, the write goes through and its result lists the
 commit under `unchecked_commits`; `acyclic doctor` later checks every recorded commit, as last fetched, on a machine
 that has the clones.
+
+## SSH transport
+
+For SSH remotes, Acyclic uses Gitoxide's non-interactive SSH policy: OpenSSH commands receive `-oBatchMode=yes` before
+caller options, and Plink and TortoisePlink receive `-batch`. These are the supported variants `ssh`, `plink` and
+`tortoiseplink`, selected with `ssh.variant`. An unknown SSH wrapper must set `ssh.variant` to one of those values and
+forward arguments directly to that client; a wrapper's behavior cannot be inferred. The generic `simple` variant and
+PuTTY (`putty`) are not supported.
+
+SSH command strings are parsed as literal arguments. Shell operators, substitutions, globs and similar shell syntax are
+refused even when quoted or escaped; they are never evaluated. A configured command that disallows shell fallback is a
+single literal executable path, so spaces and metacharacters in that path are retained.

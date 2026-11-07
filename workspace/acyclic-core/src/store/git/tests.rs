@@ -478,7 +478,25 @@ fn a_slow_http_transfer_fails_rather_than_hangs() {
 
 #[test]
 fn a_fetch_never_prompts_on_a_terminal_for_credentials() {
-    let (_dir, ours) = repository("sha1");
+    let dir = TempDir::new().expect("a temporary directory");
+    git(dir.path(), &["init", "-q", "--object-format", "sha1", "."]);
+    git(dir.path(), &["config", "gitoxide.ssh.nonInteractive", "false"]);
+    let ours = Git::new(dir.path());
+    let cached = ours.handle().expect("the cached repository opens");
+    let fresh = ours.fresh_handle().expect("a fresh repository opens");
+    let strict = super::discover_with_config(dir.path(), true)
+        .expect("the strict repository opens")
+        .to_thread_local();
+    let policy = [
+        cached.config_snapshot().boolean("gitoxide.ssh.nonInteractive"),
+        fresh.config_snapshot().boolean("gitoxide.ssh.nonInteractive"),
+        strict.config_snapshot().boolean("gitoxide.ssh.nonInteractive"),
+    ];
+    assert_eq!(
+        policy,
+        [Some(true); 3],
+        "the SSH policy overrides the local false value on cached, fresh and strict handles"
+    );
     let values =
         ours.config_values(&["gitoxide.credentials.terminalPrompt"]).expect("config reads");
     assert_eq!(
