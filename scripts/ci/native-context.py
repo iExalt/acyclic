@@ -6,13 +6,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import lzma
 import os
 import re
 import shutil
 import sys
 import tomllib
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 SNAPSHOT = "20261106T000000Z"
 RELEASES = {
@@ -80,11 +81,103 @@ def index_hashes(inrelease: bytes, arch: str) -> list[dict[str, str | int]]:
                 found.append(
                     {"path": fields[2], "sha256": fields[0], "size": int(fields[1])}
                 )
-    if {item["path"] for item in found} != selected:
+    if len(found) != len(selected) or {item["path"] for item in found} != selected:
         raise RuntimeError(
             f"signed InRelease lacks a main/universe Packages.xz hash for {arch}"
         )
     return found
+
+
+def ca_bootstrap(release: bytes, arch: str) -> tuple[bytes, dict[str, str | int]]:
+    indexes = index_hashes(release, arch)
+    index = next(
+        item for item in indexes if item["path"] == f"main/binary-{arch}/Packages.xz"
+    )
+    if index["size"] <= 0 or index["size"] > 128 * 1024 * 1024:
+        raise RuntimeError("signed ca-certificates package index has an invalid size")
+    index_url = (
+        f"https://snapshot.ubuntu.com/ubuntu/{SNAPSHOT}/dists/noble/{index['path']}"
+    )
+    compressed = fetch(index_url)
+    if len(compressed) != index["size"] or digest(compressed) != index["sha256"]:
+        raise RuntimeError("signed ca-certificates package index verification failed")
+    try:
+        records = lzma.decompress(compressed).decode("utf-8").split("\n\n")
+    except (lzma.LZMAError, EOFError, UnicodeDecodeError) as error:
+        raise RuntimeError("ca-certificates package index is corrupt") from error
+    matches = []
+    for record in records:
+        fields = {}
+        previous = None
+        for line in record.splitlines():
+            if line.startswith((" ", "\t")):
+                if previous is None:
+                    raise RuntimeError("invalid continuation in package index stanza")
+                fields[previous] += "\n" + line[1:]
+                continue
+            key, separator, value = line.partition(":")
+            if not separator or not key:
+                raise RuntimeError("corrupt package index stanza")
+            if key in fields:
+                raise RuntimeError("duplicate field in package index stanza")
+            fields[key] = value.strip()
+            previous = key
+        if fields.get("Package") == "ca-certificates":
+            matches.append(fields)
+    if len(matches) != 1:
+        raise RuntimeError(
+            "signed package index must contain one ca-certificates stanza"
+        )
+    package = matches[0]
+    version, architecture = package.get("Version"), package.get("Architecture")
+    filename, size, checksum = (
+        package.get("Filename"),
+        package.get("Size"),
+        package.get("SHA256"),
+    )
+    if (
+        not version
+        or not re.fullmatch(r"[A-Za-z0-9.+:~_-]+", version)
+        or architecture != "all"
+    ):
+        raise RuntimeError(
+            "ca-certificates stanza has an invalid version or architecture"
+        )
+    expected_filename = f"pool/main/c/ca-certificates/ca-certificates_{version}_all.deb"
+    path = PurePosixPath(filename or "")
+    if (
+        filename != expected_filename
+        or path.is_absolute()
+        or ".." in path.parts
+        or "" in path.parts
+        or "\\" in filename
+        or ":" in filename
+    ):
+        raise RuntimeError("ca-certificates stanza has an unsafe snapshot filename")
+    if (
+        not size
+        or not size.isdecimal()
+        or int(size) <= 0
+        or int(size) > 50 * 1024 * 1024
+    ):
+        raise RuntimeError("ca-certificates stanza has an invalid package size")
+    if not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum):
+        raise RuntimeError("ca-certificates stanza has an invalid SHA256")
+    package_url = f"https://snapshot.ubuntu.com/ubuntu/{SNAPSHOT}/{filename}"
+    deb = fetch(package_url)
+    if len(deb) != int(size) or digest(deb) != checksum:
+        raise RuntimeError("ca-certificates package verification failed")
+    receipt: dict[str, str | int] = {
+        "name": "ca-certificates",
+        "version": version,
+        "architecture": architecture,
+        "filename": filename,
+        "size": int(size),
+        "sha256": checksum,
+        "index_path": index["path"],
+        "index_sha256": index["sha256"],
+    }
+    return deb, receipt
 
 
 def selected_versions(root: Path) -> tuple[str, str]:
@@ -163,14 +256,18 @@ def stage(source: Path, output: Path, platform: str, helpers: list[Path]) -> str
 
     snapshot_files = {}
     releases = {}
+    release_bytes = {}
     for suite, expected in RELEASES.items():
         url = f"https://snapshot.ubuntu.com/ubuntu/{SNAPSHOT}/dists/{suite}/InRelease"
         data = fetch(url)
         if digest(data) != expected:
             raise RuntimeError(f"snapshot InRelease hash mismatch: {suite}")
+        release_bytes[suite] = data
         name = f"snapshot/{suite}/InRelease"
         snapshot_files[name] = data
         releases[suite] = {"sha256": expected, "indexes": index_hashes(data, arch)}
+    ca_package, ca_receipt = ca_bootstrap(release_bytes["noble"], arch)
+    files["bootstrap/ca-certificates.deb"] = ca_package
 
     target = {
         "linux/amd64": "x86_64-unknown-linux-musl",
@@ -195,6 +292,7 @@ def stage(source: Path, output: Path, platform: str, helpers: list[Path]) -> str
         "rust_profile": "minimal",
         "mise_sha256": MISE[arch],
         "helpers": helper_receipts,
+        "bootstrap_ca": ca_receipt,
     }
     rendered = source_recipe.decode("utf-8")
     replacements = {
@@ -208,6 +306,7 @@ def stage(source: Path, output: Path, platform: str, helpers: list[Path]) -> str
         "@@NOBLE_HASH@@": RELEASES["noble"],
         "@@UPDATES_HASH@@": RELEASES["noble-updates"],
         "@@SECURITY_HASH@@": RELEASES["noble-security"],
+        "@@CA_PACKAGE_SHA@@": ca_receipt["sha256"],
     }
     for marker, value in replacements.items():
         if marker not in rendered:

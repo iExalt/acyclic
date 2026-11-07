@@ -6,8 +6,10 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import lzma
 import tempfile
 import unittest
+from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,16 +21,38 @@ assert spec.loader is not None
 spec.loader.exec_module(native_context)
 
 
-def release_data() -> bytes:
+def bootstrap_fixture(fields=None, *, duplicate=False, index_override=None):
+    deb = b"synthetic CA package bytes"
+    package = {
+        "Package": "ca-certificates",
+        "Version": "20240203",
+        "Architecture": "all",
+        "Filename": "pool/main/c/ca-certificates/ca-certificates_20240203_all.deb",
+        "SHA256": hashlib.sha256(deb).hexdigest(),
+        "Size": str(len(deb)),
+    }
+    package.update(fields or {})
+    block = "\n".join(f"{k}: {v}" for k, v in package.items() if v is not None) + "\n\n"
+    index = (
+        lzma.compress((block * (2 if duplicate else 1)).encode())
+        if index_override is None
+        else index_override
+    )
     entries = [
-        f" {hashlib.sha256(path.encode()).hexdigest()} 42 {path}"
+        f" {hashlib.sha256(index).hexdigest()} {len(index)} {component}/binary-{arch}/Packages.xz"
         for arch in ("amd64", "arm64")
         for component in ("main", "universe")
-        for path in (f"{component}/binary-{arch}/Packages.xz",)
     ]
-    return (
-        "SHA256:\n" + "\n".join(entries) + "\nMD5Sum:\n" + "fake signed fixture\n"
-    ).encode()
+    release = ("SHA256:\n" + "\n".join(entries) + "\nMD5Sum:\n").encode()
+    return release, index, deb
+
+
+def fixture_fetch(url, release, index, deb):
+    if url.endswith("Packages.xz"):
+        return index
+    if url.endswith(".deb"):
+        return deb
+    return release
 
 
 class ContextStageTests(unittest.TestCase):
@@ -48,13 +72,17 @@ class ContextStageTests(unittest.TestCase):
         (self.root / "scripts/ci/native-musl-readiness.sh").write_text("fixture")
         self.helper = self.root / "install.sh"
         self.helper.write_text("helper one")
-        self.release = release_data()
+        self.release, self.index, self.deb = bootstrap_fixture()
         self.releases = {
             suite: hashlib.sha256(self.release).hexdigest()
             for suite in native_context.RELEASES
         }
         self.fetch_patch = patch.object(
-            native_context, "fetch", return_value=self.release
+            native_context,
+            "fetch",
+            side_effect=lambda url: fixture_fetch(
+                url, self.release, self.index, self.deb
+            ),
         )
         self.hash_patch = patch.object(native_context, "RELEASES", self.releases)
         self.fetch_patch.start()
@@ -83,6 +111,7 @@ class ContextStageTests(unittest.TestCase):
         arm, arm_files = self.stage("out-arm", "linux/arm64")
         expected = {
             "Containerfile",
+            "bootstrap/ca-certificates.deb",
             "mise.toml",
             "native-inputs.json",
             "scripts/ci/native-musl-readiness.sh",
@@ -160,6 +189,59 @@ class ContextStageTests(unittest.TestCase):
                     self.stage(f"bad-recipe-{index}")
                 self.assertFalse((self.root / f"bad-recipe-{index}").exists())
         recipe.write_text(self.template)
+
+    def test_authenticated_ca_metadata_rejects_unsafe_or_missing_inputs(self):
+        cases = [
+            ({"Architecture": "amd64"}, False, None),
+            ({"Package": "another-package"}, False, None),
+            ({"Version": None}, False, None),
+            ({"Filename": "../escape.deb"}, False, None),
+            ({"Size": "-1"}, False, None),
+            ({"SHA256": "invalid"}, False, None),
+            ({}, True, None),
+            ({}, False, b"truncated index"),
+        ]
+        for number, (fields, duplicate, override) in enumerate(cases):
+            release, index, deb = bootstrap_fixture(
+                fields, duplicate=duplicate, index_override=override
+            )
+            with (
+                self.subTest(number=number),
+                patch.object(
+                    native_context,
+                    "RELEASES",
+                    {
+                        suite: hashlib.sha256(release).hexdigest()
+                        for suite in self.releases
+                    },
+                ),
+                patch.object(
+                    native_context,
+                    "fetch",
+                    side_effect=partial(
+                        fixture_fetch, release=release, index=index, deb=deb
+                    ),
+                ),
+                self.assertRaises(RuntimeError),
+            ):
+                self.stage(f"bad-ca-{number}")
+
+    def test_corrupt_ca_index_or_package_fails_before_staging(self):
+        for suffix, bad in (("Packages.xz", b"corrupt index"), (".deb", self.deb[:-1])):
+
+            def fetch(url, suffix=suffix, bad=bad):
+                return (
+                    bad
+                    if url.endswith(suffix)
+                    else fixture_fetch(url, self.release, self.index, self.deb)
+                )
+
+            with (
+                self.subTest(suffix=suffix),
+                patch.object(native_context, "fetch", side_effect=fetch),
+                self.assertRaises(RuntimeError),
+            ):
+                self.stage("corrupt-bootstrap" + str(len(bad)))
 
 
 if __name__ == "__main__":

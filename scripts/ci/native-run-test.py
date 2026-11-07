@@ -23,6 +23,7 @@ def module(name):
 
 
 context = module("native-context")
+fixtures = module("native-context-test")
 runner = module("native-run")
 REAL_RUN = runner.run
 CONFIG = "sha256:" + "a" * 64
@@ -56,16 +57,16 @@ class AdapterTests(unittest.TestCase):
             helper = self.source / "scripts" / name
             helper.write_text("synthetic helper " + name)
             self.helpers.append(helper)
-        lines = [
-            f" {hashlib.sha256(p.encode()).hexdigest()} 42 {p}"
-            for a in ("amd64", "arm64")
-            for c in ("main", "universe")
-            for p in (f"{c}/binary-{a}/Packages.xz",)
-        ]
-        release = ("SHA256:\n" + "\n".join(lines) + "\nMD5Sum:\n").encode()
+        release, index, deb = fixtures.bootstrap_fixture()
         self.prepared = self.root / "context"
         with (
-            patch.object(context, "fetch", return_value=release),
+            patch.object(
+                context,
+                "fetch",
+                side_effect=lambda url: fixtures.fixture_fetch(
+                    url, release, index, deb
+                ),
+            ),
             patch.object(
                 context,
                 "RELEASES",
@@ -204,6 +205,15 @@ class AdapterTests(unittest.TestCase):
         with self.assertRaises(runner.RunnerError):
             self.invoke("missing-artifact")
         self.assertFalse(any(c[0] in ("docker", "skopeo") for c in self.calls))
+
+    def test_missing_bootstrap_metadata_aborts_before_engine(self):
+        path = self.prepared / "native-inputs.json"
+        manifest = json.loads(path.read_text())
+        del manifest["policy"]["bootstrap_ca"]
+        path.write_text(json.dumps(manifest))
+        with self.assertRaises(runner.RunnerError):
+            self.invoke("missing-ca-metadata")
+        self.assertEqual(self.calls, [])
 
     def test_wrong_loaded_config_never_starts_a_payload(self):
         self.bad_loaded_id = True

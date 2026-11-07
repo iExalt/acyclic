@@ -12,6 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/usr/local/bin:/opt/mise/shims:/usr/bin:/bin
 
 COPY snapshot/ /tmp/native-snapshot/
+COPY bootstrap/ca-certificates.deb /tmp/native-bootstrap/ca-certificates.deb
 RUN set -eu; \
     command -v gpgv >/dev/null 2>&1 || { echo 'pinned Ubuntu base has no gpgv' >&2; exit 1; }; \
     for release in noble noble-updates noble-security; do \
@@ -23,25 +24,28 @@ RUN set -eu; \
       printf '%s  %s\n' "$expected" "/tmp/native-snapshot/$release/InRelease" | sha256sum -c -; \
       gpgv --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg "/tmp/native-snapshot/$release/InRelease"; \
     done; \
+    printf '%s  %s\n' '@@CA_PACKAGE_SHA@@' /tmp/native-bootstrap/ca-certificates.deb | sha256sum -c -; \
+    mkdir -p /tmp/native-ca; dpkg-deb -x /tmp/native-bootstrap/ca-certificates.deb /tmp/native-ca; \
+    cat /tmp/native-ca/usr/share/ca-certificates/mozilla/*.crt > /tmp/native-ca-bundle.crt; test -s /tmp/native-ca-bundle.crt; chmod 0644 /tmp/native-ca-bundle.crt; \
     rm -f /etc/apt/sources.list; rm -f /etc/apt/sources.list.d/*; rm -f /etc/apt/preferences /etc/apt/preferences.d/*; rm -f /etc/apt/apt.conf.d/*; rm -rf /var/lib/apt/lists/*; \
     printf '%s\n' \
-      'deb [arch=@@ARCH@@] http://snapshot.ubuntu.com/ubuntu/@@SNAPSHOT@@ noble main universe' \
-      'deb [arch=@@ARCH@@] http://snapshot.ubuntu.com/ubuntu/@@SNAPSHOT@@ noble-updates main universe' \
-      'deb [arch=@@ARCH@@] http://snapshot.ubuntu.com/ubuntu/@@SNAPSHOT@@ noble-security main universe' \
+      'deb [arch=@@ARCH@@] https://snapshot.ubuntu.com/ubuntu/@@SNAPSHOT@@ noble main universe' \
+      'deb [arch=@@ARCH@@] https://snapshot.ubuntu.com/ubuntu/@@SNAPSHOT@@ noble-updates main universe' \
+      'deb [arch=@@ARCH@@] https://snapshot.ubuntu.com/ubuntu/@@SNAPSHOT@@ noble-security main universe' \
       > /etc/apt/sources.list; \
     printf '%s\n' 'Acquire::Retries "3";' 'APT::Update::Error-Mode "any";' 'APT::Install-Recommends "false";' 'APT::Install-Suggests "false";' 'APT::Get::Always-Include-Phased-Updates "true";' \
       > /etc/apt/apt.conf.d/99native-ci; \
-    apt-get update; \
+    apt-get -o Acquire::https::CaInfo=/tmp/native-ca-bundle.crt -o Acquire::https::Verify-Peer=true -o Acquire::https::Verify-Host=true update; \
     for suite in noble noble-updates noble-security; do \
       case "$suite" in noble) expected=@@NOBLE_HASH@@ ;; noble-updates) expected=@@UPDATES_HASH@@ ;; noble-security) expected=@@SECURITY_HASH@@ ;; esac; \
       list="$(find /var/lib/apt/lists -maxdepth 1 -type f -name "*_dists_${suite}_InRelease" -print -quit)"; \
       [ -n "$list" ] || { echo "missing fetched snapshot Release: $suite" >&2; exit 1; }; \
       printf '%s  %s\n' "$expected" "$list" | sha256sum -c -; \
     done; \
-    apt-get install -y --no-remove --no-install-recommends @@PACKAGES@@; \
+    apt-get -o Acquire::https::CaInfo=/tmp/native-ca-bundle.crt -o Acquire::https::Verify-Peer=true -o Acquire::https::Verify-Host=true install -y --no-remove --no-install-recommends @@PACKAGES@@; \
     mkdir -p /usr/share/native-ci; \
     LC_ALL=C dpkg-query -W -f='${binary:Package}\t${Version}\t${Architecture}\n' | LC_ALL=C sort > /usr/share/native-ci/dpkg-receipt.tsv; \
-    rm -rf /var/lib/apt/lists/* /tmp/native-snapshot
+    rm -rf /var/lib/apt/lists/* /tmp/native-snapshot /tmp/native-bootstrap /tmp/native-ca /tmp/native-ca-bundle.crt
 
 COPY mise.toml /opt/mise-config/mise.toml
 RUN set -eu; \

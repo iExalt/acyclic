@@ -18,6 +18,7 @@ from typing import Any
 
 DOCKER_HOST = "unix:///var/run/docker.sock"
 FIXTURE = "scripts/ci/native-musl-readiness.sh"
+BOOTSTRAP_CA = "bootstrap/ca-certificates.deb"
 SUITES = {"noble", "noble-updates", "noble-security"}
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -94,12 +95,12 @@ def load_context(context: Path) -> tuple[dict[str, Any], str, str, str]:
         or not SHA256.fullmatch(fingerprint)
     ):
         raise RunnerError("invalid native input hashes")
-    allowed = {"Containerfile", "mise.toml", FIXTURE} | {
+    allowed = {"Containerfile", "mise.toml", FIXTURE, BOOTSTRAP_CA} | {
         f"snapshot/{s}/InRelease" for s in SUITES
     }
-    if set(files) != {"Containerfile", "mise.toml", FIXTURE} or set(snapshots) != {
-        f"snapshot/{s}/InRelease" for s in SUITES
-    }:
+    if set(files) != {"Containerfile", "mise.toml", FIXTURE, BOOTSTRAP_CA} or set(
+        snapshots
+    ) != {f"snapshot/{s}/InRelease" for s in SUITES}:
         raise RunnerError(
             "native context manifest does not match the strict file allowlist"
         )
@@ -139,6 +140,40 @@ def load_context(context: Path) -> tuple[dict[str, Any], str, str, str]:
             for item in indexes
         ):
             raise RunnerError("snapshot package index receipt is invalid")
+    ca = policy.get("bootstrap_ca")
+    ca_index_path = f"main/binary-{arch}/Packages.xz"
+    ca_index_sha = next(
+        item["sha256"]
+        for item in releases["noble"]["indexes"]
+        if item["path"] == ca_index_path
+    )
+    if (
+        not isinstance(ca, dict)
+        or ca.get("name") != "ca-certificates"
+        or ca.get("architecture") != "all"
+    ):
+        raise RunnerError("missing or invalid CA bootstrap package metadata")
+    filename = ca.get("filename")
+    version = ca.get("version")
+    if (
+        not isinstance(filename, str)
+        or not re.fullmatch(
+            r"pool/main/c/ca-certificates/ca-certificates_[A-Za-z0-9.+~_-]+_all\.deb",
+            filename,
+        )
+        or not isinstance(version, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+:~_-]*", version)
+    ):
+        raise RunnerError("unsafe CA bootstrap package identity")
+    if (
+        ca.get("sha256") != files[BOOTSTRAP_CA]
+        or not isinstance(ca.get("size"), int)
+        or ca["size"] <= 0
+        or ca["size"] != regular_file(context, BOOTSTRAP_CA).stat().st_size
+        or ca.get("index_path") != ca_index_path
+        or ca.get("index_sha256") != ca_index_sha
+    ):
+        raise RunnerError("CA bootstrap metadata disagrees with authenticated inputs")
     expected_files = allowed | {"native-inputs.json"}
     allowed_dirs = {"."}
     for name in allowed:
