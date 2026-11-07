@@ -29,6 +29,8 @@ fn failed(err: impl std::error::Error + 'static) -> StoreError {
     StoreError::Git(describe(&err))
 }
 
+const NON_INTERACTIVE_SSH_OVERRIDE: &str = "gitoxide.ssh.nonInteractive=true";
+
 fn parse_id(text: &str) -> Result<gix::ObjectId, StoreError> {
     gix::ObjectId::from_hex(text.as_bytes())
         .map_err(|e| StoreError::Git(format!("{text} isn't an object id: {e}")))
@@ -55,6 +57,7 @@ fn discover_with_config(
             "http.lowSpeedTime=30".into(),
             // A sync or check never waits on a terminal: without this, a fetch that needs credentials prompts for them.
             "gitoxide.credentials.terminalPrompt=false".into(),
+            NON_INTERACTIVE_SSH_OVERRIDE.into(),
         ];
         if let Some(dir) = credential_exec_path() {
             overrides.push(format!("gitoxide.credentials.execPath={}", dir.display()));
@@ -1137,7 +1140,7 @@ pub(crate) fn list_remote_anywhere(
     gix::init_bare(&scratch).map_err(failed)?;
     let options = gix::open::Options::default()
         .ignore_repository_environment(true)
-        .cli_overrides(["gitoxide.core.nativeLocalTransport=true"]);
+        .cli_overrides(["gitoxide.core.nativeLocalTransport=true", NON_INTERACTIVE_SSH_OVERRIDE]);
     let repo = gix::open_opts(&scratch, options).map_err(failed)?;
     Git::new(base).list_remote_with(&repo, remote, patterns)
 }

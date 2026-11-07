@@ -19,6 +19,23 @@ struct Shell {
 
 struct ReleaseGuard(std::path::PathBuf);
 
+struct ChildGuard(Option<std::process::Child>);
+
+const SSH_ISOLATION_TEST: &str = "ACYCLIC_SSH_ISOLATION_TEST";
+const SSH_ISOLATION_ENTERED: &str = "ACYCLIC_SSH_ISOLATION_ENTERED";
+const SSH_ISOLATION_COMPLETE: &str = "ACYCLIC_SSH_ISOLATION_COMPLETE";
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take()
+            && child.try_wait().ok().flatten().is_none()
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 impl ReleaseGuard {
     fn release(&self) {
         let _ = std::fs::write(&self.0, "release");
@@ -89,6 +106,90 @@ impl Shell {
 
     fn path(&self) -> &Path {
         self.dir.path()
+    }
+}
+
+fn shell_quote(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
+/// Runs a contract test once in a clean child process; false means this process was the parent runner.
+fn ssh_isolation_gate(test_name: &str) -> bool {
+    if let Some(name) = std::env::var_os(SSH_ISOLATION_TEST) {
+        assert_eq!(name.to_string_lossy(), test_name, "the child must run exactly its named test");
+        std::fs::write(std::env::var_os(SSH_ISOLATION_ENTERED).unwrap(), test_name).unwrap();
+        return true;
+    }
+
+    let dir = TempDir::new().unwrap();
+    let bin = dir.path().join("bin");
+    let home = dir.path().join("home");
+    let xdg = dir.path().join("xdg");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&xdg).unwrap();
+    let global_config = dir.path().join("empty-gitconfig");
+    std::fs::write(&global_config, "").unwrap();
+    let canary_marker = dir.path().join("ssh-canary-called");
+    let canary = bin.join("ssh");
+    std::fs::write(&canary, format!("#!/bin/sh\n: > {}\nexit 97\n", shell_quote(&canary_marker)))
+        .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&canary, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let canary = std::fs::canonicalize(canary).unwrap();
+    let entered = dir.path().join("child-entered");
+    let complete = dir.path().join("child-complete");
+    let selected_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(
+        std::iter::once(bin.clone()).chain(std::env::split_paths(&selected_path)),
+    )
+    .unwrap();
+    let staged_ssh_command = shell_quote(&canary);
+    let executable = std::env::current_exe().unwrap();
+    let mut child = ChildGuard(Some(
+        std::process::Command::new(executable)
+            .args(["--exact", test_name])
+            .env("GIT_SSH_COMMAND", staged_ssh_command)
+            .env_clear()
+            .env(SSH_ISOLATION_TEST, test_name)
+            .env(SSH_ISOLATION_ENTERED, &entered)
+            .env(SSH_ISOLATION_COMPLETE, &complete)
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", &xdg)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &global_config)
+            .env("PATH", path)
+            .stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    ));
+    let deadline = Instant::now() + Duration::from_secs(75);
+    let status = loop {
+        if let Some(status) = child.0.as_mut().unwrap().try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "isolated {test_name} child exceeded its 75-second bound"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(status.success(), "isolated {test_name} child failed: {status}");
+    assert_eq!(std::fs::read_to_string(entered).unwrap(), test_name, "child entry was recorded");
+    assert_eq!(std::fs::read_to_string(complete).unwrap(), test_name, "child completed its body");
+    assert!(!canary_marker.exists(), "no SSH call escaped to the default client");
+    false
+}
+
+fn complete_ssh_isolation_gate(test_name: &str) {
+    if let Some(name) = std::env::var_os(SSH_ISOLATION_TEST) {
+        assert_eq!(name.to_string_lossy(), test_name, "completion belongs to this exact test");
+        std::fs::write(std::env::var_os(SSH_ISOLATION_COMPLETE).unwrap(), test_name).unwrap();
     }
 }
 
@@ -1332,42 +1433,262 @@ fn code(sh: &Shell) -> (String, String) {
     (home.to_str().unwrap().to_owned(), work)
 }
 
-/// Makes fetches use a synthetic SSH transport that records each start and waits for a release marker.
+/// Makes fetches use a finite synthetic SSH transport that records each start and can wait or fail immediately.
 fn fetch_transport(
     sh: &Shell,
     origin: &Path,
     clone: &Path,
     block: bool,
+    refusal: Option<&str>,
 ) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
     let marker = sh.path().join("fetch-started");
     let release = sh.path().join("fetch-release");
     let count = sh.path().join("fetch-count");
-    let script = sh.path().join("fake-ssh");
-    let quote = |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
+    let prompted = sh.path().join("ssh-prompted");
+    let services = sh.path().join("fetch-services");
+    let script = sh.path().join("ssh");
+    let exec_path = git(sh.path(), &["--exec-path"]);
+    let exec_path = Path::new(&exec_path);
+    let upload_pack = shell_quote(&exec_path.join("git-upload-pack"));
+    let receive_pack = shell_quote(&exec_path.join("git-receive-pack"));
     let wait = if block {
         format!(
             "n=0\nwhile [ ! -e {} ]; do\n  n=$((n + 1))\n  [ \"$n\" -lt 1000 ] || exit 124\n  sleep 0.01\ndone\n",
-            quote(&release)
+            shell_quote(&release)
         )
     } else {
         String::new()
     };
+    let action = match refusal {
+        Some("auth") => {
+            "printf '%s\\n' 'Permission denied (publickey).' >&2\nexit 255\n".to_owned()
+        },
+        Some("hostkey") => {
+            "printf '%s\\n' 'Host key verification failed.' >&2\nexit 255\n".to_owned()
+        },
+        Some(other) => panic!("unsupported synthetic SSH refusal {other:?}"),
+        None => format!(
+            "case \"$service\" in\n  git-upload-pack) printf '%s\\n' git-upload-pack >> {}; exec {} {} ;;\n  git-receive-pack) printf '%s\\n' git-receive-pack >> {}; exec {} {} ;;\n  *) exit 96 ;;\nesac\n",
+            shell_quote(&services),
+            upload_pack,
+            shell_quote(origin),
+            shell_quote(&services),
+            receive_pack,
+            shell_quote(origin),
+        ),
+    };
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\nprintf x >> {}\ntouch {}\n{}exec git-upload-pack {}\n",
-            quote(&count),
-            quote(&marker),
+            "#!/bin/sh\nif [ \"${{1-}}\" != -oBatchMode=yes ]; then : > {}; exit 95; fi\nprintf x >> {}\n: > {}\n{}shift\n[ \"${{1-}}\" = -o ] || exit 91\n[ \"${{2-}}\" = BatchMode=no ] || exit 92\nshift 2\n[ \"${{1-}}\" = -o ] || exit 93\n[ \"${{2-}}\" = SendEnv=GIT_PROTOCOL ] || exit 94\nshift 2\n[ \"${{1-}}\" = synthetic.invalid ] || exit 95\nshift\nservice=\"${{1-}}\"\nshift\n[ \"$#\" -eq 1 ] || exit 96\n{}",
+            shell_quote(&prompted),
+            shell_quote(&count),
+            shell_quote(&marker),
             wait,
-            quote(origin),
+            action,
         ),
     )
     .unwrap();
-    let command = format!("sh {}", quote(&script));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let command = format!("{} -o BatchMode=no", shell_quote(&script));
     git(clone, &["remote", "set-url", "origin", "ssh://synthetic.invalid/repository"]);
     git(clone, &["config", "core.sshCommand", &command]);
-    git(clone, &["config", "ssh.variant", "simple"]);
+    git(clone, &["config", "ssh.variant", "ssh"]);
     (marker, release, count)
+}
+
+#[test]
+fn tracker_sync_uses_the_noninteractive_ssh_transport_for_fetch_and_push() {
+    const TEST: &str =
+        "tests::contract::tracker_sync_uses_the_noninteractive_ssh_transport_for_fetch_and_push";
+    if !ssh_isolation_gate(TEST) {
+        return;
+    }
+    let mut sh = Shell::new();
+    let remote = sh.path().join("remote.git");
+    git(sh.path(), &["init", "--bare", remote.to_str().unwrap()]);
+    sh.init();
+    sh.run("item add --title Work", AGENT);
+    let tracker = sh.path().join("tracker");
+    git(&tracker, &["remote", "add", "origin", "ssh://synthetic.invalid/repository"]);
+    let (started, _, count) = fetch_transport(&sh, &remote, &tracker, false, None);
+
+    let (status, out) = sh.output("sync", AGENT);
+    assert_eq!(status, 0, "{out}");
+    assert!(started.exists(), "the configured SSH executable ran");
+    assert!(std::fs::read_to_string(&count).unwrap().len() >= 2, "fetch and push used SSH");
+    let services = std::fs::read_to_string(sh.path().join("fetch-services")).unwrap();
+    assert!(services.lines().any(|service| service == "git-upload-pack"), "{services}");
+    assert!(services.lines().any(|service| service == "git-receive-pack"), "{services}");
+    let remote_refs = git(
+        &remote,
+        &["for-each-ref", "--format=%(refname)", "refs/heads/state/", "refs/heads/log/"],
+    );
+    assert!(remote_refs.contains("refs/heads/state/mac"), "{remote_refs}");
+    assert!(remote_refs.contains("refs/heads/log/"), "{remote_refs}");
+    complete_ssh_isolation_gate(TEST);
+}
+
+#[test]
+fn ssh_refusals_refuse_sync_and_commit_refresh_without_writes() {
+    const TEST: &str =
+        "tests::contract::ssh_refusals_refuse_sync_and_commit_refresh_without_writes";
+    if !ssh_isolation_gate(TEST) {
+        return;
+    }
+    for refusal in ["auth", "hostkey"] {
+        // A sync refusal cannot change either side's refs.
+        let mut sh = Shell::new();
+        let remote = sh.path().join("remote.git");
+        git(sh.path(), &["init", "--bare", remote.to_str().unwrap()]);
+        sh.init();
+        sh.run("item add --title Work", AGENT);
+        let tracker = sh.path().join("tracker");
+        git(&tracker, &["remote", "add", "origin", "ssh://synthetic.invalid/repository"]);
+        let (started, _, _) = fetch_transport(&sh, &remote, &tracker, false, Some(refusal));
+        let local_before = git(&tracker, &["for-each-ref", "--format=%(refname) %(objectname)"]);
+        let remote_before = git(&remote, &["for-each-ref", "--format=%(refname) %(objectname)"]);
+        let (status, out) = sh.output("sync", AGENT);
+        assert_ne!(status, 0, "{refusal}: {out}");
+        assert!(started.exists(), "{refusal}: SSH ran");
+        assert!(!sh.path().join("ssh-prompted").exists(), "{refusal}: no prompt fallback");
+        assert_eq!(
+            git(&tracker, &["for-each-ref", "--format=%(refname) %(objectname)"]),
+            local_before
+        );
+        assert_eq!(
+            git(&remote, &["for-each-ref", "--format=%(refname) %(objectname)"]),
+            remote_before
+        );
+
+        // A new remote commit forces commit validation through the same failing transport.
+        let mut sh = Shell::new();
+        let (home, _) = code(&sh);
+        let mapped: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac"), ("HOME", &home)];
+        sh.init();
+        sh.run("repository add --name me/code --default-branch main", mapped);
+        sh.run(&format!("item add --id {} --title Ship", id("a1")), mapped);
+        let origin = sh.path().join("origin");
+        let clone = sh.path().join("clone");
+        git(&origin, &["commit", "-q", "--allow-empty", "-m", "merged after clone"]);
+        let commit = git(&origin, &["rev-parse", "HEAD"]);
+        let (started, _, _) = fetch_transport(&sh, &origin, &clone, false, Some(refusal));
+        let refs_before = git(&clone, &["for-each-ref", "--format=%(refname) %(objectname)"]);
+        let origin_refs_before =
+            git(&origin, &["for-each-ref", "--format=%(refname) %(objectname)"]);
+        let tracker = sh.path().join("tracker");
+        let tracker_refs_before =
+            git(&tracker, &["for-each-ref", "--format=%(refname) %(objectname)"]);
+        let (status, out) =
+            sh.output(&format!("item done Ship --force --commit me/code@{commit}"), mapped);
+        assert_eq!((status, &out["error"]["code"]), (1, &json!("unmerged")), "{out}");
+        assert_eq!(out["error"]["details"]["reason"], "fetch-failed", "{out}");
+        assert!(out["error"]["details"]["fetch_error"].as_str().is_some_and(|e| !e.is_empty()));
+        assert!(started.exists(), "{refusal}: SSH ran");
+        assert!(!sh.path().join("ssh-prompted").exists(), "{refusal}: no prompt fallback");
+        assert_eq!(
+            git(&clone, &["for-each-ref", "--format=%(refname) %(objectname)"]),
+            refs_before
+        );
+        assert_eq!(
+            git(&origin, &["for-each-ref", "--format=%(refname) %(objectname)"]),
+            origin_refs_before
+        );
+        assert_eq!(
+            git(&tracker, &["for-each-ref", "--format=%(refname) %(objectname)"]),
+            tracker_refs_before
+        );
+        let item = sh.output("item show Ship", mapped).1;
+        assert_eq!(item["data"][0]["state"], "open", "{item}");
+        assert!(item["data"][0]["evidence"].is_null(), "{item}");
+    }
+    complete_ssh_isolation_gate(TEST);
+}
+
+#[test]
+#[cfg(unix)]
+fn scratch_init_uses_batch_ssh_without_a_git_process() {
+    if std::env::var_os("ACYCLIC_SSH_CHILD").is_some() {
+        let destination = std::path::PathBuf::from(std::env::var_os("ACYCLIC_SSH_DEST").unwrap());
+        let args = [
+            "acyclic".into(),
+            "init".into(),
+            "--replica".into(),
+            "scratch".into(),
+            destination.clone().into_os_string(),
+            "--remote".into(),
+            "ssh://synthetic.invalid/repository".into(),
+        ];
+        let out = execute(args, &Env::from_process());
+        assert_ne!(out.code, 0, "the synthetic host refused authentication");
+        assert!(!destination.exists(), "refused init must not create its destination");
+        std::fs::write(std::env::var_os("ACYCLIC_SSH_CHILD_MARKER").unwrap(), "ran").unwrap();
+        return;
+    }
+
+    let dir = TempDir::new().unwrap();
+    let bin = dir.path().join("bin");
+    let home = dir.path().join("home");
+    let xdg = dir.path().join("xdg");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&xdg).unwrap();
+    let global_config = dir.path().join("empty-gitconfig");
+    std::fs::write(&global_config, "").unwrap();
+    let ssh_marker = dir.path().join("ssh-called");
+    let prompt_marker = dir.path().join("would-prompt");
+    let git_marker = dir.path().join("git-called");
+    let child_marker = dir.path().join("child-ran");
+    let destination = dir.path().join("not-created");
+    let ssh = format!(
+        "#!/bin/sh\n: > {}\nif [ \"${{1-}}\" != -oBatchMode=yes ]; then : > {}; exit 95; fi\nprintf '%s\\n' 'Permission denied (publickey).' >&2\nexit 255\n",
+        shell_quote(&ssh_marker),
+        shell_quote(&prompt_marker),
+    );
+    let git = format!("#!/bin/sh\n: > {}\nexit 96\n", shell_quote(&git_marker));
+    for (name, contents) in [("ssh", ssh), ("git", git)] {
+        let path = bin.join(name);
+        std::fs::write(&path, contents).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+    }
+    let executable = std::env::current_exe().unwrap();
+    let mut child = ChildGuard(Some(
+        std::process::Command::new(executable)
+            .args(["--exact", "tests::contract::scratch_init_uses_batch_ssh_without_a_git_process"])
+            .env_clear()
+            .env("ACYCLIC_SSH_CHILD", "1")
+            .env("ACYCLIC_SSH_DEST", &destination)
+            .env("ACYCLIC_SSH_CHILD_MARKER", &child_marker)
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", &xdg)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &global_config)
+            .env("PATH", &bin)
+            .spawn()
+            .unwrap(),
+    ));
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let status = loop {
+        if let Some(status) = child.0.as_mut().unwrap().try_wait().unwrap() {
+            break status;
+        }
+        assert!(Instant::now() < deadline, "scratch init child exceeded its deadline");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(status.success(), "scratch init child failed: {status}");
+    assert!(child_marker.exists(), "the child test ran");
+    assert!(ssh_marker.exists(), "the scratch config probe used SSH");
+    assert!(!prompt_marker.exists(), "the SSH call began in batch mode");
+    assert!(!git_marker.exists(), "the scratch config probe did not invoke Git");
+    assert!(!destination.exists(), "the refused init left no repository behind");
 }
 
 fn wait_for_file(path: &Path, timeout: Duration) -> bool {
@@ -1552,6 +1873,10 @@ fn an_originless_mapped_clone_records_unchecked_commit_evidence() {
 
 #[test]
 fn a_commit_fetch_does_not_hold_the_tracker_batch_lock() {
+    const TEST: &str = "tests::contract::a_commit_fetch_does_not_hold_the_tracker_batch_lock";
+    if !ssh_isolation_gate(TEST) {
+        return;
+    }
     let mut sh = Shell::new();
     let (home, _) = code(&sh);
     let mapped: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac"), ("HOME", &home)];
@@ -1564,7 +1889,7 @@ fn a_commit_fetch_does_not_hold_the_tracker_batch_lock() {
     let merged = git(&origin, &["rev-parse", "HEAD"]);
     git(&clone, &["fetch", "-q", "origin", &merged]);
     git(&clone, &["branch", "candidate", &merged]);
-    let (started, release, count) = fetch_transport(&sh, &origin, &clone, true);
+    let (started, release, count) = fetch_transport(&sh, &origin, &clone, true, None);
 
     let first_line = format!("item done Ship --force --commit me/code@{merged}");
     let first_env = sh.env(mapped);
@@ -1603,10 +1928,15 @@ fn a_commit_fetch_does_not_hold_the_tracker_batch_lock() {
     assert_eq!(second_after_release.expect("second writer should finish").code, 0);
     assert!(second_joined.is_some(), "second worker should exit after returning its result");
     assert_eq!(std::fs::read_to_string(count).unwrap(), "x", "one refresh per repository");
+    complete_ssh_isolation_gate(TEST);
 }
 
 #[test]
 fn a_clone_config_failure_after_preflight_requires_retry() {
+    const TEST: &str = "tests::contract::a_clone_config_failure_after_preflight_requires_retry";
+    if !ssh_isolation_gate(TEST) {
+        return;
+    }
     let mut sh = Shell::new();
     let (home, _) = code(&sh);
     let mapped: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac"), ("HOME", &home)];
@@ -1617,7 +1947,7 @@ fn a_clone_config_failure_after_preflight_requires_retry() {
     let clone = sh.path().join("clone");
     git(&origin, &["commit", "-q", "--allow-empty", "-m", "merged"]);
     let merged = git(&origin, &["rev-parse", "HEAD"]);
-    let (started, release, _) = fetch_transport(&sh, &origin, &clone, true);
+    let (started, release, _) = fetch_transport(&sh, &origin, &clone, true, None);
 
     let first_line = format!("item done Ship --force --commit me/code@{merged}");
     let first_env = sh.env(mapped);
@@ -1659,10 +1989,15 @@ fn a_clone_config_failure_after_preflight_requires_retry() {
     assert_eq!(first.code, 1, "{}", first.stdout);
     assert_eq!(first_output["error"]["code"], "changed-since");
     assert_eq!(first_output["error"]["details"]["reason"], "stale-preflight");
+    complete_ssh_isolation_gate(TEST);
 }
 
 #[test]
 fn an_import_checks_the_commits_it_writes_and_a_dry_run_too() {
+    const TEST: &str = "tests::contract::an_import_checks_the_commits_it_writes_and_a_dry_run_too";
+    if !ssh_isolation_gate(TEST) {
+        return;
+    }
     let mut sh = Shell::new();
     let (home, work) = code(&sh);
     let mapped: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac"), ("HOME", &home)];
@@ -1694,7 +2029,7 @@ fn an_import_checks_the_commits_it_writes_and_a_dry_run_too() {
     let first = git(&origin, &["rev-parse", "HEAD"]);
     git(&origin, &["commit", "-q", "--allow-empty", "-m", "merged two"]);
     let second = git(&origin, &["rev-parse", "HEAD"]);
-    let (_, release, count) = fetch_transport(&sh, &origin, &clone, false);
+    let (_, release, count) = fetch_transport(&sh, &origin, &clone, false, None);
     std::fs::write(release, "release").unwrap();
     let document = json!({
         "format": "acyclic-import", "version": 4,
@@ -1710,4 +2045,5 @@ fn an_import_checks_the_commits_it_writes_and_a_dry_run_too() {
     let (code, out) = sh.output("import plan.json", mapped);
     assert_eq!(code, 0, "{out}");
     assert_eq!(std::fs::read_to_string(count).unwrap(), "x", "one refresh for both commits");
+    complete_ssh_isolation_gate(TEST);
 }

@@ -6,7 +6,7 @@ readme = "README.md"
 license.workspace = true
 
 [dependencies]
-gix = { git = "https://github.com/iExalt/gitoxide", tag = "gitoxide-fork-v0.4.1", default-features = false, features = [
+gix = { git = "https://github.com/iExalt/gitoxide", rev = "7300dcd7fdf8e9d6e52606195ecf0c2861a3304e", default-features = false, features = [
   "sha1", "sha256", "reftable", "zlib-sirocco", "revision", "parallel", "hook", "maintenance",
   "blocking-network-client", "blocking-http-transport-reqwest-rust-tls-ring", "receive", "upload",
 ] }
