@@ -37,6 +37,14 @@ fn parse_id(text: &str) -> Result<gix::ObjectId, StoreError> {
 /// Finds the repository from the path alone, as `git -C <path>` does, taking no repository or settings from the
 /// environment, and without reflogs for the tracker's refs.
 fn discover(path: &Path) -> Result<gix::ThreadSafeRepository, String> {
+    discover_with_config(path, false)
+}
+
+/// Open a repository with strict configuration parsing when a decision depends on proving its configuration is valid.
+fn discover_with_config(
+    path: &Path,
+    strict_config: bool,
+) -> Result<gix::ThreadSafeRepository, String> {
     let overrides = || {
         let mut overrides: Vec<String> = vec![
             "core.logAllRefUpdates=false".into(),
@@ -54,7 +62,10 @@ fn discover(path: &Path) -> Result<gix::ThreadSafeRepository, String> {
         overrides
     };
     let options = || {
-        gix::open::Options::default().ignore_repository_environment(true).cli_overrides(overrides())
+        gix::open::Options::default()
+            .ignore_repository_environment(true)
+            .strict_config(strict_config)
+            .cli_overrides(overrides())
     };
     let mapping = gix::sec::trust::Mapping { full: options(), reduced: options() };
     gix::ThreadSafeRepository::discover_opts(
@@ -63,6 +74,15 @@ fn discover(path: &Path) -> Result<gix::ThreadSafeRepository, String> {
         mapping,
     )
     .map_err(|e| format!("can't open {}: {}", path.display(), describe(&e)))
+}
+
+fn config_has_sectionless_values(config: &gix::config::File) -> bool {
+    use gix::config::parse::EventRef::SectionValueName;
+
+    config.frontmatter().into_iter().flatten().any(|event| matches!(event, SectionValueName(_)))
+        || config.sections_and_postmatter().any(|(_, postmatter)| {
+            postmatter.into_iter().any(|event| matches!(event, SectionValueName(_)))
+        })
 }
 
 /// Where Git keeps its helpers on a Mac, which `gix` can't ask `git` for: the first of these that holds the keychain
@@ -134,6 +154,29 @@ impl Git {
         let id = found.peel_to_id().map_err(failed)?.detach();
         let header = repo.find_header(id).map_err(failed)?;
         Ok((header.kind() == gix::object::Kind::Commit).then(|| id.to_string()))
+    }
+
+    /// Whether no exact default refs or origin remote are configured, using one fresh, strict repository snapshot.
+    pub(crate) fn is_originless_without_default_refs(
+        &self,
+        refs: [&str; 2],
+    ) -> Result<bool, StoreError> {
+        let repo =
+            discover_with_config(&self.repo, true).map_err(StoreError::Git)?.to_thread_local();
+        let snapshot = repo.config_snapshot();
+        if config_has_sectionless_values(snapshot.plumbing()) {
+            return Err(StoreError::Git("configuration has values outside a section".to_owned()));
+        }
+        let remote_ref_absent = repo.try_find_reference(refs[0]).map_err(failed)?.is_none();
+        let local_ref_absent = repo.try_find_reference(refs[1]).map_err(failed)?.is_none();
+        let origin_absent = match repo.try_find_remote("origin") {
+            None => true,
+            Some(found) => {
+                found.map_err(failed)?;
+                false
+            },
+        };
+        Ok(remote_ref_absent && local_ref_absent && origin_absent)
     }
 
     /// Refs under a prefix with their object ids.

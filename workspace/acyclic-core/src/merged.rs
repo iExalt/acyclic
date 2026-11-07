@@ -19,12 +19,14 @@ pub trait Ancestry {
     fn merged(&self, repository: &Repository, commit: &str) -> Result<bool, String>;
 }
 
+type BranchCache = BTreeMap<(PathBuf, String), Result<Option<Branch>, String>>;
+
 /// Checks ancestry in local code clones, as they were last fetched. Each clone's default branch is looked up once,
 /// with its latest commits, so a batch with many commits walks each branch once. Make one for each batch: it doesn't
 /// see a branch move after its first look, except through [`refresh`](GitAncestry::refresh).
 pub struct GitAncestry<F> {
     clone_of: F,
-    branches: RefCell<BTreeMap<(PathBuf, String), Result<Branch, String>>>,
+    branches: RefCell<BranchCache>,
 }
 
 /// A clone's default branch: the ref it is read from, and its latest commits, sorted.
@@ -46,16 +48,27 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
 
 impl Branch {
     /// The ref `clone` reads `branch` from, and its latest commits.
-    fn of(clone: &Path, branch: &str) -> Result<Self, String> {
+    /// Returns `None` only when both exact refs are absent and no `origin` remote is configured.
+    fn of(clone: &Path, branch: &str) -> Result<Option<Self>, String> {
         let git = Git::new(clone);
         let target = [format!("refs/remotes/origin/{branch}"), format!("refs/heads/{branch}")]
             .into_iter()
-            .find_map(|candidate| git.resolve(&candidate).ok().flatten())
-            .ok_or_else(|| format!("the clone has no {branch} branch"))?;
+            .find_map(|candidate| git.resolve(&candidate).ok().flatten());
+        let Some(target) = target else {
+            let remote_ref = format!("refs/remotes/origin/{branch}");
+            let local_ref = format!("refs/heads/{branch}");
+            if git
+                .is_originless_without_default_refs([&remote_ref, &local_ref])
+                .map_err(|error| error.to_string())?
+            {
+                return Ok(None);
+            }
+            return Err(format!("the clone has no {branch} branch"));
+        };
         // Without them, every commit is checked on its own, which is slower but no less right.
         let mut commits = git.recent_commits(&target, LATEST).unwrap_or_default();
         commits.sort_unstable();
-        Ok(Self { target, commits, git })
+        Ok(Some(Self { target, commits, git }))
     }
 
     /// The commit `commit` names, in full: an abbreviated id as git names it, so one that names no commit, or several,
@@ -76,7 +89,8 @@ pub enum Check {
     UnknownCommit,
     /// The clone has no default branch to look in, as before its first fetch of it; the reason says so.
     NoBranch(String),
-    /// Can't be checked on this machine, and why: no clone mapped, no single default branch, or git failing.
+    /// Can't be checked on this machine, such as with no clone, no single default branch, an originless clone without
+    /// default refs, or a Git failure.
     Unchecked(String),
 }
 
@@ -98,7 +112,12 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
             .entry((clone.clone(), branch.to_owned()))
             .or_insert_with(|| Branch::of(&clone, branch))
         {
-            Ok(found) => found,
+            Ok(Some(found)) => found,
+            Ok(None) => {
+                return Check::Unchecked(format!(
+                    "the clone has neither an origin remote nor refs for default branch {branch}"
+                ));
+            },
             Err(reason) => return Check::NoBranch(reason.clone()),
         };
         // An id the clone has no object for is unknown: a typo, or a commit it hasn't fetched.

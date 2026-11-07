@@ -1521,6 +1521,36 @@ fn a_commit_is_checked_when_it_is_written_and_never_when_read() {
 }
 
 #[test]
+fn an_originless_mapped_clone_records_unchecked_commit_evidence() {
+    let mut sh = Shell::new();
+    let (home, work) = code(&sh);
+    let mapped: &[(&str, &str)] = &[("ACYCLIC_ACTOR", "session/mac"), ("HOME", &home)];
+    sh.init();
+    sh.run("repository add --name me/code --default-branch main", mapped);
+    sh.run(&format!("item add --id {} --title Ship", id("a1")), mapped);
+
+    let clone = sh.path().join("clone");
+    git(&clone, &["update-ref", "-d", "refs/remotes/origin/main"]);
+    git(&clone, &["remote", "remove", "origin"]);
+    git(&clone, &["branch", "-D", "main"]);
+
+    let (code, out) = sh.output(&format!("item done Ship --force --commit me/code@{work}"), mapped);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        out["data"]["unchecked_commits"][0],
+        json!({
+            "item": id("a1"),
+            "repository": "me/code",
+            "commit": work,
+            "reason": "the clone has neither an origin remote nor refs for default branch main"
+        })
+    );
+
+    let doctor = sh.output("doctor", mapped).1;
+    assert_eq!(doctor["data"]["commits"], json!({"checked": 0, "unchecked": 1, "unmerged": []}));
+}
+
+#[test]
 fn a_commit_fetch_does_not_hold_the_tracker_batch_lock() {
     let mut sh = Shell::new();
     let (home, _) = code(&sh);
