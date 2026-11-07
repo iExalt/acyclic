@@ -1061,13 +1061,13 @@ const floorOf = (core: Core): number => (core.scratch("floor") as number | undef
  * Lets the Map zoom out until the whole plan fits it, and no further: the wheel stops there and a pinch is held there
  * (see the viewport listener); a zoom already further out stays until moved.
  */
-function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
+export function zoomOutTo(core: Core, element: HTMLElement, placed: Placed) {
   const fit = Math.min(
     element.clientWidth / Math.max(1, placed.width),
     element.clientHeight / Math.max(1, placed.height),
   );
   const floor = Math.min(1, fit * 0.9);
-  core.scratch("floor", floor);
+  if (core.scratch("floor") !== floor) core.scratch("floor", floor);
   core.minZoom(floor * PINCH_SLACK);
 }
 
