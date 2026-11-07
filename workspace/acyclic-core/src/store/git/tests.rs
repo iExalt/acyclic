@@ -11,6 +11,41 @@ use tempfile::TempDir;
 
 use super::{Git, NewCommit};
 
+#[test]
+fn sectionless_config_values_only_block_the_originless_exemption() {
+    let parses = |text: &str| {
+        gix::config::File::from_bytes_no_includes(
+            text.as_bytes(),
+            gix::config::file::Metadata::api(),
+            gix::config::file::init::Options::default(),
+        )
+        .expect("the config fixture parses")
+    };
+
+    assert!(!super::config_has_sectionless_values(&parses("# comment\n \n")));
+    assert!(!super::config_has_sectionless_values(&parses(
+        "[core]\nrepositoryformatversion = 0\n"
+    )));
+    assert!(super::config_has_sectionless_values(&parses(
+        "key = value\n[core]\nrepositoryformatversion = 0\n"
+    )));
+    assert!(!super::config_has_sectionless_values(&parses(
+        "[core]\nrepositoryformatversion = 0\nkey = value\n"
+    )));
+
+    let mut with_section = parses("[core]\nrepositoryformatversion = 0\n");
+    with_section
+        .append(parses("key = value\n[core]\nrepositoryformatversion = 0\n"))
+        .expect("the parsed config appends");
+    assert!(super::config_has_sectionless_values(&with_section));
+
+    let mut with_comments = parses("[core]\nrepositoryformatversion = 0\n");
+    with_comments
+        .append(parses("# comment\n \n[core]\nrepositoryformatversion = 0\n"))
+        .expect("the parsed config appends");
+    assert!(!super::config_has_sectionless_values(&with_comments));
+}
+
 type Files = BTreeMap<String, Option<Vec<u8>>>;
 
 /// Git in `dir`, away from the machine's configuration; its trimmed output.

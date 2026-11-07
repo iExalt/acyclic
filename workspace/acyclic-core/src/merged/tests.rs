@@ -52,7 +52,7 @@ fn git_finds_a_commit_on_the_default_branch_of_a_clone_or_its_remote() {
     let ancestry = GitAncestry::new(|_: &Repository| Some(code.clone()));
     assert_eq!(
         ancestry.merged(&record("trunk"), &base),
-        Err("the clone has no trunk branch".to_owned())
+        Err("the clone has neither an origin remote nor refs for default branch trunk".to_owned())
     );
 
     git(&code, &["merge", "-q", "--ff-only", "feature"]);
@@ -63,6 +63,90 @@ fn git_finds_a_commit_on_the_default_branch_of_a_clone_or_its_remote() {
     git(&clone, &["update-ref", "refs/remotes/origin/main", "refs/heads/main"]);
     git(&clone, &["update-ref", "-d", "refs/heads/main"]);
     assert_eq!(merged(&clone, &work), Ok(true));
+}
+
+#[test]
+fn an_originless_clone_without_default_refs_is_unchecked_but_a_local_branch_still_checks() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let origin = dir.path().join("origin");
+    git(dir.path(), &["init", "-q", "-b", "main", origin.to_str().unwrap()]);
+    git(&origin, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    let base = git(&origin, &["rev-parse", "HEAD"]);
+    let clone = dir.path().join("clone");
+    git(dir.path(), &["clone", "-q", origin.to_str().unwrap(), clone.to_str().unwrap()]);
+    git(&clone, &["switch", "-q", "-c", "work"]);
+
+    git(&clone, &["remote", "remove", "origin"]);
+    let config_path = clone.join(".git/config");
+    let initial_config = std::fs::read(&config_path).unwrap();
+    std::fs::write(&config_path, "not a valid git config = [\n").unwrap();
+    let record = Repository {
+        id: "code".to_owned(),
+        owner: Value::None,
+        name: Value::None,
+        default_branch: Value::One("main".to_owned()),
+    };
+    let ancestry = GitAncestry::new(|_: &Repository| Some(clone.clone()));
+    assert_eq!(
+        ancestry.check(&record, &base),
+        Check::Merged,
+        "a local default branch still counts"
+    );
+
+    std::fs::write(&config_path, initial_config).unwrap();
+    git(&clone, &["branch", "-D", "main"]);
+    std::fs::write(&config_path, "# comments and whitespace are harmless\n \n").unwrap();
+    let without_refs = GitAncestry::new(|_: &Repository| Some(clone.clone()));
+    assert_eq!(
+        without_refs.check(&record, &base),
+        Check::Unchecked(
+            "the clone has neither an origin remote nor refs for default branch main".to_owned()
+        )
+    );
+}
+
+#[test]
+fn noncommit_refs_configured_remotes_and_invalid_config_never_look_originless() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let clone = dir.path().join("clone");
+    git(dir.path(), &["init", "-q", "-b", "main", clone.to_str().unwrap()]);
+    git(&clone, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    git(&clone, &["switch", "-q", "-c", "work"]);
+    git(&clone, &["branch", "-D", "main"]);
+    let config_path = clone.join(".git/config");
+    let initial_config = std::fs::read_to_string(&config_path).unwrap();
+    let record = Repository {
+        id: "code".to_owned(),
+        owner: Value::None,
+        name: Value::None,
+        default_branch: Value::One("main".to_owned()),
+    };
+    let check =
+        || GitAncestry::new(|_: &Repository| Some(clone.clone())).check(&record, &"ab".repeat(20));
+
+    let tree = git(&clone, &["mktree"]);
+    git(&clone, &["update-ref", "refs/remotes/origin/main", &tree]);
+    assert!(matches!(check(), Check::NoBranch(_)), "a noncommit exact ref is not absent");
+    git(&clone, &["update-ref", "-d", "refs/remotes/origin/main"]);
+
+    git(&clone, &["config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+    assert!(matches!(check(), Check::NoBranch(_)), "an origin without a URL is not absent");
+
+    std::fs::write(&config_path, initial_config).unwrap();
+    std::fs::create_dir_all(clone.join(".git/refs/remotes/origin")).unwrap();
+    std::fs::write(clone.join(".git/refs/remotes/origin/main"), "not-a-valid-object-id\n").unwrap();
+    assert!(matches!(check(), Check::NoBranch(_)), "a corrupt exact ref is not absent");
+
+    std::fs::remove_file(clone.join(".git/refs/remotes/origin/main")).unwrap();
+    std::fs::write(&config_path, "not a valid git config = [\n").unwrap();
+    assert!(matches!(check(), Check::NoBranch(_)), "invalid repository config is not absent");
+
+    std::fs::write(&config_path, "[unterminated\n").unwrap();
+    assert!(matches!(check(), Check::NoBranch(_)), "a malformed header is not absent");
+
+    std::fs::remove_file(&config_path).unwrap();
+    std::fs::create_dir(&config_path).unwrap();
+    assert!(matches!(check(), Check::NoBranch(_)), "a config read failure is not absence");
 }
 
 #[test]
