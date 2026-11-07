@@ -252,6 +252,15 @@ pub enum Outcome {
     },
 }
 
+/// What local storage compaction changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Compacted {
+    /// The replacement state commit, when a non-parentless state history was squashed.
+    pub squashed: Option<String>,
+    /// Audit files removed by pruning. Compaction currently preserves every audit event, so this is empty.
+    pub pruned: Vec<String>,
+}
+
 /// A tracker repository opened as one replica.
 #[derive(Debug)]
 pub struct Tracker {
@@ -570,6 +579,37 @@ impl Tracker {
         };
         init_replica(path, &fresh)?;
         Ok((tracker(git, fresh.clone(), true, None), Some(fresh)))
+    }
+
+    /// Whether this replica's state has at least 1,000 commits on its first-parent chain.
+    ///
+    /// This is a bounded local check; it neither fetches nor scans audit history.
+    ///
+    /// # Errors
+    ///
+    /// Fails when Git cannot read the local state history.
+    pub fn compaction_due(&self) -> Result<bool, StoreError> {
+        self.compaction_due_at_least(1_000)
+    }
+
+    fn compaction_due_at_least(&self, minimum: usize) -> Result<bool, StoreError> {
+        let Some(tip) = self.git.resolve(&state_ref(&self.replica))? else {
+            return Ok(false);
+        };
+        self.git.first_parent_commits_at_least(&tip, minimum)
+    }
+
+    /// Conservatively prunes eligible storage and squashes this replica's local state history.
+    ///
+    /// Audit history is retained in full. A later sync propagates the local squash to peers.
+    ///
+    /// # Errors
+    ///
+    /// Fails when Git cannot read or update the local refs.
+    pub fn compact(&self, now: Millis) -> Result<Compacted, StoreError> {
+        let pruned = self.prune(now, &|_| None, &|_, _| false)?;
+        let squashed = self.squash()?;
+        Ok(Compacted { squashed, pruned })
     }
 
     /// Sets how old a lock on this replica's own refs must be before a writer removes it, for tests that need a short one.
@@ -1239,6 +1279,9 @@ impl Tracker {
         let Some(tip) = self.git.resolve(&state_ref(&self.replica))? else {
             return Ok(None);
         };
+        if !self.git.first_parent_commits_at_least(&tip, 2)? {
+            return Ok(None);
+        }
         let tree = self.git.tree_of(&tip)?;
         let seconds = self.git.commit_seconds(&tip)?;
         let commit = self.git.commit(&tree, None, self.replica.as_str(), seconds, "squash")?;

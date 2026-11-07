@@ -224,6 +224,31 @@ impl Git {
         Ok(commit.time().map_or(0, |time| time.seconds))
     }
 
+    /// Whether `tip` has at least `minimum` commits following only first parents.
+    /// Reads no more than `minimum` commits.
+    pub(crate) fn first_parent_commits_at_least(
+        &self,
+        tip: &str,
+        minimum: usize,
+    ) -> Result<bool, StoreError> {
+        if minimum == 0 {
+            return Ok(true);
+        }
+        let repo = self.handle()?;
+        let mut current = parse_id(tip)?;
+        for count in 0..minimum {
+            let commit = repo.find_commit(current).map_err(failed)?;
+            if count + 1 == minimum {
+                return Ok(true);
+            }
+            let Some(parent) = commit.parent_ids().next() else {
+                return Ok(false);
+            };
+            current = parent.detach();
+        }
+        Ok(true)
+    }
+
     /// The repository's common Git directory, shared by its worktrees.
     pub(crate) fn common_dir(&self) -> Result<PathBuf, StoreError> {
         Ok(self.handle()?.common_dir().to_owned())
