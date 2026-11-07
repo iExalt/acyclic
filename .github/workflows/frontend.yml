@@ -1,0 +1,68 @@
+name: Frontend artifact
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The source commit or tag to build; defaults to the caller's checkout
+        type: string
+        default: ""
+    outputs:
+      artifact-id:
+        description: The immutable same-run complete frontend artifact
+        value: ${{ jobs.frontend.outputs.artifact-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      MISE_DISABLE_TOOLS: rust,python,uv,ruff,cargo:cargo-edit,cargo:cargo-generate,github:nextest-rs/nextest,aqua:gitleaks/gitleaks,aqua:rvben/rumdl,github:EmbarkStudios/cargo-about,aqua:rhysd/actionlint,aqua:koalaman/shellcheck
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        with:
+          install_args: node pnpm
+      - name: Require defining workflow identity
+        id: tooling
+        env:
+          JOB_CONTEXT: ${{ toJSON(job) }}
+        run: |
+          repository=$(jq -er '.workflow_repository | select(type == "string")' <<< "$JOB_CONTEXT")
+          revision=$(jq -er '.workflow_sha | select(type == "string")' <<< "$JOB_CONTEXT")
+          [[ "$repository" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - name: Check out the defining workflow's tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.tooling.outputs.repository }}
+          ref: ${{ steps.tooling.outputs.revision }}
+          path: .build-tooling
+          persist-credentials: false
+      - id: pnpm
+        run: echo "store=$(pnpm --dir workspace/acyclic-app store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('workspace/acyclic-app/pnpm-lock.yaml') }}
+      - name: Check the artifact boundary and workflow failure paths
+        run: node --test .build-tooling/scripts/frontend-artifact.test.mjs .build-tooling/scripts/build-workflow.test.mjs
+      - run: mise run build:app
+      - name: Bind the complete frontend to this source and toolchain
+        run: node .build-tooling/scripts/frontend-artifact.mjs create "$GITHUB_WORKSPACE" "$RUNNER_TEMP/frontend-artifact"
+      - id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/frontend-artifact/
+          include-hidden-files: true
+          if-no-files-found: error
