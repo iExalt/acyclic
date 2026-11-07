@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  anchorPan,
   firstOf,
   firstView,
   fitAll,
@@ -15,6 +16,23 @@ import {
   startOf,
   uncovered,
 } from "./reveal";
+
+describe("anchorPan", () => {
+  it("keeps the rendered corner fixed after a layout shift at non-unit zoom", () => {
+    const zoom = 1.5;
+    const pan = { x: 20, y: -10 };
+    const render = (point: { x: number; y: number }) => ({ x: point.x * zoom + pan.x, y: point.y * zoom + pan.y });
+    const was = render({ x: 80, y: 40 });
+    const now = render({ x: 60, y: 70 });
+    const compensate = anchorPan(was, now);
+
+    expect({ x: now.x + compensate.x, y: now.y + compensate.y }).toEqual(was);
+  });
+
+  it("does not pan when the anchored corner did not move", () => {
+    expect(anchorPan({ x: 31, y: 42 }, { x: 31, y: 42 })).toEqual({ x: 0, y: 0 });
+  });
+});
 
 describe("focusReveal", () => {
   it.each([
