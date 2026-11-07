@@ -2,7 +2,6 @@
 
 use std::fmt;
 
-use acyclic_core::delete::DeleteError;
 use acyclic_core::import::{ApplyError, ParseError, ValidationError};
 use acyclic_core::locate::LocateError;
 use acyclic_core::model::WriteError;
@@ -114,7 +113,17 @@ impl From<WriteError> for CliError {
         match err {
             WriteError::State(err) => err.into(),
             WriteError::InvalidName(_) => Self::new("invalid-name", exit::USAGE, message),
-            WriteError::NoItem(_) => Self::new("not-found", exit::NOT_FOUND, message),
+            WriteError::NoItem(_) | WriteError::NoThread(_) | WriteError::NoInitiative(_) => {
+                Self::new("not-found", exit::NOT_FOUND, message)
+            },
+            WriteError::InUse { item, reasons } => {
+                Self::refused("in-use", message).with(json!({"item": item, "reasons": reasons}))
+            },
+            WriteError::InitiativeInUse { initiative, reasons } => Self::refused("in-use", message)
+                .with(json!({"initiative": initiative, "reasons": reasons})),
+            WriteError::ThreadInUse { thread, reasons } => {
+                Self::refused("in-use", message).with(json!({"thread": thread, "reasons": reasons}))
+            },
             WriteError::Deleted(_) => Self::refused("deleted", message),
             WriteError::ParentCycle(_) => Self::refused("parent-cycle", message),
             WriteError::WaitsForCycle(path) => {
@@ -147,28 +156,6 @@ impl From<BatchError<CliError>> for CliError {
         match err {
             BatchError::Store(err) => err.into(),
             BatchError::Apply(err) => err,
-        }
-    }
-}
-
-impl From<DeleteError> for CliError {
-    fn from(err: DeleteError) -> Self {
-        let message = err.to_string();
-        match err {
-            DeleteError::Write(err) => err.into(),
-            DeleteError::InUse { item, reasons } => {
-                Self::refused("in-use", message).with(json!({"item": item, "reasons": reasons}))
-            },
-            DeleteError::NoThread(_) | DeleteError::NoInitiative(_) => {
-                Self::new("not-found", exit::NOT_FOUND, message)
-            },
-            DeleteError::InitiativeInUse { initiative, reasons } => {
-                Self::refused("in-use", message)
-                    .with(json!({"initiative": initiative, "reasons": reasons}))
-            },
-            DeleteError::ThreadInUse { thread, reasons } => {
-                Self::refused("in-use", message).with(json!({"thread": thread, "reasons": reasons}))
-            },
         }
     }
 }

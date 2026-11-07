@@ -388,8 +388,9 @@ fn a_refusal_reads_as_the_cli_has_always_told_it_and_names_every_violation() {
     );
     edit_item(&mut r, "p", &waits("o"), USER_BY).unwrap();
     let back = waits("p");
+    // p's wait is inherited by leaf c, so the effective cycle is c and o.
     let err = edit_item(&mut r, "o", &back, USER_BY).unwrap_err();
-    assert_eq!((err.code, err.details.clone()), ("waits-for-cycle", json!({"items": ["o", "p"]})));
+    assert_eq!((err.code, err.details.clone()), ("waits-for-cycle", json!({"items": ["c", "o"]})));
     // Several at once: the one naming nothing speaks first, and every one is listed.
     let both = ItemFields { thread: Change::Set("nowhere".into()), ..back };
     let err = edit_item(&mut r, "o", &both, USER_BY).unwrap_err();

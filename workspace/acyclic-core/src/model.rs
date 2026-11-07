@@ -923,8 +923,33 @@ pub enum WriteError {
     InvalidName(String),
     /// The item doesn't exist.
     NoItem(String),
+    /// The item is in use and can't be deleted.
+    InUse {
+        /// The item.
+        item: String,
+        /// Why not.
+        reasons: Vec<crate::delete::Reason>,
+    },
     /// The item or thread was deleted, and its id isn't used again.
     Deleted(String),
+    /// No such initiative, or it was deleted.
+    NoInitiative(String),
+    /// The initiative holds items and can't be deleted.
+    InitiativeInUse {
+        /// The initiative.
+        initiative: String,
+        /// Why not.
+        reasons: Vec<crate::delete::Reason>,
+    },
+    /// No such thread, or it was deleted.
+    NoThread(String),
+    /// The thread is in use and can't be deleted.
+    ThreadInUse {
+        /// The thread.
+        thread: String,
+        /// Why not.
+        reasons: Vec<crate::delete::Reason>,
+    },
     /// The write would put an item under itself or its own descendant.
     ParentCycle(String),
     /// The link would close a cycle of waits-for links, through these items.
@@ -942,7 +967,14 @@ impl fmt::Display for WriteError {
                 "{name:?} is not a valid name: use at most {MAX_ID_LEN} lowercase letters, digits, '-', '_' or '.'"
             ),
             Self::NoItem(id) => write!(f, "no item {id}"),
+            Self::InUse { item, reasons }
+            | Self::ThreadInUse { thread: item, reasons }
+            | Self::InitiativeInUse { initiative: item, reasons } => {
+                write!(f, "{item} can't be deleted: {}", crate::say::list(reasons, "; "))
+            },
             Self::Deleted(id) => write!(f, "{id} was deleted, and its id isn't used again"),
+            Self::NoInitiative(id) => write!(f, "no initiative {id}"),
+            Self::NoThread(id) => write!(f, "no thread {id}"),
             Self::ParentCycle(id) => write!(f, "{id} can't go under itself or its own descendant"),
             Self::WaitsForCycle(path) => {
                 write!(f, "the link would close a cycle through {}", path.join(", "))

@@ -30,7 +30,7 @@ fn with_items(ids: &[&str]) -> Replica {
 
 fn refusal(r: &mut Replica, id: &str, by: By<'_>) -> Vec<String> {
     match delete_item(r, id, by) {
-        Err(DeleteError::InUse { reasons, .. }) => reasons
+        Err(WriteError::InUse { reasons, .. }) => reasons
             .into_iter()
             .map(|reason| serde_json::to_value(reason).unwrap()["why"].as_str().unwrap().to_owned())
             .collect(),
@@ -71,14 +71,11 @@ fn only_an_item_nothing_refers_to_is_deleted() {
     let message = delete_item(&mut r, "a", user(NOW)).unwrap_err().to_string();
     assert_eq!(message, "a can't be deleted: a waits-for b");
     // The details name a link's kind as the command line does.
-    let Err(DeleteError::InUse { reasons, .. }) = delete_item(&mut r, "a", user(NOW)) else {
+    let Err(WriteError::InUse { reasons, .. }) = delete_item(&mut r, "a", user(NOW)) else {
         panic!("in use")
     };
     assert_eq!(serde_json::to_value(&reasons).unwrap()[0]["kind"], "waits-for");
-    assert!(matches!(
-        delete_item(&mut r, "nope", user(NOW)),
-        Err(DeleteError::Write(WriteError::NoItem(_)))
-    ));
+    assert!(matches!(delete_item(&mut r, "nope", user(NOW)), Err(WriteError::NoItem(_))));
     // A claim that has lapsed no longer holds it.
     assert_eq!(delete_item(&mut r, "claimed", user(NOW + 61_000)), Ok(true));
     assert_eq!(delete_item(&mut r, "free", user(NOW)), Ok(true));
@@ -186,7 +183,7 @@ fn a_thread_is_deleted_only_with_no_members_and_no_live_claim() {
         .unwrap();
     claim::claim(&mut r, "u", USER, NOW, (60_000, 480 * 60_000), false).unwrap();
     let why = |r: &mut Replica, id: &str| match delete_thread(r, id, user(NOW)) {
-        Err(DeleteError::ThreadInUse { reasons, .. }) => reasons
+        Err(WriteError::ThreadInUse { reasons, .. }) => reasons
             .into_iter()
             .map(|reason| serde_json::to_value(reason).unwrap()["why"].as_str().unwrap().to_owned())
             .collect(),
@@ -199,7 +196,7 @@ fn a_thread_is_deleted_only_with_no_members_and_no_live_claim() {
     assert_eq!(delete_thread(&mut r, "u", user(NOW)), Ok(true));
     assert!(!Model::read(&r.state).unwrap().threads.contains_key("u"));
     assert_eq!(delete_thread(&mut r, "u", user(NOW)), Ok(false), "deleting again writes nothing");
-    assert_eq!(delete_thread(&mut r, "v", user(NOW)), Err(DeleteError::NoThread("v".into())));
+    assert_eq!(delete_thread(&mut r, "v", user(NOW)), Err(WriteError::NoThread("v".into())));
 }
 
 #[test]
@@ -209,7 +206,7 @@ fn a_tasks_thread_of_one_is_never_deleted_but_deleting_the_task_lets_its_own_cla
     claim::claim(&mut r, &one, "actor/user", 5, (10_000, 10_000), true).unwrap();
     // Not while the task is in it, nor once it is empty: a tombstone would make the task unclaimable.
     let refused =
-        Err(DeleteError::ThreadInUse { thread: one.clone(), reasons: vec![Reason::TaskThread] });
+        Err(WriteError::ThreadInUse { thread: one.clone(), reasons: vec![Reason::TaskThread] });
     assert_eq!(delete_thread(&mut r, &one, user(6)), refused);
     assert!(delete_item(&mut r, "x", user(6)).unwrap());
     assert_eq!(delete_thread(&mut r, &one, user(6)), refused);
@@ -246,7 +243,7 @@ fn an_initiative_is_deleted_only_while_no_item_is_under_it_and_its_tombstone_is_
     let refused = delete_initiative(&mut r, "init", user(3));
     assert_eq!(
         refused,
-        Err(DeleteError::InitiativeInUse {
+        Err(WriteError::InitiativeInUse {
             initiative: "init".into(),
             reasons: vec![Reason::HoldsItems { items: vec!["a".into()] }],
         })
@@ -259,7 +256,7 @@ fn an_initiative_is_deleted_only_while_no_item_is_under_it_and_its_tombstone_is_
     assert_eq!(delete_initiative(&mut r, "init", user(5)), Ok(false));
     assert_eq!(
         delete_initiative(&mut r, "nowhere", user(5)),
-        Err(DeleteError::NoInitiative("nowhere".into()))
+        Err(WriteError::NoInitiative("nowhere".into()))
     );
     let model = Model::read(&r.state).unwrap();
     assert!(!model.initiatives.contains_key("init") && model.initiatives.contains_key("other"));

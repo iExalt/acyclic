@@ -35,8 +35,10 @@ expression: table
 2 invalid-id
 1 import-cycle
 1 internal
+3 not-found
 1 in-use
 3 not-found
+1 in-use
 1 not-ready
 1 changed-since
 1 already-exists
