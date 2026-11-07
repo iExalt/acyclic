@@ -16,6 +16,11 @@ export interface RevealIntent {
   picked: boolean;
 }
 
+/** The rendered-pixel pan that keeps an anchored corner at its prior screen position. */
+export function anchorPan(was: { x: number; y: number }, now: { x: number; y: number }): { x: number; y: number } {
+  return { x: was.x - now.x, y: was.y - now.y };
+}
+
 /** How a selection should be brought into view once its prior-frame purpose is known. */
 export function focusReveal(focus: { id: string; pin: string | null }, preserveFrame: boolean): RevealIntent {
   const picked = focus.pin === null && !preserveFrame;

@@ -1977,10 +1977,9 @@ def map_journey(page, view, plan, name, failures, hint=None):
                 f"{name}: a wheel notch zoomed the Map by {ratio:.3f}, not 1.12"
             )
     # Expand a box inside a root, then collapse it again: the count follows, and the root holds still on screen, as
-    # DESIGN.md has it, though the box may move inside it. Only a box the layout moves shows the screen holds at the
-    # root, not at the box, so boxes are tried, biggest first, until one has moved. The pan that holds the root still
-    # knows nothing of the screen's size or of touch, so the phone, which finds the box first, only taps; the desktop,
-    # starting from the box it found, measures that its root held still.
+    # DESIGN.md has it, though the box may move inside it. A top-level box can already stay put through layout alone,
+    # so this journey's root check does not prove the camera anchor ran. It tries boxes the layout moves, biggest first;
+    # the phone only taps the first one, while the desktop also measures that the root held still.
     still = not view.get("has_touch")
     corner = "(m, id) => { const b = m.cy.getElementById(id).boundingBox({ includeLabels: false }); return [b.x1, b.y1]; }"
     moved, box, checked = 0, None, False

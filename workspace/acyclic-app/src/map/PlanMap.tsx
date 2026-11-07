@@ -21,6 +21,7 @@ import type { Placed } from "./layout";
 import { buildModel, type Crossing, collapsedWith, type Model, sourceKey, topOf, type View, visible } from "./model";
 import { busy, subscribe, track } from "./motion";
 import {
+  anchorPan,
   firstView,
   fitAll,
   fitPlan,
@@ -731,7 +732,7 @@ export default function PlanMap({
         const box = core.getElementById(anchor.current.id);
         if (box.nonempty()) {
           const now = settledBox(core, anchor.current.id);
-          core.panBy({ x: anchor.current.x - now.x1, y: anchor.current.y - now.y1 });
+          core.panBy(anchorPan({ x: anchor.current.x, y: anchor.current.y }, { x: now.x1, y: now.y1 }));
         }
         anchor.current = null;
       }
