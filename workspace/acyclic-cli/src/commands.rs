@@ -304,7 +304,8 @@ impl<'a> CommandContext<'a> {
             },
             Command::Item(ItemCommand::Done { item, commit, evidence: text, force }) => {
                 let commit = commit.as_deref().map(split_commit).transpose()?;
-                self.write(|replica, by| {
+                let prepared = self.prepare_item_done(item, commit)?;
+                self.write_prepared(&prepared, |replica, by| {
                     let mut id = String::new();
                     let outcome = edit::commit(replica, by, None, true, |model| {
                         let records = Records::of(model);
@@ -525,6 +526,14 @@ impl<'a> CommandContext<'a> {
         &self,
         apply: impl FnOnce(&mut Replica, By<'_>) -> Result<Json, CliError>,
     ) -> Result<Json, CliError> {
+        self.write_prepared(&crate::evidence::Prepared::default(), apply)
+    }
+
+    fn write_prepared(
+        &self,
+        prepared: &crate::evidence::Prepared,
+        apply: impl FnOnce(&mut Replica, By<'_>) -> Result<Json, CliError>,
+    ) -> Result<Json, CliError> {
         let result = RefCell::new((Json::Null, false));
         let unchecked = RefCell::new(Vec::new());
         let meta = Meta { actor: self.actor.clone() };
@@ -559,6 +568,7 @@ impl<'a> CommandContext<'a> {
                     self.env,
                     &commits_before,
                     &Model::read(replica.state())?,
+                    prepared,
                 )?;
             }
             *result.borrow_mut() = (data, changed);
@@ -810,24 +820,59 @@ impl<'a> CommandContext<'a> {
             CliError::new("not-found", exit::NOT_FOUND, format!("{}: {e}", file.display()))
         })?;
         let doc = Import::from_json(&text)?;
+        let (_, state) = self.tracker.load()?;
+        let mut probe = Replica::open(self.tracker.replica().clone(), state);
+        let before_model = Model::read(probe.state())?;
+        let before = crate::evidence::commits(&before_model);
+        let at = probe.stamp(self.now, false)?;
+        let by = By { actor: &self.actor, at };
         if dry_run {
-            let (_, state) = self.tracker.load()?;
-            let replica = Replica::open(self.tracker.replica().clone(), state);
-            let at = replica.stamp(self.now, false)?;
-            let by = By { actor: &self.actor, at };
-            let report = import::preview(&doc, &replica, by)?;
+            let report = import::preview(&doc, &probe, by)?;
             // Its commits are checked as a write would check them, on a copy that is never stored.
-            let before = crate::evidence::commits(&Model::read(replica.state())?);
-            let mut copy = replica;
-            import::apply(&doc, &mut copy, by)?;
-            let unchecked = crate::evidence::check(self.env, &before, &Model::read(copy.state())?)?;
+            import::apply(&doc, &mut probe, by)?;
+            let after = Model::read(probe.state())?;
+            let added = crate::evidence::commits(&after).difference(&before).cloned().collect();
+            let prepared = crate::evidence::preflight(self.env, &added, &after);
+            let unchecked = crate::evidence::check(self.env, &before, &after, &prepared)?;
             let mut shown = import_json(&report, true);
             if !unchecked.is_empty() {
                 shown["unchecked_commits"] = Json::Array(unchecked);
             }
             return Ok(shown);
         }
-        self.write(|replica, by| Ok(import_json(&import::apply(&doc, replica, by)?, false)))
+        let prepared = if import::apply(&doc, &mut probe, by).is_ok() {
+            let after = Model::read(probe.state())?;
+            let added = crate::evidence::commits(&after).difference(&before).cloned().collect();
+            crate::evidence::preflight(self.env, &added, &after)
+        } else {
+            crate::evidence::Prepared::default()
+        };
+        self.write_prepared(&prepared, |replica, by| {
+            Ok(import_json(&import::apply(&doc, replica, by)?, false))
+        })
+    }
+
+    fn prepare_item_done(
+        &self,
+        item: &str,
+        commit: Option<(&str, &str)>,
+    ) -> Result<crate::evidence::Prepared, CliError> {
+        let Some((repository, sha)) = commit else {
+            return Ok(crate::evidence::Prepared::default());
+        };
+        let (_, state) = self.tracker.load()?;
+        let replica = Replica::open(self.tracker.replica().clone(), state);
+        let model = Model::read(replica.state())?;
+        let records = Records::of(&model);
+        let (Ok(item), Ok(repository)) = (records.item(item), records.repository(repository))
+        else {
+            return Ok(crate::evidence::Prepared::default());
+        };
+        let candidate = (item, repository, sha.to_owned());
+        if crate::evidence::commits(&model).contains(&candidate) {
+            return Ok(crate::evidence::Prepared::default());
+        }
+        Ok(crate::evidence::preflight(self.env, &BTreeSet::from([candidate]), &model))
     }
 
     fn claim(&self, reference: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {
