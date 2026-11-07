@@ -22,6 +22,27 @@ export interface FrameWatch {
 
 export const FRESH_WATCH: FrameWatch = { viewport: null, calm: 0 };
 
+/** The render state that owns title suppression after a thread frame. */
+export interface SuppressionOwner {
+  model: object;
+  view: object;
+  source: string;
+  thread: string | null;
+  selected: string | null;
+}
+
+/** Whether an existing title suppression still belongs to this exact rendered frame. */
+export function sameSuppressionOwner(owner: SuppressionOwner | null, next: SuppressionOwner): boolean {
+  return (
+    owner !== null &&
+    owner.model === next.model &&
+    owner.view === next.view &&
+    owner.source === next.source &&
+    owner.thread === next.thread &&
+    owner.selected === next.selected
+  );
+}
+
 /**
  * One animation frame's step. The Map has settled when nothing is in flight, no tile is animating, and the viewport
  * has been the same for `CALM_FRAMES` consecutive frames; anything in flight, or a moved viewport, starts again.

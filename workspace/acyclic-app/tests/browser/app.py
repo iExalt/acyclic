@@ -758,6 +758,148 @@ def to_map(page):
 
 
 @timed
+def pane_geometry_journey(page, origin, plan, name, failures):
+    """A wide pane reserves the Map beside it; below 900 px, sheets leave the Map full width."""
+    nodes = len(plan.default())
+    item = min(id for id in plan.default() if plan.depth(id) == 1)
+    tap_middle(page, VIEWS["desktop"], item)
+    page.get_by_test_id("inspector").wait_for(timeout=5_000)
+    page.wait_for_function(
+        "() => { const m=document.querySelector('[data-testid=map]'); return m?.dataset.settled==='true'; }"
+    )
+    page.evaluate(
+        """() => {
+          window.__paneProbeResize = 0;
+          window.__paneProbeObserver = new ResizeObserver(() => window.__paneProbeResize++);
+          window.__paneProbeObserver.observe(document.querySelector('.stage'));
+          window.__paneProbeObserver.observe(document.querySelector('[data-testid=map]'));
+        }"""
+    )
+
+    def geometry():
+        return page.evaluate(
+            """() => {
+              const stage=document.querySelector('.stage'), map=document.querySelector('[data-testid=map]');
+              const panel=stage.querySelector(':scope > .inspector, :scope > .sheet.add');
+              const rect=e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width}};
+              return {stage:rect(stage),map:rect(map),panel:panel?rect(panel):null};
+            }"""
+        )
+
+    def check(label, width):
+        wait_drawn(page, nodes)
+        settled_map(page)
+        page.wait_for_function(
+            "() => { const p=document.querySelector('.stage > .inspector, .stage > .sheet.add');"
+            " return p && p.getAnimations().length === 0; }",
+            timeout=5_000,
+        )
+        rects = geometry()
+        stage, map_rect, panel = rects["stage"], rects["map"], rects["panel"]
+        if panel is None:
+            failures.append(f"{name}: {label} lost its open panel")
+            return
+        if width >= 900:
+            valid = (
+                abs(panel["width"] - 360) <= 0.5
+                and abs(panel["right"] - stage["right"]) <= 0.5
+                and abs(map_rect["left"] - stage["left"]) <= 0.5
+                and abs(map_rect["right"] - panel["left"]) <= 0.5
+                and abs(map_rect["width"] - (stage["width"] - 360)) <= 0.5
+            )
+        else:
+            valid = (
+                abs(panel["left"] - stage["left"]) <= 0.5
+                and abs(panel["right"] - stage["right"]) <= 0.5
+                and abs(panel["bottom"] - stage["bottom"]) <= 0.5
+                and abs(map_rect["left"] - stage["left"]) <= 0.5
+                and abs(map_rect["right"] - stage["right"]) <= 0.5
+            )
+        if not valid:
+            failures.append(f"{name}: {label} panel did not match the Map area: {rects}")
+
+    def check_closed(label):
+        rects = geometry()
+        if rects["panel"] is not None or abs(rects["map"]["width"] - rects["stage"]["width"]) > 0.5:
+            failures.append(f"{name}: closing {label} did not restore the full Map: {rects}")
+
+    def check_visible(label):
+        if not in_open_view(page, item):
+            failures.append(f"{name}: selected item {item} is not inside the visible Map at {label}")
+
+    def resize(width):
+        previous = page.evaluate("window.__paneProbeResize")
+        page.set_viewport_size({"width": width, "height": 900})
+        page.wait_for_function(
+            "previous => window.__paneProbeResize > previous", arg=previous, timeout=5_000
+        )
+        check(f"{width}px", width)
+        check_visible(f"{width}px")
+
+    check("1440px", 1440)
+    check_visible("1440px")
+    page.get_by_role("button", name="Fold the sidebar").click()
+    page.locator(".sidebar-shell[data-folded=true]").wait_for(timeout=5_000)
+    check("folded sidebar", 1440)
+    check_visible("folded sidebar")
+    page.get_by_role("button", name="Unfold the sidebar").click()
+    page.locator(".sidebar-shell[data-folded=false]").wait_for(timeout=5_000)
+    for width in (1000, 900, 899, 900, 820, 412, 1440):
+        resize(width)
+    camera_before_close = page.get_by_test_id("map").evaluate(
+        "m => ({ pan: m.cy.pan(), zoom: m.cy.zoom() })"
+    )
+    resize_before_close = page.evaluate("window.__paneProbeResize")
+    page.keyboard.press("Escape")
+    page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
+    page.wait_for_function(
+        "() => !document.querySelector('.stage > .inspector, .stage > .sheet.add')"
+    )
+    page.wait_for_function(
+        "previous => window.__paneProbeResize > previous",
+        arg=resize_before_close,
+        timeout=5_000,
+    )
+    settled_map(page)
+    camera_after_close = page.get_by_test_id("map").evaluate(
+        "m => ({ pan: m.cy.pan(), zoom: m.cy.zoom() })"
+    )
+    if (
+        abs(camera_after_close["pan"]["x"] - camera_before_close["pan"]["x"]) > 0.5
+        or abs(camera_after_close["pan"]["y"] - camera_before_close["pan"]["y"]) > 0.5
+        or abs(camera_after_close["zoom"] - camera_before_close["zoom"]) > 1e-6
+    ):
+        failures.append(
+            f"{name}: closing the item pane changed the settled Map camera: "
+            f"{camera_before_close} -> {camera_after_close}"
+        )
+    closed = geometry()
+    if abs(closed["map"]["width"] - closed["stage"]["width"]) > 0.5:
+        failures.append(f"{name}: closing the item pane did not restore the full Map: {closed}")
+
+    page.goto(f"{origin}/?view=overview")
+    overview = page.get_by_test_id("overview")
+    overview.wait_for(timeout=5_000)
+    overview.locator("[data-overview-thread]").first.click()
+    thread_panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
+    thread_panel.wait_for(timeout=10_000)
+    check("thread panel", 1440)
+    page.keyboard.press("Escape")
+    thread_panel.wait_for(state="detached", timeout=5_000)
+    check_closed("thread panel")
+
+    to_map(page)
+    page.locator("[data-action=add-top]").click()
+    add_panel = page.get_by_test_id("add-form")
+    add_panel.wait_for(timeout=5_000)
+    check("New item panel", 1440)
+    add_panel.get_by_role("button", name="Cancel").click()
+    add_panel.wait_for(state="detached", timeout=5_000)
+    check_closed("New item panel")
+    page.evaluate("() => window.__paneProbeObserver?.disconnect()")
+
+
+@timed
 def overview_journey(page, view, name, failures):
     """The app opens on the Overview: its four lists, a thread's row taking the user to the Map with its panel open, a
     needs row going to Needs you's view at its entry, that view marked as the one shown, and on a phone Back from the
@@ -4669,6 +4811,8 @@ def shard_run(shard):
                     installable(context, page, origin, name, failures)
                     overview_journey(page, view, name, failures)
                     to_map(page)
+                    if name == "desktop":
+                        pane_geometry_journey(page, origin, plan, name, failures)
                     # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                     hint = map_journey(page, view, plan, name, failures, hint)
                     outline_journey(page, view, plan, name, failures)

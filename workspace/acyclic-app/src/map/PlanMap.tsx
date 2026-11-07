@@ -14,7 +14,7 @@ import { onChevron, STRIP } from "./chevron";
 import { browserLayouts } from "./client";
 import { apply, type Drawn, elementsOf, land, prefersReducedMotion, settle, settledBox } from "./draw";
 import { PORTRAIT, shapeAfter } from "./elk";
-import { FRESH_WATCH, intentsPending, stepFrame } from "./framed";
+import { FRESH_WATCH, intentsPending, type SuppressionOwner, sameSuppressionOwner, stepFrame } from "./framed";
 import { createGesture } from "./gesture";
 import { metricsOf, TILE_WIDTH } from "./labelmetrics";
 import type { Placed } from "./layout";
@@ -294,6 +294,7 @@ export default function PlanMap({
   const placed =
     laid !== null && laid.view === view && laid.aspect === aspect && laid.source === source ? laid.placed : null;
   const suppressedTitles = useRef<Set<string>>(new Set());
+  const suppressionOwner = useRef<SuppressionOwner | null>(null);
 
   const clearSuppressedTitles = () => {
     const core = cy.current;
@@ -303,18 +304,22 @@ export default function PlanMap({
         if (node.nonempty()) node.removeStyle("text-opacity");
       }
     suppressedTitles.current.clear();
+    suppressionOwner.current = null;
   };
 
   const suppressTitles = (ids: Iterable<string>) => {
     const core = cy.current;
     if (core === null) return;
+    let hidden = false;
     for (const id of ids) {
       const node = core.getElementById(id);
       if (!node.empty()) {
         node.style("text-opacity", 0);
         suppressedTitles.current.add(id);
+        hidden = true;
       }
     }
+    if (hidden) suppressionOwner.current = { model, view, source, thread, selected };
   };
 
   useEffect(() => {
@@ -577,7 +582,7 @@ export default function PlanMap({
       const was = size;
       size = { width: element.clientWidth, height: element.clientHeight };
       if (core === null || placedNow.current === null) return;
-      clearSuppressedTitles();
+      // A host resize doesn't invalidate the titles the current thread frame hid.
       core.resize();
       zoomOutTo(core, element, placedNow.current);
       const id = selectedNow.current;
@@ -704,7 +709,8 @@ export default function PlanMap({
     const first = core.elements().length === 0;
     const job = () => {
       // Only what changed: on a large plan, a write changes a few elements of thousands.
-      clearSuppressedTitles();
+      if (!sameSuppressionOwner(suppressionOwner.current, { model, view, source, thread, selected }))
+        clearSuppressedTitles();
       held.current = apply(core, held.current, elementsOf(drawn, colour, lines, palette), {
         reduced: prefersReducedMotion(),
         extent: core.extent(),
