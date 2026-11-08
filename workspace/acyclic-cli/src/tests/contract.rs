@@ -945,6 +945,139 @@ fn an_import_is_an_upsert_and_a_dry_run_writes_nothing() {
     assert_eq!(sh.run("import missing.json", &[]), 3);
 }
 
+/// A graph with each shape an export must carry: nested epics, loose items beside threaded siblings, waits-for, notes,
+/// every state, and done work with a commit and with words.
+fn exported_graph() -> serde_json::Value {
+    let [garden, code, epic, inner, one, two, loose, parked, canceled, shipped, noted] =
+        ["a0", "c1", "a1", "a9", "b1", "b2", "a5", "a7", "a8", "a6", "aa"].map(id);
+    let [t1, t2, deep, text] = ["f1", "f2", "a10", "a11"].map(id);
+    json!({
+        "format": "acyclic-import", "version": 4,
+        "initiatives": [{"id": garden, "title": "Garden", "notes": "Beds and seeds"}],
+        "repositories": [{"id": code, "name": "me/code", "default_branch": "main"}],
+        "threads": [{"id": t1, "title": "Spring", "notes": "Sow early"}, {"id": t2, "title": "Autumn"}],
+        "items": [
+            {"id": epic, "title": "Beds", "parent": garden, "notes": "Raised"},
+            {"id": one, "title": "Dig", "parent": epic, "thread": t1},
+            {"id": two, "title": "Sow", "parent": epic, "thread": t1, "waits_for": [one]},
+            {"id": loose, "title": "Water", "parent": epic, "thread": null},
+            {"id": shipped, "title": "Fence", "parent": epic, "thread": t1, "state": "done",
+             "evidence": {"commit": format!("{code}@abc1234"), "text": "Built"}},
+            {"id": inner, "title": "Shed", "parent": epic},
+            {"id": deep, "title": "Roof", "parent": inner, "thread": t2, "waits_for": [two]},
+            {"id": parked, "title": "Wait", "parent": garden, "state": "parked"},
+            {"id": canceled, "title": "Drop", "parent": garden, "state": "canceled"},
+            {"id": text, "title": "Note", "parent": garden, "state": "done",
+             "evidence": {"text": "Lives in the shed"}},
+            {"id": noted, "title": "Spare", "parent": garden, "notes": "Kept"},
+        ],
+    })
+}
+
+fn refs(dir: &Path) -> String {
+    git(dir, &["for-each-ref", "--format=%(refname) %(objectname)"])
+}
+
+#[test]
+fn an_export_is_a_document_that_imports_back_unchanged_and_into_a_fresh_tracker() {
+    let mut sh = Shell::new();
+    let second: &[(&str, &str)] = &[("ACYCLIC_TRACKER", "second")];
+    let export = |sh: &Shell, extra: &[(&str, &str)], line: &str| {
+        execute(line.split(' ').map(Into::into), &sh.env(extra))
+    };
+    // An empty tracker exports a document that imports.
+    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    let empty = export(&sh, &[], "acyclic export");
+    assert_eq!((empty.code, &empty.stderr[..]), (0, ""), "{empty:?}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&empty.stdout).unwrap(),
+        json!({"format": "acyclic-import", "version": 4,
+               "repositories": [], "initiatives": [], "items": [], "threads": []}),
+    );
+    assert!(empty.stdout.ends_with("}\n"));
+    std::fs::write(sh.path().join("empty.json"), &empty.stdout).unwrap();
+    assert_eq!(sh.run("import empty.json", &[]), 0);
+
+    // A representative graph, written by an import and read back out.
+    std::fs::write(sh.path().join("graph.json"), exported_graph().to_string()).unwrap();
+    let (code, out) = sh.output("import graph.json", &[]);
+    assert_eq!(code, 0, "{out}");
+    let state_refs = refs(&sh.path().join("tracker"));
+    let first = export(&sh, &[], "acyclic export -o pretty");
+    assert_eq!((first.code, &first.stderr[..]), (0, ""), "{first:?}");
+    let document: serde_json::Value = serde_json::from_str(&first.stdout).unwrap();
+    // Every item says its thread (an id or null) and its waits-for, and the loose item is not left to inherit.
+    let items = document["items"].as_array().unwrap();
+    assert_eq!(items.len(), 11);
+    assert!(items.iter().all(|i| i.get("thread").is_some() && i["waits_for"].is_array()));
+    let water = items.iter().find(|i| i["title"] == "Water").unwrap();
+    assert_eq!(water["thread"], json!(null));
+    let open = items.iter().find(|i| i["title"] == "Dig").unwrap();
+    assert_eq!((&open["state"], &open["waits_for"]), (&json!("open"), &json!([])));
+    let fence = items.iter().find(|i| i["title"] == "Fence").unwrap();
+    assert_eq!(
+        fence["evidence"],
+        json!({"commit": format!("{}@abc1234", id("c1")), "text": "Built"})
+    );
+    // Asking twice gives the same bytes, and writes, syncs and commits nothing.
+    let again = export(&sh, &[], "acyclic export");
+    assert_eq!(again.stdout, first.stdout);
+    assert_eq!(refs(&sh.path().join("tracker")), state_refs);
+
+    // Importing it again into the tracker it came from changes nothing.
+    std::fs::write(sh.path().join("plan.json"), &first.stdout).unwrap();
+    let (code, out) = sh.output("import plan.json", &[]);
+    assert_eq!(
+        (code, &out["data"]["changes"], &out["data"]["changed"]),
+        (0, &json!([]), &json!(false))
+    );
+    assert_eq!(refs(&sh.path().join("tracker")), state_refs);
+
+    // And into a fresh tracker it makes the same records.
+    assert_eq!(sh.run("init second --replica two", &[]), 0);
+    let (code, out) = sh.output("import plan.json", second);
+    assert_eq!(code, 0, "{out}");
+    let copy = export(&sh, second, "acyclic export");
+    assert_eq!(copy.stdout, first.stdout, "the copy exports as the original does");
+    for list in ["item list", "thread list", "initiative list", "repository list"] {
+        let (a, b) = (sh.output(list, &[]).1, sh.output(list, second).1);
+        assert_eq!(a, b, "{list}");
+    }
+}
+
+#[test]
+fn an_export_refuses_what_a_document_cant_say_naming_the_records() {
+    let mut sh = Shell::new();
+    let item = id("a1");
+    sh.init();
+    sh.run(&format!("item add --id {item} --title First"), AGENT);
+    // A thread no record backs: a document can't name it, and an import would refuse it.
+    let (tracker, _) = acyclic_core::store::Tracker::open(&sh.path().join("tracker")).unwrap();
+    let meta = acyclic_core::store::Meta { actor: "actor/user".into() };
+    let key = acyclic_core::state::Key::new("item", &item).unwrap();
+    let gone = id("f9");
+    tracker
+        .batch(&meta, NOW.parse().unwrap(), false, &|_, _| None, |replica, at| {
+            replica.write(&key, "thread", "actor/user", at, Some(json!(gone)))?;
+            Ok::<(), acyclic_core::state::Error>(())
+        })
+        .unwrap();
+    let state_refs = refs(&sh.path().join("tracker"));
+    let outcome = execute(["acyclic", "export"].map(Into::into), &sh.env(&[]));
+    assert_eq!(outcome.code, 1, "{outcome:?}");
+    let out: serde_json::Value = serde_json::from_str(&outcome.stdout).unwrap();
+    assert_eq!(out["ok"], false, "{out}");
+    assert_eq!(out["error"]["code"], "unexportable");
+    let records = out["error"]["details"]["records"].as_array().unwrap();
+    assert_eq!(
+        (records.len(), &records[0]["id"], &records[0]["kind"]),
+        (1, &json!(item), &json!("item"))
+    );
+    assert!(records[0]["reason"].as_str().unwrap().contains(&gone), "{out}");
+    assert!(!outcome.stdout.contains("acyclic-import"));
+    assert_eq!(refs(&sh.path().join("tracker")), state_refs, "nothing is written");
+}
+
 #[test]
 fn a_parent_that_is_a_thread_suggests_a_command_that_pastes_as_it_is() {
     let mut sh = Shell::new();

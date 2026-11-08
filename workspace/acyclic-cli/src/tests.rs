@@ -209,6 +209,7 @@ fn every_error_has_a_stable_code_and_exit() {
         .into(),
         ApplyError::Cycles(vec![]).into(),
         ApplyError::Internal(vec![]).into(),
+        acyclic_core::export::Refusal(vec![]).into(),
         WriteError::NoInitiative("i".into()).into(),
         WriteError::InitiativeInUse { initiative: "i".into(), reasons: vec![] }.into(),
         WriteError::NoThread("t".into()).into(),

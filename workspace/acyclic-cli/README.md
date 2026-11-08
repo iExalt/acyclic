@@ -9,8 +9,8 @@ Every command's inputs follow these rules, so you can guess a command from its n
 1. **Verbs.** A command that acts on one kind of record sits in its group, as `acyclic <noun> <verb>`:
    `item add|edit|show|list|done|reopen|delete`, `thread add|edit|show|list|delete|ready|claim|release`,
    and `repository add|edit|show|list`. Only commands that act on the tracker or the tool sit at the
-   top: `needs`, `init`, `sync`, `import`, `doctor`, `prime`, `id`, `serve`, `up` and `completions`. Actions that
-   aren't a field's value are verbs: `item reopen`, `item delete`, `thread delete`.
+   top: `needs`, `init`, `sync`, `import`, `export`, `doctor`, `prime`, `id`, `serve`, `up` and `completions`.
+   Actions that aren't a field's value are verbs: `item reopen`, `item delete`, `thread delete`.
 2. **Positionals** are only the subject, named for the record: `<ITEM>`, `<THREAD>`, `<REPOSITORY>`. Read
    commands take one or more and answer as an array in the order given; write commands take one. The exceptions are
    the path of `init <PATH>`, the file of `import <FILE>` and the count of `id [COUNT]`.
@@ -62,8 +62,8 @@ document is version 4: it lists `initiatives`, and every new item in it names a 
 Every command's output follows these rules, so you can guess a key from the inputs.
 
 1. **The envelope** is `{"ok": true, "data": …}` or `{"ok": false, "error": {"code", "message", "details"}}`. Every
-   command prints one, except `prime`, `id`, `completions`, `import --schema` and help and version text, which print
-   text;
+   command prints one, except `prime`, `id`, `completions`, `export`, `import --schema` and help and version text,
+   which print text;
    errors are JSON too, except those of a command line that doesn't parse, which print as text on standard error with
    exit code 2. Times are RFC 3339 in UTC and their keys end in `_at`. Pretty output prints the same data for people
    instead: a table for `item list`, `thread ready` and `thread list`, a block of fields for each record, one line for a
@@ -92,7 +92,15 @@ Every command's output follows these rules, so you can guess a key from the inpu
 6. **`import`** returns `counts` and `changes`, the records it creates or updates, each with the `fields` that change
    as `{from, to}`: `{record, id, action, fields}`, where `action` is `create` or `update`, or `remove` for a
    waits-for that an item's `waits_for` list left out. A waits-for is a `link` named by `from`, `kind` (`waits-for`)
-   and `to`. `--dry-run` reports the same without writing.
+   and `to`. `--dry-run` reports the same without writing. **`export`** prints the whole tracker (initiatives,
+   repositories, threads, items with their parents, thread, waits-for, notes, state and evidence, each list sorted by
+   id) as one import document, raw whatever `-o` says: `acyclic export > plan.json`, then `acyclic import plan.json`
+   makes the same records in a fresh tracker and changes nothing in the one it came from. Claims, history, deleted
+   records and readiness aren't in it. A tracker holding what a document can't say, such as a field two replicas set
+   apart, is refused as `unexportable`, with `details.records` listing each record in the way as `{kind, id, reason}`.
+   It writes no logical state and moves no ref; opening the clone may record its replica id and a local read cache,
+   as any read command does.
+   In a document, an item's `thread: null` means no thread; builds that predate it read `null` as left out.
 7. **`needs`** entries are `{kind, …}`. An entry that is about an item embeds it as its `item list` row under `item`,
    and one about a thread embeds its summary under `thread`; one about several, such as a `thread-cycle`, embeds them
    as a list under `items` or `threads`.

@@ -83,8 +83,11 @@ Never put counters in titles.
 `acyclic item` also has `reopen` and `delete`; `delete` refuses an item with children, anything it waits
 for or that waits for it, evidence, a done state or someone else's live claim on its thread. `acyclic import <file>`
 applies a whole plan document, its records named by ids from `acyclic id`, and `--dry-run` reports what it would
-change. `acyclic import --schema` prints the plan format. `acyclic thread delete` deletes a thread no item is in and
-no one holds a live claim on.
+change. `acyclic import --schema` prints the plan format, and `acyclic export` prints the whole tracker in it, as raw
+JSON, so `acyclic export > plan.json` then `acyclic import plan.json` in another tracker copies it. It refuses as
+`unexportable`, naming each record in the way. It writes no logical state and moves no ref; opening the clone may
+record its replica id and a local read cache, as any read command does. `acyclic thread delete` deletes a thread no
+item is in and no one holds a live claim on.
 
 Every item belongs to an initiative, directly or through its parent: an initiative is a long-lived body of work, a
 record of its own (`acyclic initiative add|edit|show|list|delete`), and an item under it is an epic once it has
@@ -102,8 +105,8 @@ give the item the parent, waits-for and thread it belongs with.
 
 ## Output
 
-- `prime`, `id`, `completions`, `import --schema`, and help and version text print documents or text. Every other
-  command prints one JSON document when its output is piped, as a tool's is: `{"ok": true, "data": …}` or
+- `prime`, `id`, `completions`, `export`, `import --schema`, and help and version text print documents or text. Every
+  other command prints one JSON document when its output is piped, as a tool's is: `{"ok": true, "data": …}` or
   `{"ok": false, "error": {"code", "message", "details"}}`, errors included. Branch on `error.code`, not on the message.
   At a terminal it prints text for people instead; if your commands run in one, pass `-o json`.
 - `serve` and `up` print a JSON startup result even at a terminal, then keep running until stopped.

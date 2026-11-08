@@ -124,6 +124,9 @@ fn run_with_observed(
             }
             let result =
                 CommandContext::open(cli, env, named, expected, observed).and_then(|context| {
+                    if matches!(command, Command::Export) {
+                        return Ok((Output::Text(context.export()?), Names::new(), Vec::new()));
+                    }
                     let data = context.dispatch(command)?;
                     let output_names = if named { context.names() } else { Names::new() };
                     let acknowledged = context.acknowledged.into_inner();
@@ -202,6 +205,7 @@ impl<'a> CommandContext<'a> {
             | Command::Prime
             | Command::Id { .. }
             | Command::Import { file: None, .. }
+            | Command::Export
             | Command::Serve(_)
             | Command::Up(_)
             | Command::Completions { .. } => {
@@ -824,6 +828,15 @@ impl<'a> CommandContext<'a> {
             // As each clone was last fetched: doctor reads, so it fetches nothing.
             "commits": crate::evidence::audit(self.env, &model),
         }))
+    }
+
+    /// The tracker as an import document, from one read of its state: nothing is written or synced.
+    fn export(&self) -> Result<String, CliError> {
+        let (_, state) = self.tracker.load()?;
+        let model = Model::read(&state)?;
+        let mut text = acyclic_core::export::export(&model)?.to_json();
+        text.push('\n');
+        Ok(text)
     }
 
     fn import(&self, file: &Path, dry_run: bool) -> Result<Json, CliError> {

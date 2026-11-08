@@ -37,7 +37,7 @@ pub(super) fn valid() -> Import {
     import.items[2].evidence =
         Some(Evidence { commit: Some(format!("{}@abc1234", id(1))), text: Some("shipped".into()) });
     for member in &mut import.items[1..] {
-        member.thread = Some(id(20));
+        member.thread = Some(Some(id(20)));
     }
     import.threads = vec![Thread { id: id(20), title: "Thread".into(), notes: None }];
     import
@@ -212,4 +212,25 @@ fn an_initiative_is_a_record_of_its_own_whose_id_no_item_shares() {
     assert!(bad.validate().iter().all(ValidationError::is_invalid_id));
     let upper = valid().to_json().replace(&id(9), &id(9).to_uppercase());
     assert_eq!(Import::from_json(&upper).unwrap(), valid());
+}
+
+#[test]
+fn a_null_thread_reads_apart_from_an_absent_one() {
+    let at = |thread: &str| {
+        Import::from_json(&document(
+            4,
+            &format!("{{\"id\":\"{}\",\"title\":\"A\"{thread}}}", id(1)),
+        ))
+        .unwrap()
+        .items[0]
+            .thread
+            .clone()
+    };
+    assert_eq!(at(""), None);
+    assert_eq!(at(",\"thread\":null"), Some(None));
+    assert_eq!(at(&format!(",\"thread\":\"{}\"", id(2).to_uppercase())), Some(Some(id(2))));
+    let mut import = valid();
+    import.items[1].thread = Some(None);
+    assert!(import.to_json().contains("\"thread\": null"));
+    assert_eq!(Import::from_json(&import.to_json()).unwrap(), import);
 }

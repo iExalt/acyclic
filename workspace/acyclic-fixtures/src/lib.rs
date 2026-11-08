@@ -406,7 +406,7 @@ impl Generator {
             let title = self.title();
             let id = self.id();
             for &member in run.iter() {
-                self.import.items[member].thread = Some(id.clone());
+                self.import.items[member].thread = Some(Some(id.clone()));
             }
             self.import.threads.push(Thread {
                 id,
@@ -666,10 +666,10 @@ mod tests {
 
     #[test]
     fn a_seed_gives_the_same_plan_everywhere() {
-        // A deliberate change to the generator or the import format updates this digest; anything else changing it is a bug.
+        // A deliberate change to the generator or the import format (a state now prints as `open`, not `backlog`) updates this digest; anything else changing it is a bug.
         let json = generate(BASE_ITEMS, 1).to_json();
         assert_eq!(generate(BASE_ITEMS, 1).to_json(), json, "the same seed twice");
-        assert_eq!((json.len(), fnv1a(json.as_bytes())), (121_775, 1_025_738_443_312_359_225));
+        assert_eq!((json.len(), fnv1a(json.as_bytes())), (120_860, 16_552_022_158_910_724_248));
     }
 
     #[test]

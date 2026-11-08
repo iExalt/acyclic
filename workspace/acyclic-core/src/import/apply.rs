@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::{Value as Json, json};
 
 use super::{Import, KeyKind, ValidationError, owner_name};
-use crate::model::{By, Evidence, Model, WriteError, shown_state};
+use crate::model::{By, Evidence, Model, Value, WriteError, shown_state};
 use crate::place::Inherited;
 use crate::schema::kind;
 use crate::state::{Error, Replica};
@@ -247,7 +247,7 @@ fn judged(doc: &Import, before: &Model, by: By<'_>) -> Result<Outcome, ApplyErro
 
 /// The document as one change set: each record's fields, then the lists it gives, removals before additions, then
 /// the threads it puts items in, so a report lists them in that order.
-fn changes(doc: &Import, before: &Model) -> ChangeSet {
+pub(crate) fn changes(doc: &Import, before: &Model) -> ChangeSet {
     let add = |record: Record, with: Vec<Assign>| Write::Add {
         record,
         minted: false,
@@ -305,12 +305,17 @@ fn changes(doc: &Import, before: &Model) -> ChangeSet {
         }
     }
     for item in &doc.items {
-        if let Some(thread) = &item.thread {
-            changes.push(Write::Set(Assign::Item(
-                item.id.clone(),
-                ItemAssign::Thread(Some(thread.clone())),
-            )));
+        let Some(thread) = &item.thread else { continue };
+        // `null` on a new item is a decision to be in no thread, which keeps it from joining its siblings'. On one the
+        // tracker has it clears a real thread, and changes nothing when it has none or only its own thread of one.
+        if thread.is_none() {
+            let held = before.items.get(&item.id).map(|held| &held.thread);
+            let own = crate::ids::one(&item.id);
+            if matches!(held, Some(Value::None)) || held.is_some_and(|h| h.holds(Some(&own))) {
+                continue;
+            }
         }
+        changes.push(Write::Set(Assign::Item(item.id.clone(), ItemAssign::Thread(thread.clone()))));
     }
     ChangeSet(changes)
 }

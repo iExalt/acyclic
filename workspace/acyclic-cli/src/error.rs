@@ -190,6 +190,14 @@ impl From<ApplyError> for CliError {
     }
 }
 
+impl From<acyclic_core::export::Refusal> for CliError {
+    fn from(err: acyclic_core::export::Refusal) -> Self {
+        let records: Vec<Json> =
+            err.0.iter().map(|b| json!({"kind": b.kind, "id": b.id, "reason": b.reason})).collect();
+        Self::refused("unexportable", err.to_string()).with(json!({"records": records}))
+    }
+}
+
 impl From<LocateError> for CliError {
     fn from(err: LocateError) -> Self {
         Self::new("no-tracker", exit::CONFIG, err.to_string())

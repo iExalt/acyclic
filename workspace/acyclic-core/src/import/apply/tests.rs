@@ -140,7 +140,7 @@ fn references_may_name_the_trackers_records_but_not_unknown_ones() {
     let mut r = imported();
     let mut doc = crate::import::Import::new();
     let mut next = item(30, None, Some(10));
-    next.thread = Some(id(20));
+    next.thread = Some(Some(id(20)));
     next.waits_for = Some(vec![id(12)]);
     doc.items.push(next);
     apply(&doc, &mut r, by(USER, 2)).unwrap();
@@ -346,7 +346,7 @@ fn a_deleted_thread_items_still_name_is_unknown_to_an_import() {
     r.write(&key, field::THREAD, USER, 4, Some(json!(id(20)))).unwrap();
     let mut doc = Import::new();
     let mut next = item(30, None, Some(10));
-    next.thread = Some(id(20));
+    next.thread = Some(Some(id(20)));
     doc.items.push(next);
     let Err(ApplyError::Invalid(errors)) = apply(&doc, &mut r, by(USER, 5)) else {
         panic!("a deleted thread accepted")
@@ -456,7 +456,7 @@ fn new_children_join_their_siblings_thread_and_moved_work_never_changes_a_thread
     assert_eq!(report.placed, Vec::new());
     assert_eq!(model(&r).thread_of(&id(14)), None);
     // Siblings in different threads leave a new child to the document, which says so in its own terms.
-    doc.items[4].thread = Some(id(21));
+    doc.items[4].thread = Some(Some(id(21)));
     doc.threads.push(crate::import::Thread { id: id(21), title: "Other".into(), notes: None });
     apply(&doc, &mut r, by(USER, 4)).unwrap();
     doc.items.push(item(15, None, Some(10)));
@@ -467,7 +467,7 @@ fn new_children_join_their_siblings_thread_and_moved_work_never_changes_a_thread
     assert_eq!(errors, [ValidationError::ThreadUnclear { item: id(15), parent: id(10) }]);
     assert_eq!(r.state, before);
     // Given a thread, it goes where the document says.
-    doc.items[5].thread = Some(id(21));
+    doc.items[5].thread = Some(Some(id(21)));
     apply(&doc, &mut r, by(USER, 6)).unwrap();
     assert_eq!(model(&r).thread_of(&id(15)), Some(id(21).as_str()));
 }
@@ -567,4 +567,64 @@ fn a_title_clash_is_an_invalid_import_naming_the_plan_titles_and_the_initiative(
     });
     doc.items = vec![titled(24, "Sow", 8)];
     apply(&doc, &mut r, by(USER, 5)).unwrap();
+}
+
+#[test]
+fn a_null_thread_keeps_a_new_item_out_of_every_thread_and_clears_an_existing_one() {
+    let mut r = imported();
+    let mut doc = valid();
+    // 11 and 12 share thread 20; a new child saying `null` stays loose instead of joining them.
+    doc.items.push(item(13, None, Some(10)));
+    doc.items[3].thread = Some(None);
+    let report = apply(&doc, &mut r, by(USER, 2)).unwrap();
+    assert_eq!(report.placed, Vec::new());
+    assert_eq!(model(&r).thread_of(&id(13)), None);
+    // Siblings in different threads or none make a new child unclear, unless it says `null`.
+    doc.items[2].thread = Some(Some(id(21)));
+    doc.threads.push(crate::import::Thread { id: id(21), title: "Other".into(), notes: None });
+    doc.items.push(item(14, None, Some(10)));
+    assert!(matches!(
+        super::preview(&doc, &r, by(USER, 3)),
+        Err(ApplyError::Invalid(errors))
+            if errors == [ValidationError::ThreadUnclear { item: id(14), parent: id(10) }]
+    ));
+    doc.items[4].thread = Some(None);
+    apply(&doc, &mut r, by(USER, 3)).unwrap();
+    assert_eq!(model(&r).thread_of(&id(14)), None);
+    // On an item in a real thread, `null` clears it.
+    assert_eq!(model(&r).thread_of(&id(11)), Some(id(20).as_str()));
+    doc.items[1].thread = Some(None);
+    let report = apply(&doc, &mut r, by(USER, 4)).unwrap();
+    assert_eq!(report.changes.len(), 1);
+    assert_eq!(report.changes[0].fields["thread"].to, json!(null));
+    assert_eq!(model(&r).thread_of(&id(11)), None);
+}
+
+#[test]
+fn a_null_thread_on_an_item_with_none_or_only_its_own_thread_of_one_changes_nothing() {
+    let mut r = imported();
+    let mut doc = valid();
+    doc.items.push(item(13, None, Some(9)));
+    doc.items[3].thread = Some(None);
+    apply(&doc, &mut r, by(USER, 2)).unwrap();
+    assert_eq!(super::preview(&doc, &r, by(USER, 3)).unwrap().changes, vec![]);
+    // A claim puts a loose task in its own thread of one: still no thread as the document says it.
+    let own = crate::ids::one(&id(13));
+    model::put(&mut r, &model::item_key(&id(13)).unwrap(), field::THREAD, Some(&own), by(USER, 3))
+        .unwrap();
+    assert_eq!(super::preview(&doc, &r, by(USER, 4)).unwrap().changes, vec![]);
+    // Another item's thread of one is a thread like any other, which `null` leaves.
+    let other = crate::ids::one(&id(14));
+    doc.items.push(item(14, None, Some(9)));
+    doc.items[4].thread = Some(None);
+    apply(&doc, &mut r, by(USER, 5)).unwrap();
+    model::put(
+        &mut r,
+        &model::item_key(&id(13)).unwrap(),
+        field::THREAD,
+        Some(&other),
+        by(USER, 6),
+    )
+    .unwrap();
+    assert_eq!(super::preview(&doc, &r, by(USER, 7)).unwrap().changes.len(), 1);
 }

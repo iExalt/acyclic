@@ -17,7 +17,7 @@ use serde::Serialize;
 const GLOBAL_OPTIONS: &str = "Global options";
 
 /// The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o`
-/// chooses), except `prime`, `completions`, `import --schema` and help and version text. A command line that doesn't parse prints its error as text on standard error, whatever `-o` says.
+/// chooses), except `prime`, `completions`, `export`, `import --schema` and help and version text. A command line that doesn't parse prints its error as text on standard error, whatever `-o` says.
 #[derive(Debug, Parser)]
 #[command(name = "acyclic", version, arg_required_else_help = true)]
 pub struct Cli {
@@ -70,6 +70,7 @@ pub const SECTIONS: [(&str, &[&str]); 2] = [
             "prime",
             "id",
             "import",
+            "export",
             "doctor",
             "serve",
             "up",
@@ -187,6 +188,16 @@ pub enum Command {
         #[serde(default)]
         schema: bool,
     },
+    /// Prints the whole tracker as one import document, as raw JSON.
+    ///
+    /// `acyclic export > plan.json`, then `acyclic import plan.json` in another tracker makes the same records, and
+    /// in this one changes nothing. Import adds and updates what it names and deletes nothing, so it leaves other
+    /// records in its target alone. Claims, history, deleted records and what is derived, such as readiness, aren't
+    /// in the document. It is printed as it is whatever `-o` says. When the tracker holds what a document can't say,
+    /// such as a field two replicas set apart, nothing is printed and the error names each record in the way. It
+    /// writes no logical state and moves no ref; opening the clone may record its replica id and a local read cache,
+    /// as any read command does.
+    Export,
     /// Lists entities that can't be read.
     Doctor,
     /// Adds, edits, shows, lists and deletes initiatives, the long-lived bodies of work that items sit under.
@@ -312,6 +323,7 @@ impl Command {
             Self::Serve(_) | Self::Up(_) => Class::Server,
             Self::Sync | Self::Compact | Self::Import { .. } | Self::Doctor => Class::Clone,
             Self::Needs
+            | Self::Export
             | Self::Initiative(InitiativeCommand::List | InitiativeCommand::Show { .. })
             | Self::Item(ItemCommand::List | ItemCommand::Show { .. })
             | Self::Thread(

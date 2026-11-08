@@ -111,7 +111,7 @@ impl Outcome {
 /// Runs a command line. Every command prints one JSON document to standard output, `{"ok": true, "data": …}` or
 /// `{"ok": false, "error": {"code", "message", "details"}}`, with times as RFC 3339 in UTC. Pretty output, the default
 /// at a terminal, prints the same data as text for people instead, and an error as a line on standard error with the
-/// same exit code. Help and version text, `prime`, `completions` and `import --schema` print text instead, and a
+/// same exit code. Help and version text, `prime`, `completions`, `export` and `import --schema` print text instead, and a
 /// command line that doesn't parse prints its error and usage as text to standard error, with exit code 2, as other
 /// command-line tools do.
 pub fn execute(args: impl IntoIterator<Item = OsString>, env: &Env) -> Outcome {
