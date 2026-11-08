@@ -188,3 +188,16 @@ describe("redraft", () => {
     expect(again.id).not.toBe(item.id);
   });
 });
+
+it("draws completion immediately and reconciles an unanswered write by the saved state", () => {
+  const a = item("a", null, []);
+  const edited = { base: draftOf(a), draft: { ...draftOf(a), state: "done", evidence: "Finished" } };
+  const pending = { kind: "edit" as const, id: "a", edited };
+  expect(withPending([a], pending)[0]?.state).toBe("done");
+  expect(landed(pending, [a])).toBe(false);
+  const completed = { ...a, state: "done", evidence: { commit: null, text: "Finished" } };
+  expect(landed(pending, [completed])).toBe(true);
+  expect(landed(pending, [{ ...a, state: "done" }])).toBe(false);
+  for (const evidence of [null, { commit: null, text: "Someone else's result" }, { conflict: [completed.evidence] }])
+    expect(landed(pending, [{ ...completed, evidence }])).toBe(false);
+});
