@@ -454,8 +454,8 @@ before what went wrong.
   contents appear immediately when their growing frames finish, with no fade. Collapse removes the contents immediately,
   then shrinks the frame. Reduced motion changes both at once.
 - **Threads are membership, not hierarchy.** Only real parent items make boxes. Task tiles retain their thread's
-  stripe and name it in a `Thread: …` footer; unnamed threads of one and missing thread records add no label.
-  Membership takes its own room without shrinking or rewrapping the task title, above any cross-initiative stub.
+  stripe; thread names are available in the item inspector. Tasks and collapsed boxes share a 200 × 86 px tile.
+  Long titles and collapsed counts end with an ellipsis within that height, including above a cross-initiative stub.
   Selecting a thread highlights its tasks and fits every visible member, including a real folded box standing in for
   hidden members, beside the inspector or above a phone sheet. This explicit selection may zoom below the normal
   opening view's readable floor; the opening view and whole-plan Fit keep their own behavior.

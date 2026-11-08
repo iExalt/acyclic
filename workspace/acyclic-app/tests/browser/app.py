@@ -3757,7 +3757,7 @@ def thread_journey(page, env, plan, thread, name, failures):
 
 @timed
 def membership_journey(page, view, env, plan, name, failures):
-    """Completed members stay beside unfinished work under their real parent, with thread labels."""
+    """Completed members stay beside unfinished work under their real parent, with uniform task sizes."""
     box = min(id for id in plan.items if plan.depth(id) == 0 and plan.children(id))
     thread = json.loads(run(env, "thread", "add", "--title", "Membership"))["data"]["thread"]
     items = []
@@ -3788,12 +3788,12 @@ def membership_journey(page, view, env, plan, name, failures):
         [items, box],
     )
     if result["synthetic"] or any(
-        row["parent"] != box or row["kind"] != "leaf" or "Thread: Membership" not in row["label"]
+        row["parent"] != box or row["kind"] != "leaf" or "Thread:" in row["label"]
         for row in result["tasks"]
     ):
-        failures.append(f"{name}: thread membership changed the item hierarchy or lost its label: {result}")
+        failures.append(f"{name}: thread membership changed the item hierarchy or added a thread footer: {result}")
     page.screenshot(path=SHOTS / f"app-{name}-membership.png")
-    print(f"{name}: completed and unfinished thread members retain their real parent and membership labels")
+    print(f"{name}: completed and unfinished thread members retain their real parent without thread footers")
     # Leave the fixture open for the subsequent journeys' item counts.
     for id in items[:2]:
         run(env, "item", "reopen", id)
@@ -4210,9 +4210,9 @@ def labels_journey(browser, link, ids, titles):
         assert "Ready" not in long["label"] and "Ready" not in ready["label"], found
         assert "…" in long["label"], long
         assert abs(long["body"]["w"] - ready["body"]["w"]) < 0.5, found
-        # The named task keeps the same title body and adds its membership footer.
-        assert "Thread:" not in long["label"] and ready["label"].endswith("Thread: Label proof"), found
-        assert abs(ready["body"]["h"] - long["body"]["h"] - 32.5) < 0.5, found
+        # Thread membership does not change tile labels or geometry.
+        assert all("Thread:" not in node["label"] for node in (long, ready)), found
+        assert abs(ready["body"]["h"] - long["body"]["h"]) < 0.5, found
         assert root["header"] > 72, root
         assert all(
             child["body"]["y1"] >= root["body"]["y1"] + root["header"] - 1

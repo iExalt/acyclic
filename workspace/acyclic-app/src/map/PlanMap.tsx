@@ -145,12 +145,7 @@ export default function PlanMap({
   const cy = useRef<Core | null>(null);
   const layouts = useMemo(browserLayouts, []);
   const model = useMemo(() => buildModel(items, outside), [items, outside]);
-  // Only named threads have a membership label. Palette changes do not change layout.
-  const names = JSON.stringify(
-    [...lines].filter(([, line]) => line.task === null).map(([id, line]) => [id, line.name]),
-  );
-  const named = useMemo(() => new Map<string, string>(JSON.parse(names)), [names]);
-  const source = useMemo(() => `${sourceKey(model)}:${names}`, [model, names]);
+  const source = useMemo(() => sourceKey(model), [model]);
   /** The boxes the user has collapsed (true) or expanded (false); the rest follow the default view. */
   const [toggles, setToggles] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [hovered, setHovered] = useState<string | null>(null);
@@ -276,17 +271,8 @@ export default function PlanMap({
   const view = useMemo(() => visible(model, { collapsed }), [model, collapsed]);
   const fonts = useMemo(() => (fontFamily === null ? UNMEASURED : measuring(fontFamily)), [fontFamily]);
   const labelMetrics = useMemo(
-    () =>
-      new Map(
-        view.nodes.map(
-          (node) =>
-            [
-              node.id,
-              metricsOf(node, fonts, TILE_WIDTH, node.thread === null ? null : (named.get(node.thread) ?? null)),
-            ] as const,
-        ),
-      ),
-    [view, fonts, named],
+    () => new Map(view.nodes.map((node) => [node.id, metricsOf(node, fonts, TILE_WIDTH)] as const)),
+    [view, fonts],
   );
   const viewNow = useRef(view);
   viewNow.current = view;

@@ -1,5 +1,5 @@
 // The Map's labels and the room they need, shared by layout and drawing so titles never get laid out at one size and
-// rendered at another. Item titles are clamped to a common tile size; box headers grow with their content.
+// rendered at another. Task and collapsed-box labels fit a common tile size; open box headers grow with their content.
 
 import { countsText } from "../api";
 import { cut, type Measure } from "./fit";
@@ -54,7 +54,6 @@ export function metricsOf(
   node: Pick<VisibleNode, "title" | "kind" | "hidden" | "stage" | "progress"> & Partial<Pick<VisibleNode, "outside">>,
   fonts: LabelFonts,
   width = TILE_WIDTH,
-  threadName: string | null = null,
 ): LabelMetrics {
   const available = textWidth(node.kind, width);
   const title = node.title.replace(/`([^`]+)`/g, "$1");
@@ -65,21 +64,17 @@ export function metricsOf(
     node.kind === "leaf"
       ? clampTitle(title, available, titleLines, fonts.regular)
       : boxLines(node, title, available, fonts.bold);
-  const membership = node.kind === "leaf" && threadName !== null;
-  const footerWidth = width - MARKS_LEFT - 8;
-  if (membership)
-    lines.push("", ...clampTitle(`Thread: ${threadName.replace(/\s+/g, " ")}`, footerWidth, 1, fonts.regular));
   const header = node.kind === "leaf" ? 0 : Math.max(BASE_HEADER, Math.ceil(lines.length * LINE_HEIGHT + 16)) + reserve;
   return {
     width,
     height:
-      node.kind === "leaf"
-        ? ITEM_HEIGHT + (membership ? 2 * LINE_HEIGHT : 0)
+      node.kind !== "box"
+        ? ITEM_HEIGHT
         : Math.max(MIN_NODE_HEIGHT, Math.ceil(lines.length * LINE_HEIGHT + 20)) + reserve,
     reserve,
     stub,
     header,
-    textWidth: membership ? footerWidth : available,
+    textWidth: available,
     lines,
   };
 }
@@ -114,12 +109,19 @@ export function stubOf(
 }
 
 function boxLines(
-  node: Pick<VisibleNode, "kind" | "hidden" | "progress" | "stage">,
+  node: Pick<VisibleNode, "kind" | "hidden" | "progress" | "stage"> & Partial<Pick<VisibleNode, "outside">>,
   title: string,
   width: number,
   measure: Measure,
 ): string[] {
   const hidden = node.kind === "collapsed" ? ` (+${node.hidden})` : "";
+  if (node.kind === "collapsed") {
+    const limit = Math.floor((ITEM_HEIGHT - (node.outside?.length ? STUB_ROOM : 0) - 20) / LINE_HEIGHT);
+    const named = clampTitle(title + hidden, width, limit - (node.progress === null ? 0 : 1), measure);
+    return node.progress === null
+      ? named
+      : [...named, ...clampTitle(countsText(node.progress), width, limit - named.length, measure)];
+  }
   const named = wrap(title + hidden, width, measure);
   return node.progress === null ? named : [...named, ...wrap(countsText(node.progress), width, measure)];
 }
