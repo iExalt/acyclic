@@ -17,6 +17,8 @@ export interface MapItem {
   id: string;
   title: string;
   state: string;
+  /** Whether the item is manually parked, with no conflicting state. */
+  parkedByHand: boolean;
   parent: string | null;
   /** The initiative above it at any depth; null when it is in none. */
   initiative: string | null;
@@ -67,6 +69,7 @@ export function buildModel(items: Item[], outside: ReadonlyMap<string, Crossing[
         id: item.id,
         title: item.title,
         state: item.state,
+        parkedByHand: item.state === "parked" && item.conflicts.state === undefined,
         parent: item.parent,
         initiative: item.initiative,
         thread: item.thread,

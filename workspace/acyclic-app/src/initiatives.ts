@@ -12,7 +12,7 @@ export const NO_INITIATIVE = "No initiative";
 export interface InitiativeRow {
   id: string;
   title: string;
-  /** Items under it, at any depth, that are not finished or canceled: the leaves, as a parent's own stage is theirs. */
+  /** Unfinished, unparked leaves under it, excluding canceled work and descendants of manually parked parents. */
   open: number;
 }
 
@@ -22,9 +22,18 @@ export interface InitiativeRow {
  */
 export function switcherRows(initiatives: readonly Initiative[], model: Model | null): InitiativeRow[] {
   const open = new Map<string, number>();
-  for (const item of model?.items.values() ?? []) {
-    if (item.initiative === null || (model?.children.get(item.id) ?? []).length > 0) continue;
-    if (item.stage === "done" || item.stage === "canceled") continue;
+  const pending = [...(model?.roots ?? [])];
+  while (pending.length > 0) {
+    const item = model?.items.get(pending.pop() as string);
+    if (item === undefined) continue;
+    const children = model?.children.get(item.id) ?? [];
+    if (children.length > 0) {
+      // Core's rollups count open descendants of manually parked parents as parked too.
+      if (!item.parkedByHand) for (const child of children) pending.push(child);
+      continue;
+    }
+    if (item.initiative === null || item.stage === "done" || item.stage === "canceled" || item.stage === "parked")
+      continue;
     open.set(item.initiative, (open.get(item.initiative) ?? 0) + 1);
   }
   return initiatives

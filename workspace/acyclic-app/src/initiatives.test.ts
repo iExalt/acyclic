@@ -21,7 +21,7 @@ import { buildModel } from "./map/model";
 import type { Need } from "./needs";
 import { outlineOf } from "./outline";
 
-// Two initiatives, "big" with three open leaves, a done one and a canceled one, "small" with one, and a project in none.
+// Two initiatives, "big" with two active leaves, a parked one, a done one and a canceled one, "small" with one, and a project in none.
 const plan = [
   item("e1", "big", [], { initiative: "big" }),
   item("a", "e1", [], { initiative: "big", thread: "t1", stage: "ready" }),
@@ -42,13 +42,56 @@ const initiatives = [
 ];
 
 describe("switcherRows", () => {
-  it("counts the open leaves under each initiative, as a parent's stage is its leaves'", () => {
-    // Done and canceled leaves are not open, nor are the epics, whose stage their leaves give.
+  it("counts the active leaves under each initiative, as a parent's stage is its leaves'", () => {
+    // Parked, done and canceled leaves are excluded, as are epics, whose stage their leaves give.
     expect(switcherRows(initiatives, model)).toEqual([
-      { id: "big", title: "Big", open: 3 },
+      { id: "big", title: "Big", open: 2 },
       { id: "small", title: "Small", open: 1 },
       { id: "idle", title: "Idle", open: 0 },
     ]);
+  });
+
+  it("excludes descendants of manually parked parents, keeping other unfinished stages and their precedence", () => {
+    const rows = [
+      { id: "parked", title: "Parked", items: 3 },
+      { id: "active", title: "Active", items: 5 },
+    ];
+    const model = buildModel([
+      item("parked-epic", "parked", [], { initiative: "parked", state: "parked", stage: "parked" }),
+      item("nested", "parked-epic", [], { initiative: "parked", stage: "ready" }),
+      item("under-parked", "nested", [], { initiative: "parked", stage: "ready" }),
+      item("parked-leaf", "parked", [], { initiative: "parked", stage: "parked" }),
+      ...(["ready", "in-progress", "waiting", "stalled"] as const).map((stage, at) =>
+        item(`active-${at}`, "active", [], { initiative: "active", stage }),
+      ),
+      item("unknown", "active", [], { initiative: "active" }),
+      // A state conflict or cycle takes precedence over a leaf's stored parked state in core.
+      item("conflicted", "active", [], { initiative: "active", state: "parked", stage: "waiting" }),
+    ]);
+    expect(switcherRows(rows, model)).toEqual([
+      { id: "active", title: "Active", open: 6 },
+      { id: "parked", title: "Parked", open: 0 },
+    ]);
+  });
+
+  it("keeps children of conflicted parked parents, but excludes manually parked ancestry even with a canceled rollup", () => {
+    const model = buildModel([
+      item("conflicted-parent", "big", [], {
+        initiative: "big",
+        state: "parked",
+        stage: "ready",
+        conflicts: { state: ["parked", "open"] },
+      }),
+      item("active-child", "conflicted-parent", [], { initiative: "big", stage: "ready" }),
+      item("parked-parent", "big", [], { initiative: "big", state: "parked", stage: "canceled" }),
+      item("canceled-parent", "parked-parent", [], { initiative: "big", state: "canceled", stage: "canceled" }),
+      item("conflicted-child", "canceled-parent", [], {
+        initiative: "big",
+        stage: "waiting",
+        conflicts: { state: ["open", "done"] },
+      }),
+    ]);
+    expect(switcherRows(initiatives, model).find((row) => row.id === "big")?.open).toBe(1);
   });
 
   it("orders the busiest first, then by title, whichever initiative is in context, and lists every one before the plan loads", () => {
