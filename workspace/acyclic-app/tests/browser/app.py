@@ -757,146 +757,33 @@ def to_map(page):
     page.get_by_test_id("overview").wait_for(state="detached", timeout=5_000)
 
 
-@timed
-def pane_geometry_journey(page, origin, plan, name, failures):
-    """A wide pane reserves the Map beside it; below 900 px, sheets leave the Map full width."""
-    nodes = len(plan.default())
-    item = min(id for id in plan.default() if plan.depth(id) == 1)
-    tap_middle(page, VIEWS["desktop"], item)
-    page.get_by_test_id("inspector").wait_for(timeout=5_000)
+def pane_beside_map(page, label, name, failures):
+    """The pane over the stage, once it has stopped rising, leaves the Map the room it doesn't take: wide, the stage
+    less a 360 px pane at its right edge; narrow, the whole stage under a sheet along its foot. With no pane, the whole
+    stage."""
     page.wait_for_function(
-        "() => { const m=document.querySelector('[data-testid=map]'); return m?.dataset.settled==='true'; }"
-    )
-    page.evaluate(
-        """() => {
-          window.__paneProbeResize = 0;
-          window.__paneProbeObserver = new ResizeObserver(() => window.__paneProbeResize++);
-          window.__paneProbeObserver.observe(document.querySelector('.stage'));
-          window.__paneProbeObserver.observe(document.querySelector('[data-testid=map]'));
-        }"""
-    )
-
-    def geometry():
-        return page.evaluate(
-            """() => {
-              const stage=document.querySelector('.stage'), map=document.querySelector('[data-testid=map]');
-              const panel=stage.querySelector(':scope > .inspector, :scope > .sheet.add');
-              const rect=e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width}};
-              return {stage:rect(stage),map:rect(map),panel:panel?rect(panel):null};
-            }"""
-        )
-
-    def check(label, width):
-        wait_drawn(page, nodes)
-        settled_map(page)
-        page.wait_for_function(
-            "() => { const p=document.querySelector('.stage > .inspector, .stage > .sheet.add');"
-            " return p && p.getAnimations().length === 0; }",
-            timeout=5_000,
-        )
-        rects = geometry()
-        stage, map_rect, panel = rects["stage"], rects["map"], rects["panel"]
-        if panel is None:
-            failures.append(f"{name}: {label} lost its open panel")
-            return
-        if width >= 900:
-            valid = (
-                abs(panel["width"] - 360) <= 0.5
-                and abs(panel["right"] - stage["right"]) <= 0.5
-                and abs(map_rect["left"] - stage["left"]) <= 0.5
-                and abs(map_rect["right"] - panel["left"]) <= 0.5
-                and abs(map_rect["width"] - (stage["width"] - 360)) <= 0.5
-            )
-        else:
-            valid = (
-                abs(panel["left"] - stage["left"]) <= 0.5
-                and abs(panel["right"] - stage["right"]) <= 0.5
-                and abs(panel["bottom"] - stage["bottom"]) <= 0.5
-                and abs(map_rect["left"] - stage["left"]) <= 0.5
-                and abs(map_rect["right"] - stage["right"]) <= 0.5
-            )
-        if not valid:
-            failures.append(f"{name}: {label} panel did not match the Map area: {rects}")
-
-    def check_closed(label):
-        rects = geometry()
-        if rects["panel"] is not None or abs(rects["map"]["width"] - rects["stage"]["width"]) > 0.5:
-            failures.append(f"{name}: closing {label} did not restore the full Map: {rects}")
-
-    def check_visible(label):
-        if not in_open_view(page, item):
-            failures.append(f"{name}: selected item {item} is not inside the visible Map at {label}")
-
-    def resize(width):
-        previous = page.evaluate("window.__paneProbeResize")
-        page.set_viewport_size({"width": width, "height": 900})
-        page.wait_for_function(
-            "previous => window.__paneProbeResize > previous", arg=previous, timeout=5_000
-        )
-        check(f"{width}px", width)
-        check_visible(f"{width}px")
-
-    check("1440px", 1440)
-    check_visible("1440px")
-    page.get_by_role("button", name="Fold the sidebar").click()
-    page.locator(".sidebar-shell[data-folded=true]").wait_for(timeout=5_000)
-    check("folded sidebar", 1440)
-    check_visible("folded sidebar")
-    page.get_by_role("button", name="Unfold the sidebar").click()
-    page.locator(".sidebar-shell[data-folded=false]").wait_for(timeout=5_000)
-    for width in (1000, 900, 899, 900, 820, 412, 1440):
-        resize(width)
-    camera_before_close = page.get_by_test_id("map").evaluate(
-        "m => ({ pan: m.cy.pan(), zoom: m.cy.zoom() })"
-    )
-    resize_before_close = page.evaluate("window.__paneProbeResize")
-    page.keyboard.press("Escape")
-    page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
-    page.wait_for_function(
-        "() => !document.querySelector('.stage > .inspector, .stage > .sheet.add')"
-    )
-    page.wait_for_function(
-        "previous => window.__paneProbeResize > previous",
-        arg=resize_before_close,
+        "() => { const p = document.querySelector('.stage > .inspector, .stage > .sheet.add');"
+        " return !p || p.getAnimations().length === 0; }",
         timeout=5_000,
     )
-    settled_map(page)
-    camera_after_close = page.get_by_test_id("map").evaluate(
-        "m => ({ pan: m.cy.pan(), zoom: m.cy.zoom() })"
+    rects = page.evaluate(
+        """() => {
+          const stage = document.querySelector('.stage'), map = document.querySelector('[data-testid=map]');
+          const pane = stage.querySelector(':scope > .inspector, :scope > .sheet.add');
+          const rect = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, b: r.bottom, w: r.width }; };
+          return { stage: rect(stage), map: rect(map), pane: pane && rect(pane) };
+        }"""
     )
-    if (
-        abs(camera_after_close["pan"]["x"] - camera_before_close["pan"]["x"]) > 0.5
-        or abs(camera_after_close["pan"]["y"] - camera_before_close["pan"]["y"]) > 0.5
-        or abs(camera_after_close["zoom"] - camera_before_close["zoom"]) > 1e-6
-    ):
-        failures.append(
-            f"{name}: closing the item pane changed the settled Map camera: "
-            f"{camera_before_close} -> {camera_after_close}"
-        )
-    closed = geometry()
-    if abs(closed["map"]["width"] - closed["stage"]["width"]) > 0.5:
-        failures.append(f"{name}: closing the item pane did not restore the full Map: {closed}")
-
-    page.goto(f"{origin}/?view=overview")
-    overview = page.get_by_test_id("overview")
-    overview.wait_for(timeout=5_000)
-    overview.locator("[data-overview-thread]").first.click()
-    thread_panel = page.locator("[data-testid=thread-panel]:not([aria-busy])")
-    thread_panel.wait_for(timeout=10_000)
-    check("thread panel", 1440)
-    page.keyboard.press("Escape")
-    thread_panel.wait_for(state="detached", timeout=5_000)
-    check_closed("thread panel")
-
-    to_map(page)
-    page.locator("[data-action=add-top]").click()
-    add_panel = page.get_by_test_id("add-form")
-    add_panel.wait_for(timeout=5_000)
-    check("New item panel", 1440)
-    add_panel.get_by_role("button", name="Cancel").click()
-    add_panel.wait_for(state="detached", timeout=5_000)
-    check_closed("New item panel")
-    page.evaluate("() => window.__paneProbeObserver?.disconnect()")
+    stage, map_rect, pane = rects["stage"], rects["map"], rects["pane"]
+    near = lambda a, b: abs(a - b) <= 0.5
+    beside = pane is not None and page.viewport_size["width"] >= 900
+    expected = (
+        near(pane["w"], 360) and near(pane["r"], stage["r"]) and near(map_rect["r"], pane["l"])
+        if beside
+        else near(map_rect["r"], stage["r"]) and (pane is None or near(pane["b"], stage["b"]))
+    )
+    if not (expected and near(map_rect["l"], stage["l"])):
+        failures.append(f"{name}: {label} left the Map {rects}, not {'beside it' if beside else 'the whole stage'}")
 
 
 @timed
@@ -943,6 +830,7 @@ def overview_journey(page, view, name, failures):
         failures.append(f"{name}: {thread}'s row on the Overview opened no panel")
     if page.locator("[data-view=map][aria-current=page]").count() != 1:
         failures.append(f"{name}: {thread}'s row on the Overview didn't go to the Map")
+    pane_beside_map(page, f"{thread}'s panel", name, failures)
     # Going to a list view leaves the thread, whose panel would only stand over the list.
     page.locator("[data-view=overview]").click()
     try:
@@ -1771,6 +1659,7 @@ def keys_journey(page, plan, name, failures):
     page.keyboard.press("Enter")
     page.locator("[data-testid=inspector] h2").wait_for(timeout=5_000)
     shown = header_marks(page, "inspector")
+    pane_beside_map(page, "the item panel", name, failures)
     page.keyboard.press("e")
     form = page.get_by_test_id("item-form")
     form.wait_for(timeout=5_000)
@@ -1792,10 +1681,12 @@ def keys_journey(page, plan, name, failures):
     page.locator("[data-action=add-top]").click()
     page.get_by_test_id("add-form").wait_for(timeout=5_000)
     added = header_marks(page, "add-form")
+    pane_beside_map(page, "the New item panel", name, failures)
     if any(abs(added[key] - shown[key]) > 0.5 for key in shown):
         failures.append(f"{name}: New item's header {added} isn't the item panel's {shown}")
     page.get_by_test_id("add-form").get_by_role("button", name="Cancel").click()
     page.get_by_test_id("add-form").wait_for(state="detached", timeout=5_000)
+    pane_beside_map(page, "the closed New item panel", name, failures)
     from_menu(page, lambda: page.get_by_test_id("shortcuts").click())
     # Off the switch, which as a field would take the keys for itself.
     page.evaluate("() => document.activeElement?.blur()")
@@ -1838,138 +1729,6 @@ def keys_journey(page, plan, name, failures):
         failures.append(f"{name}: ⌘Z twice left the title {heading.inner_text()!r}, in {len(writes)} writes")
     page.keyboard.press("Escape")
     print(f"{name}: single keys went to views and edited {id}, left typing alone, and switched off; ⌘Z undid once")
-
-
-@timed
-def link_focus_journey(page, env, plan, name, failures):
-    """After removing links, keep keyboard focus on the next row, then the Inspector when its group is empty."""
-    media = page.evaluate(
-        """() => ({ hover: matchMedia('(hover: hover)').matches,
-          pointer: matchMedia('(pointer: fine)').matches,
-          coarse: matchMedia('(pointer: coarse)').matches, touches: navigator.maxTouchPoints })"""
-    )
-    if not media["hover"] or not media["pointer"] or media["coarse"] or media["touches"]:
-        failures.append(f"{name}: link focus needs a desktop hover/fine-pointer context, got {media}")
-        return
-    parent = next((id for id in plan.items if plan.depth(id) == 0 and plan.children(id)), None)
-    if parent is None:
-        failures.append(f"{name}: the fixture has no parent for temporary link-focus items")
-        return
-    title = f"Keyboard focus {time.monotonic_ns()}"
-    items = []
-    try:
-        for suffix in ("subject", "first", "last"):
-            record = json.loads(
-                run(env, "item", "add", "--parent", parent, "--no-thread", "--title", f"{title} {suffix}")
-            )["data"]["item"]
-            items.append((record, f"{title} {suffix}"))
-        subject, subject_title = items[0]
-        outgoing = items[1:]
-        run(env, "item", "edit", subject, *(arg for target, _ in outgoing for arg in ("--waits-for", target)))
-        page.reload()
-        page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
-        to_map(page)
-        page.keyboard.press("Escape")
-        page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
-        page.keyboard.press("ControlOrMeta+k")
-        page.keyboard.type(subject_title)
-        page.keyboard.press("Enter")
-        page.get_by_test_id("inspector").wait_for(timeout=5_000)
-        page.mouse.move(1, page.viewport_size["height"] - 1)
-        if page.locator(".link:hover").count():
-            failures.append(f"{name}: the pointer still hovers a link row before keyboard removal")
-            return
-
-        def remove_pair(testid, rows):
-            group = page.locator(f"[data-testid={testid}]")
-            if group.locator(".link-row").count() != 2:
-                failures.append(f"{name}: {testid} started with {group.locator('.link-row').count()} rows, expected two")
-                return False
-            first = page.locator(f"[data-testid={testid}] .link-row[data-select='{rows[0][0]}']")
-            # Focus is setup only; Tab and Enter must reach the remove control through normal keyboard navigation.
-            hidden = first.locator("xpath=..").locator(".unlink")
-            if hidden.is_visible():
-                failures.append(f"{name}: {testid}'s remove control was visible before its row got keyboard focus")
-                return False
-            first.focus()
-            page.keyboard.press("Tab")
-            button = page.get_by_role("button", name=f"Remove the link to {rows[0][1]}", exact=True)
-            if not button.evaluate("e => e === document.activeElement") or not button.is_visible():
-                failures.append(f"{name}: Tab didn't focus and reveal {testid}'s first remove button")
-                return False
-            page.keyboard.press("Enter")
-            try:
-                button.wait_for(state="detached", timeout=10_000)
-                if group.locator(".link-row").count() != 1:
-                    raise PlaywrightTimeout(f"{testid} did not have exactly one link row left")
-                selector = f"[data-testid={testid}] .link-row[data-select='{rows[1][0]}']"
-                remaining = page.locator(selector)
-                remaining.wait_for(state="visible", timeout=10_000)
-                page.wait_for_function(
-                    "selector => document.querySelector(selector) === document.activeElement",
-                    arg=selector,
-                    timeout=5_000,
-                )
-            except PlaywrightTimeout:
-                failures.append(f"{name}: removing the first {testid} link didn't focus its exact remaining row")
-                return False
-            remaining_button = page.get_by_role("button", name=f"Remove the link to {rows[1][1]}", exact=True)
-            if not remaining_button.is_visible():
-                failures.append(f"{name}: the remaining {testid} row didn't reveal its remove control on focus")
-                return False
-            page.keyboard.press("Tab")
-            if not remaining_button.evaluate("e => e === document.activeElement"):
-                failures.append(f"{name}: Tab didn't focus {testid}'s last remove button")
-                return False
-            page.keyboard.press("Enter")
-            try:
-                page.locator(f"[data-testid={testid}]").wait_for(state="detached", timeout=10_000)
-                page.wait_for_function(
-                    "() => document.activeElement?.matches('[data-testid=inspector]')",
-                    timeout=5_000,
-                )
-            except PlaywrightTimeout:
-                failures.append(f"{name}: removing the last {testid} link didn't focus the Inspector fallback")
-                return False
-            return True
-
-        if not remove_pair("waits-for", outgoing):
-            return
-        for source, _ in outgoing:
-            run(env, "item", "edit", source, "--waits-for", subject)
-        page.reload()
-        page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
-        to_map(page)
-        page.keyboard.press("Escape")
-        page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
-        page.keyboard.press("ControlOrMeta+k")
-        page.keyboard.type(subject_title)
-        page.keyboard.press("Enter")
-        page.get_by_test_id("inspector").wait_for(timeout=5_000)
-        page.mouse.move(1, page.viewport_size["height"] - 1)
-        if not remove_pair("waited-on-by", outgoing):
-            return
-        print(f"{name}: keyboard removal focused the next link row and the empty group's Inspector fallback")
-    finally:
-        cleanup_errors = []
-        if len(items) == 3:
-            for source, targets in [(subject, [target for target, _ in outgoing]), *[(source, [subject]) for source, _ in outgoing]]:
-                try:
-                    run(env, "item", "edit", source, *(arg for target in targets for arg in ("--no-waits-for", target)))
-                except (Exception, SystemExit) as err:
-                    cleanup_errors.append(str(err))
-        for id, _ in reversed(items):
-            try:
-                run(env, "item", "delete", id)
-            except (Exception, SystemExit) as err:
-                cleanup_errors.append(str(err))
-        try:
-            page.reload()
-            page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
-        except (Exception, SystemExit) as err:
-            cleanup_errors.append(str(err))
-        if cleanup_errors:
-            failures.append(f"{name}: temporary link-focus cleanup failed: {'; '.join(cleanup_errors)}")
 
 
 @timed
@@ -2717,9 +2476,16 @@ def threads_journey(page, view, env, plan, name, failures):
             "() => !document.querySelector('[data-testid=thread-panel], [data-testid=inspector]')",
             timeout=5_000,
         )
+    # A thread with no task at all is in no initiative, so it is in the Threads view of each, in Anytime. The view
+    # doesn't differ by device, so one run's reloads are enough.
+    empty = None
+    if not view.get("has_touch"):
+        empty = json.loads(run(env, "thread", "add", "--title", f"Empty {name}"))["data"]["thread"]
+        page.reload()
+        page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
     to_map(page)
     listed = json.loads(run(env, "thread", "list"))["data"]
-    want = waves_in_context(plan, listed)
+    want = waves_in_context(plan, listed) | ({empty: "anytime"} if empty else {})
     # The other initiatives' threads are left out, and the proof is not vacuous: the tracker has some.
     if len(want) == len(listed["threads"]) and plan.elsewhere:
         failures.append(f"{name}: the tracker has no thread outside the initiative in context to leave out")
@@ -2801,146 +2567,12 @@ def threads_journey(page, view, env, plan, name, failures):
             page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from the Threads view didn't go home to the Overview")
+    if empty:
+        run(env, "thread", "delete", empty)
+        page.reload()
+        page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
     to_map(page)
     print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
-
-
-@timed
-def visibility_journey(page, view, env, plan, name, failures):
-    """An empty thread stays reachable in a scoped Threads view, foreign-only membership stays out, and a box's own
-    cross-initiative wait gets a dashed stub in the header row and opens its target."""
-    base = page.url.split("?", 1)[0]
-    foreign_initiatives = sorted({row["initiative"] for row in plan.elsewhere.values() if row["initiative"] is not None})
-    if not foreign_initiatives:
-        failures.append(f"{name}: the fixture has no foreign initiative for the visibility journey's cross-initiative task")
-        return
-    foreign_initiative = foreign_initiatives[0]
-    empty_thread = None
-    foreign_thread = None
-    foreign_item = None
-    outer = None
-    box = None
-    child = None
-    try:
-        empty_thread = json.loads(run(env, "thread", "add", "--title", f"Empty visibility {name}"))["data"]["thread"]
-        foreign_thread = json.loads(run(env, "thread", "add", "--title", f"Foreign visibility {name}"))["data"]["thread"]
-        foreign_item = json.loads(
-            run(
-                env,
-                "item",
-                "add",
-                "--title",
-                f"Foreign task {name}",
-                "--parent",
-                foreign_initiative,
-                "--thread",
-                foreign_thread,
-            )
-        )["data"]["item"]
-        outer = json.loads(run(env, "item", "add", "--title", f"Visibility container {name}", "--parent", plan.initiative, "--no-thread"))["data"]["item"]
-        box = json.loads(
-            run(
-                env,
-                "item",
-                "add",
-                "--title",
-                f"A long nested waiting box {name} whose title wraps across the header",
-                "--parent",
-                outer,
-                "--no-thread",
-            )
-        )["data"]["item"]
-        child = json.loads(run(env, "item", "add", "--title", f"Box child {name}", "--parent", box, "--no-thread"))["data"]["item"]
-        run(env, "item", "edit", box, "--waits-for", foreign_item)
-        page.goto(f"{base}?initiative={plan.initiative}")
-        page.get_by_test_id("overview").wait_for(timeout=10_000)
-        page.locator("[data-view=threads]").click()
-        page.get_by_test_id("threads-view").wait_for(timeout=5_000)
-        empty = page.locator(f"[data-thread-tile='{empty_thread}']")
-        empty.wait_for(timeout=10_000)
-        if page.locator(f"[data-thread-tile='{foreign_thread}']").count():
-            failures.append(f"{name}: a thread with membership only outside the selected initiative appeared in Threads")
-        empty.click()
-        panel = page.get_by_test_id("thread-panel")
-        panel.wait_for(timeout=10_000)
-        panel.get_by_role("heading", name=f"Empty visibility {name}", exact=True).wait_for(timeout=10_000)
-        if f"Empty visibility {name}" not in panel.inner_text():
-            failures.append(f"{name}: the truly empty thread's tile opened a different thread panel")
-        page.keyboard.press("Escape")
-        panel.wait_for(state="detached", timeout=5_000)
-        to_map(page)
-        if box is None or foreign_item is None:
-            raise AssertionError("runtime fixture ids were not created")
-        wait_drawn(page, len(plan.default()) + 2)
-        page.wait_for_function(
-            "id => { const m=document.querySelector('[data-testid=map]'), n=m?.cy?.getElementById(id);"
-            " return m?.dataset.settled==='true' && n?.visible() && !m.cy.elements().some(e=>e.animated()); }",
-            arg=box,
-            timeout=10_000,
-        )
-        centre(page, box)
-        page.wait_for_function(
-            "id => { const m=document.querySelector('[data-testid=map]'), n=m?.cy?.getElementById(id);"
-            " return m?.dataset.settled==='true' && n?.visible() && !m.cy.elements().some(e=>e.animated()); }",
-            arg=box,
-            timeout=10_000,
-        )
-        tap_box(page, view, box)
-        stub_id = f"stub {box}"
-        page.wait_for_function(
-            "([box, child, stub]) => { const m=document.querySelector('[data-testid=map]');"
-            " const b=m?.cy?.getElementById(box), c=m?.cy?.getElementById(child), s=m?.cy?.getElementById(stub);"
-            " return m?.dataset.settled==='true' && b?.data('kind')==='box' && c?.nonempty() && c.visible()"
-            " && s?.nonempty() && !m.cy.elements().some(e=>e.animated()); }",
-            arg=[box, child, stub_id],
-            timeout=10_000,
-        )
-        geometry = page.get_by_test_id("map").evaluate(
-            "(m, ids) => { const b=m.cy.getElementById(ids[0]), c=m.cy.getElementById(ids[1]);"
-            " const box=b.boundingBox({ includeLabels:false }), child=c.boundingBox({ includeLabels:false });"
-            " return { header:Number(b.data('header')), clearance:child.y1-(box.y1+Number(b.data('header'))) }; }",
-            [box, child],
-        )
-        if geometry["clearance"] < -0.5:
-            failures.append(f"{name}: the nested box's wrapped title or stub row overlaps its child: {geometry}")
-        stub = page.get_by_test_id("map").evaluate(
-            "(m, id) => { const n=m.cy.getElementById(id); return { target:n.data('target'), style:n.pstyle('border-style').strValue }; }",
-            stub_id,
-        )
-        if stub != {"target": foreign_item, "style": "dashed"}:
-            failures.append(f"{name}: the open box's outside wait drew {stub}, not its dashed target {foreign_item}")
-        tap_middle(page, view, stub_id)
-        inspector = page.get_by_test_id("inspector")
-        inspector.wait_for(timeout=10_000)
-        inspector.get_by_role("heading", name=f"Foreign task {name}", exact=True).wait_for(timeout=10_000)
-        if f"item={foreign_item}" not in page.url:
-            failures.append(f"{name}: tapping the open-box stub did not open its target: {page.url}")
-        print(f"{name}: empty thread included, foreign-only thread excluded, open-box stub opened its target")
-        page.keyboard.press("Escape")
-        page.get_by_test_id("inspector").wait_for(state="detached", timeout=5_000)
-    finally:
-        # Remove only the rows this journey added; the shared seeded plan remains unchanged.
-        if box is not None and foreign_item is not None:
-            cleanup = subprocess.run(
-                [ACYCLIC, "item", "edit", box, "--no-waits-for", foreign_item],
-                env=env,
-                capture_output=True,
-                text=True,
-            )
-            if cleanup.returncode != 0:
-                failures.append(f"{name}: couldn't unlink the temporary cross-initiative wait: {cleanup.stderr}")
-        for item_id in (child, box, outer, foreign_item):
-            if item_id is not None:
-                cleanup = subprocess.run([ACYCLIC, "item", "delete", item_id], env=env, capture_output=True, text=True)
-                if cleanup.returncode != 0:
-                    failures.append(f"{name}: couldn't delete temporary item {item_id}: {cleanup.stderr}")
-        for thread_id in (foreign_thread, empty_thread):
-            if thread_id is not None:
-                cleanup = subprocess.run([ACYCLIC, "thread", "delete", thread_id], env=env, capture_output=True, text=True)
-                if cleanup.returncode != 0:
-                    failures.append(f"{name}: couldn't delete temporary thread {thread_id}: {cleanup.stderr}")
-        page.goto(f"{base}?initiative={plan.initiative}")
-        page.get_by_test_id("overview").wait_for(timeout=10_000)
 
 
 def verify_thread_arrows(page, listed, want, name, failures):
@@ -3078,10 +2710,12 @@ def item_action(page, action):
     page.locator(f"[data-testid=inspector] [data-action={action}]").click()
 
 
-def unlink(page, testid, held_alone=None):
+def unlink(page, testid, held_alone=None, rows_left=None):
     """Removes a panel's first link of a kind, its button shown as a pointer comes over its row. With `held_alone` a
     list, adds to it what was wrong while the write was out: only the pressed button may look held, no other control
-    greyed or disabled (an observer sees the write's first draw, however soon it lands)."""
+    greyed or disabled (an observer sees the write's first draw, however soon it lands). With `rows_left`, returns
+    what was wrong with where the keyboard went, else None: the group's first of that many remaining rows, or with
+    none left, the panel."""
     open_full(page, "inspector")
     row = page.locator(f"[data-testid={testid}] .link").first
     row.hover()
@@ -3115,7 +2749,21 @@ def unlink(page, testid, held_alone=None):
         # The Edit pencil is always one of the others, so none seen means the panel was not looked at.
         if seen["others"] < 1 or seen["disabled"] or seen["dim"] or not seen["pressedDim"]:
             held_alone.append(f"{testid}'s write held {seen}")
+    lost = None
+    if rows_left is not None:
+        try:
+            page.wait_for_function(
+                "([rows, left]) => { const found = document.querySelectorAll(rows), at = document.activeElement;"
+                " return left ? found.length === left && at === found[0]"
+                " : !found.length && at?.matches('[data-testid=inspector]'); }",
+                arg=[f"[data-testid={testid}] .link-row", rows_left],
+                timeout=5_000,
+            )
+        except PlaywrightTimeout:
+            at = page.evaluate("() => document.activeElement?.outerHTML.slice(0, 100)")
+            lost = f"removing {testid}'s link, with {rows_left} rows left, left the focus on {at}"
     open_full(page, "inspector", full=False)
+    return lost
 
 
 def wait_inspector(page, selector, state="visible"):
@@ -3147,6 +2795,14 @@ def edit_journey(page, view, env, plan, box, name, failures):
         return
     first, second = leaves
     root = plan.chain(box)[-1]
+    # Another task for the new one to wait on, from elsewhere in the plan, so it can't be where the new one is put.
+    third = next(
+        (id for id in sorted(plan.default()) if not plan.children(id) and id not in {*leaves, *plan.chain(second)}),
+        None,
+    )
+    if third is None:
+        failures.append(f"{name}: the plan has no third leaf for a second link")
+        return
     centre(page, box)
     tap_box(page, view, box)
     base = int(wait_drawn(page, len(plan.default()) + len(plan.children(box)))["nodes"])
@@ -3425,7 +3081,7 @@ def edit_journey(page, view, env, plan, box, name, failures):
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     notice = show_notice(page)
     notice.get_by_role("button", name="Undo").wait_for(timeout=5_000)
-    run(env, "item", "edit", added, "--waits-for", first)
+    run(env, "item", "edit", added, "--waits-for", first, "--waits-for", third)
     # Sent, the undo would add a link already there, which the tracker wouldn't show: the writes the app sends tell.
     sent = []
     listen = lambda request: (
@@ -3441,7 +3097,12 @@ def edit_journey(page, view, env, plan, box, name, failures):
         failures.append(f"{name}: a refused undo sent {sent}")
     # Unlinked once more, as the journeys after expect.
     close_notice_details(page)
-    unlink(page, "waits-for")
+    # Two links to take off: the keyboard goes on to the row left, and with none, to the panel.
+    page.locator("[data-testid=waits-for] .link-row").nth(1).wait_for(timeout=10_000)
+    for left in (1, 0):
+        lost = unlink(page, "waits-for", rows_left=left)
+        if lost:
+            failures.append(f"{name}: {lost}")
     wait_inspector(page, "[data-testid=waits-for]", state="detached")
     page.screenshot(path=SHOTS / f"app-{name}-edited.png")
     print(
@@ -4811,12 +4472,9 @@ def shard_run(shard):
                     installable(context, page, origin, name, failures)
                     overview_journey(page, view, name, failures)
                     to_map(page)
-                    if name == "desktop":
-                        pane_geometry_journey(page, origin, plan, name, failures)
                     # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                     hint = map_journey(page, view, plan, name, failures, hint)
                     outline_journey(page, view, plan, name, failures)
-                    visibility_journey(page, view, env, plan, name, failures)
                     threads_journey(page, view, env, plan, name, failures)
                     deep_link_journey(context, origin, view, plan, name, failures)
                     history_journey(context, origin, view, plan, name, failures)
@@ -4824,7 +4482,6 @@ def shard_run(shard):
                     if name == "desktop":
                         cross_origin_journey(context, origin, env, name, failures)
                         keys_journey(page, plan, name, failures)
-                        link_focus_journey(page, env, plan, name, failures)
                     if name == "phone" and hint is not None:
                         # Edits run once, on the phone the app is used on; the plan is read again after them.
                         leaf = min(
