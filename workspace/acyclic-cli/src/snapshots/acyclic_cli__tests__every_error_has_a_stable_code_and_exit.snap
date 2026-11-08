@@ -35,6 +35,7 @@ expression: table
 2 invalid-id
 1 import-cycle
 1 internal
+1 unexportable
 3 not-found
 1 in-use
 3 not-found

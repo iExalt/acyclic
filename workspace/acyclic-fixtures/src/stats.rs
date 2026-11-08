@@ -60,7 +60,7 @@ impl Stats {
         let mut thread_sizes = Vec::new();
         for thread in &import.threads {
             let members: Vec<usize> = (0..import.items.len())
-                .filter(|&i| import.items[i].thread.as_ref() == Some(&thread.id))
+                .filter(|&i| import.items[i].thread.as_ref() == Some(&Some(thread.id.clone())))
                 .collect();
             thread_sizes.push(members.len());
             threaded.extend(members.iter().copied());

@@ -14,6 +14,7 @@ use crate::ids;
 
 mod apply;
 
+pub(crate) use apply::changes;
 pub use apply::{ApplyError, Report, apply, preview};
 
 /// The value of the document's `format` field.
@@ -47,7 +48,9 @@ pub const SCHEMA: &str = r#"// An acyclic import document: a whole plan, every r
     // for another holder's claim that `item edit --state canceled` makes, as done work skips the one finishing makes.
     // Required for a new item: parent, an initiative or an item. Optional: thread, notes, waits_for (the items it can't start before they are done),
     // and evidence on done items: {"commit": "<repository id>@<sha>", "text": "…"}, either part or both. A list
-    // given replaces the record's: [] clears it.
+    // given replaces the record's: [] clears it. "thread": null puts an item in no thread, which also keeps a new item
+    // from joining the thread its siblings share, and leaves out the thread of one that a claim made (builds that
+    // predate null read it as left out). `acyclic export` prints the whole tracker as a document like this.
     {"id": "01900000-0000-7000-8000-000000000003", "title": "Build the beds",
      "parent": "01900000-0000-7000-8000-000000000005", "thread": "01900000-0000-7000-8000-000000000002"},
     {"id": "01900000-0000-7000-8000-000000000004", "title": "Plant the seeds",
@@ -142,21 +145,48 @@ pub struct Item {
     pub notes: Option<String>,
     /// The item's state: `open`, `parked`, `done` or `canceled`; left out, an existing item keeps its own and a new
     /// one is open. `backlog`, as older documents say, reads as open.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", serialize_with = "state_word")]
     pub state: Option<State>,
     /// The parent: an initiative or an item. A new item must name one; an existing item with none left out keeps the one
     /// it has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
-    /// The thread it is in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread: Option<String>,
+    /// The thread it is in: absent keeps what the item has, `null` puts it in no thread, an id names one. A new item
+    /// with it absent joins the thread its siblings share; with `null` it stays out of any.
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub thread: Option<Option<String>>,
     /// The items it waits for, which it can't start until they are done: the whole list, replacing the item's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waits_for: Option<Vec<String>>,
     /// Evidence of completion, for done items only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<Evidence>,
+}
+
+/// Writes a state as reads show it, `open` for the stored `backlog`.
+#[expect(
+    clippy::ref_option,
+    clippy::trivially_copy_pass_by_ref,
+    reason = "the shape serde's `serialize_with` takes"
+)]
+fn state_word<S: serde::Serializer>(
+    state: &Option<State>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match state {
+        Some(state) => serializer.serialize_str(state.word()),
+        None => serializer.serialize_none(),
+    }
+}
+
+/// Reads a field that may be absent, `null` or a value, keeping `null` apart from absent: `Some(None)` is `null`.
+#[expect(clippy::option_option, reason = "absent and null are different values")]
+fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// A thread: items for one continuing agent conversation.
@@ -481,7 +511,7 @@ impl Import {
         for item in &mut self.items {
             low(&mut item.id);
             item.parent.iter_mut().for_each(low);
-            item.thread.iter_mut().for_each(low);
+            item.thread.iter_mut().flatten().for_each(low);
             all(&mut item.waits_for);
             if let Some(commit) = item.evidence.as_mut().and_then(|e| e.commit.as_mut())
                 && let Some((repository, sha)) = commit.rsplit_once('@')
@@ -537,7 +567,10 @@ impl Import {
         for item in &self.items {
             check("item id".to_owned(), &item.id);
             let at = |field: &str| format!("item {}, {field}", item.id);
-            for (field, id) in [("parent", &item.parent), ("thread", &item.thread)] {
+            for (field, id) in [
+                ("parent", item.parent.as_ref()),
+                ("thread", item.thread.as_ref().and_then(Option::as_ref)),
+            ] {
                 if let Some(id) = id {
                     check(at(field), id);
                 }

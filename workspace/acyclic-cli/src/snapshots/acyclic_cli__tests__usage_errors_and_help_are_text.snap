@@ -2,7 +2,7 @@
 source: workspace/acyclic-cli/src/tests.rs
 expression: help.stdout
 ---
-The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o` chooses), except `prime`, `completions`, `import --schema` and help and version text. A command line that doesn't parse prints its error as text on standard error, whatever `-o` says
+The acyclic tracker. Every command prints one JSON document when piped and text for people at a terminal (`-o` chooses), except `prime`, `completions`, `export`, `import --schema` and help and version text. A command line that doesn't parse prints its error as text on standard error, whatever `-o` says
 
 Usage: acyclic [OPTIONS] <COMMAND>
 
@@ -20,6 +20,7 @@ Other Commands:
   prime        Prints conventions for agents, matched to this version, as text
   id           Prints new `UUIDv7` ids, one per line, as text, to name records with in `--id` or an import document
   import       Imports a plan, adding and updating what it names and never deleting; `--schema` prints an example
+  export       Prints the whole tracker as one import document, as raw JSON
   doctor       Lists entities that can't be read
   serve        Serves the JSON API and the app, refusing any request without the user's Tailscale identity
   up           Serves the JSON API and the app on this machine, to every process on it, as the user

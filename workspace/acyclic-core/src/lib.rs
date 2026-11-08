@@ -21,6 +21,7 @@ macro_rules! fixture {
 
 pub mod claim;
 pub mod delete;
+pub mod export;
 pub mod graph;
 pub mod ids;
 pub mod import;
