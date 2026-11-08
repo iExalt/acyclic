@@ -515,32 +515,28 @@ fn compact_preserves_audit_refs_and_is_idempotent() {
     let dir = TempDir::new().unwrap();
     let path = tracker(&dir, "mac");
     let (tracker, _) = Tracker::open(&path).unwrap();
-    let empty = tracker.compact(NOW).unwrap();
+    let empty = tracker.compact().unwrap();
     assert_eq!(empty.squashed, None);
-    assert!(empty.pruned.is_empty());
     write_month(&tracker, JULY, 1);
-    let parentless = tracker.compact(NOW).unwrap();
+    let parentless = tracker.compact().unwrap();
     assert_eq!(parentless.squashed, None, "one state commit is already parentless");
-    assert!(parentless.pruned.is_empty());
     write_month(&tracker, AUGUST, 2);
     let (_, before_state) = tracker.load().unwrap();
     let before_tree = git(&path, &["rev-parse", "refs/heads/state/mac^{tree}"]);
     let before_audit =
         git(&path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/log/"]);
 
-    let compacted = tracker.compact(NOW).unwrap();
+    let compacted = tracker.compact().unwrap();
 
     assert!(compacted.squashed.is_some());
-    assert!(compacted.pruned.is_empty(), "compaction retains every audit event");
     assert_eq!(git(&path, &["rev-parse", "refs/heads/state/mac^{tree}"]), before_tree);
     assert_eq!(
         git(&path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/log/"]),
         before_audit
     );
     assert_eq!(tracker.load().unwrap().1, before_state);
-    let again = tracker.compact(NOW).unwrap();
+    let again = tracker.compact().unwrap();
     assert_eq!(again.squashed, None, "an already parentless state is a no-op");
-    assert!(again.pruned.is_empty());
 }
 
 #[test]
@@ -976,9 +972,8 @@ fn sync_joins_every_replica_through_the_remote_and_a_squash_passes_the_ruleset()
     // Compaction rewrites local state; a later sync propagates it while audit segments only fast-forward.
     let audit_before =
         git(&mac_path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/log/"]);
-    let compacted = mac.compact(NOW).unwrap();
+    let compacted = mac.compact().unwrap();
     assert!(compacted.squashed.is_some());
-    assert!(compacted.pruned.is_empty());
     assert_eq!(
         git(&mac_path, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/log/"]),
         audit_before

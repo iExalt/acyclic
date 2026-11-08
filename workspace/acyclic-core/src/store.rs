@@ -257,8 +257,6 @@ pub enum Outcome {
 pub struct Compacted {
     /// The replacement state commit, when a non-parentless state history was squashed.
     pub squashed: Option<String>,
-    /// Audit files removed by pruning. Compaction currently preserves every audit event, so this is empty.
-    pub pruned: Vec<String>,
 }
 
 /// A tracker repository opened as one replica.
@@ -599,17 +597,16 @@ impl Tracker {
         self.git.first_parent_commits_at_least(&tip, minimum)
     }
 
-    /// Conservatively prunes eligible storage and squashes this replica's local state history.
+    /// Squashes this replica's local state history.
     ///
     /// Audit history is retained in full. A later sync propagates the local squash to peers.
     ///
     /// # Errors
     ///
     /// Fails when Git cannot read or update the local refs.
-    pub fn compact(&self, now: Millis) -> Result<Compacted, StoreError> {
-        let pruned = self.prune(now, &|_| None, &|_, _| false)?;
+    pub fn compact(&self) -> Result<Compacted, StoreError> {
         let squashed = self.squash()?;
-        Ok(Compacted { squashed, pruned })
+        Ok(Compacted { squashed })
     }
 
     /// Sets how old a lock on this replica's own refs must be before a writer removes it, for tests that need a short one.

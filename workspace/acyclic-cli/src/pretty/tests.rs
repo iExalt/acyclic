@@ -236,15 +236,15 @@ fn init_and_sync_name_the_tracker_and_distinguish_local_changes_from_pushes() {
 #[test]
 fn compact_pretty_output_says_local_state_and_audit_are_separate() {
     let command = command("compact");
-    let changed = json!({"changed": true, "squashed": "abc123", "pruned": []});
-    let unchanged = json!({"changed": false, "squashed": null, "pruned": []});
+    let changed = json!({"changed": true, "squashed": "abc123"});
+    let unchanged = json!({"changed": false, "squashed": null});
     assert_eq!(
         render(&command, &changed, None, &BTreeMap::new()),
-        "compacted local state history · audit history retained · pruned 0 audit files\n"
+        "compacted local state history · audit history retained\n"
     );
     assert_eq!(
         render(&command, &unchanged, None, &BTreeMap::new()),
-        "no compaction needed for local state history · audit history retained · pruned 0 audit files\n"
+        "no compaction needed for local state history · audit history retained\n"
     );
 }
 
