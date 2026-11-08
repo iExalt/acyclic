@@ -33,6 +33,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Locator, Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
@@ -1619,7 +1620,7 @@ def search_selection_journey(context, origin, plan, name, failures):
         search_item()
         opened_and_framed("already-visible Search")
         page.screenshot(path=SHOTS / f"app-{name}-search-visible-after.png")
-    except Exception as error:
+    except PlaywrightError as error:
         failures.append(f"{name}: Search selection framing failed: {error}")
         page.screenshot(path=SHOTS / f"app-{name}-search-selection-failure.png")
     finally:
