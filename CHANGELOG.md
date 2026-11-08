@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.10.0](https://github.com/iExalt/acyclic/compare/v0.9.0...v0.10.0) (2026-11-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cli:** allow deletion of any item ([#261](https://github.com/iExalt/acyclic/issues/261))
+* **cli:** an import item's `"thread": null` now means "in no thread". A new item stays out of its siblings' thread, and an existing item leaves its thread; one with no thread, or only its own thread of one, is unchanged. Before, `null` read as left out, which keeps what the item holds, and older builds still read it that way. Import documents also write the state `open` instead of `backlog`.
+
+### Features
+
+* **cli:** export the whole plan as an import document ([e84dd4c](https://github.com/iExalt/acyclic/commit/e84dd4cafe40af841863ce1d7b4f094f62a8470d))
+
+
+### Bug Fixes
+
+* **cli:** allow deletion of any item ([#261](https://github.com/iExalt/acyclic/issues/261)) ([8d73124](https://github.com/iExalt/acyclic/commit/8d73124e76c72bcd9ec262aa94c8d2bed3dfe15c))
+
 ## [0.9.0](https://github.com/iExalt/acyclic/compare/v0.8.0...v0.9.0) (2026-11-08)
 
 
