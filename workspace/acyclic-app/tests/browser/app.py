@@ -4328,6 +4328,57 @@ def labels_journey(browser, link, ids, titles):
             context.close()
 
 
+@timed
+def hover_tints_journey(page, view, name):
+    """A real settings tap leaves :hover matched, but must not leave its tint behind."""
+    touch = view.get("has_touch", False)
+    assert page.evaluate("matchMedia('(hover: hover)').matches") is not touch
+    assert page.evaluate("matchMedia('(pointer: coarse)').matches") is touch
+    page.get_by_test_id("menu").tap() if touch else page.get_by_test_id("menu").click()
+    label = page.locator("label:has([data-testid=shortcuts])")
+    read = """e => ({bg: getComputedStyle(e).backgroundColor,
+      hover: e.matches(':hover'), focus: e.matches(':focus-visible')})"""
+    before = label.evaluate(read)
+    label.tap() if touch else label.hover()
+    after = label.evaluate(read)
+    assert after["hover"] and not after["focus"], (name, after)
+    assert (before["bg"] == after["bg"]) is touch, (name, before, after)
+    page.screenshot(path=SHOTS / f"app-{name}-hover-tints.png")
+    if touch:
+        label.tap()  # Restore the setting for the other journeys.
+    page.keyboard.press("Escape")
+    print(f"{name}: settings hover {before} -> {after}")
+
+
+@timed
+def hover_focus_journey(browser):
+    """Focus paint works without hover, and disabled/selected fills remain unchanged with it."""
+    for name, view in VIEWS.items():
+        context = browser.new_context(**view)
+        try:
+            page = context.new_page()
+            page.set_content("""<!DOCTYPE html><meta name="viewport" content="width=device-width, initial-scale=1">
+              <button class="primary" disabled>Disabled</button>
+              <button class="primary" aria-disabled="true">Unavailable</button>
+              <button class="view" aria-current="page">Overview</button>
+              <div class="menu-list"><button class="menu-action">Edit</button></div>""")
+            page.add_style_tag(path=Path(__file__).resolve().parents[2] / "src/app.css")
+            background = "e => getComputedStyle(e).backgroundColor"
+            if not view.get("has_touch"):
+                for control in page.locator(".primary, .view").all():
+                    page.mouse.move(1400, 880)
+                    before = control.evaluate(background)
+                    control.hover()
+                    assert control.evaluate(background) == before, control.inner_text()
+            page.keyboard.press("Tab")
+            page.locator(".menu-action").focus()
+            assert page.locator(".menu-action").evaluate("e => e.matches(':focus-visible')")
+            assert page.locator(".menu-action").evaluate(background) != "rgba(0, 0, 0, 0)"
+        finally:
+            context.close()
+    print("Menu keyboard tint and disabled/selected fills checked")
+
+
 def shard_run(shard):
     """Runs one shard of the journeys, and leaves its timings and failures where the driver reads them."""
     assert shard in SHARDS, f"unknown shard {shard}"
@@ -4414,6 +4465,7 @@ def shard_run(shard):
         try:
             if shard == "small":
                 chromium = playwright.chromium.launch()
+                hover_focus_journey(chromium)
                 label_link, label_ids, label_titles = serve_labels()
                 labels_journey(chromium, label_link, label_ids, label_titles)
                 # Only these two roots share the packing, so a shrink can be measured without other roots obscuring it.
@@ -4470,6 +4522,7 @@ def shard_run(shard):
                         failures.append(
                             f"{name}: the page lists {count} items, expected {total}"
                         )
+                    hover_tints_journey(page, view, name)
                     installable(context, page, origin, name, failures)
                     overview_journey(page, view, name, failures)
                     to_map(page)

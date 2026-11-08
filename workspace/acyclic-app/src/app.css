@@ -154,8 +154,10 @@ button.primary {
   border-color: var(--accent);
   color: var(--accent-ink);
 }
-button.primary:hover:not(:disabled, [aria-disabled="true"]) {
-  background: color-mix(in srgb, var(--accent) 85%, var(--ground));
+@media (hover: hover) {
+  button.primary:hover:not(:disabled, [aria-disabled="true"]) {
+    background: color-mix(in srgb, var(--accent) 85%, var(--ground));
+  }
 }
 button.quiet,
 button.close {
@@ -336,9 +338,11 @@ button.view {
   text-align: left;
 }
 /* Not the view shown: filled under a pointer left on it, or a finger just lifted, it read as a second view shown. */
-button.view:hover:not(:disabled, [aria-current="page"]) {
-  color: var(--ink);
-  background: var(--hover);
+@media (hover: hover) {
+  button.view:hover:not(:disabled, [aria-current="page"]) {
+    color: var(--ink);
+    background: var(--hover);
+  }
 }
 /* The view shown is filled, so one place reads as where the user is. */
 button.view[aria-current="page"] {
@@ -1638,10 +1642,12 @@ button.row {
   font-size: 14px;
   font-weight: 400;
 }
-.need-items button.row:hover:not(:disabled) {
-  background: none;
-  color: var(--ink);
-  text-decoration: underline;
+@media (hover: hover) {
+  .need-items button.row:hover:not(:disabled) {
+    background: none;
+    color: var(--ink);
+    text-decoration: underline;
+  }
 }
 /* A phone's at 13 px, the text's weight, set close; how many more alike. */
 @media (max-width: 899px) {
@@ -2216,8 +2222,10 @@ dl.facts .chip.line {
   border-color: transparent;
   background: none;
 }
-dl.facts .chip:hover:not(:disabled) {
-  background: var(--hover);
+@media (hover: hover) {
+  dl.facts .chip:hover:not(:disabled) {
+    background: var(--hover);
+  }
 }
 .links {
   margin-top: 14px;
@@ -2233,8 +2241,10 @@ dl.facts .chip:hover:not(:disabled) {
   align-items: center;
   border-radius: 6px;
 }
-.links .link:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .links .link:hover {
+    background: var(--hover);
+  }
 }
 .link-row {
   display: flex;
@@ -2312,7 +2322,11 @@ dl.facts .chip:hover:not(:disabled) {
 .menu-list .menu-action .grow {
   color: var(--ink);
 }
-.menu-list .menu-action:hover:not(:disabled),
+@media (hover: hover) {
+  .menu-list .menu-action:hover:not(:disabled) {
+    background: var(--hover);
+  }
+}
 .menu-list .menu-action:focus-visible {
   background: var(--hover);
 }
@@ -2468,9 +2482,11 @@ button.notice-backdrop:hover {
   min-height: 44px;
   padding: 0 14px;
 }
-.bar .menu-body label:has(> input[type="checkbox"]):hover,
-.sidebar-foot .menu-body label:has(> input[type="checkbox"]):hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .bar .menu-body label:has(> input[type="checkbox"]):hover,
+  .sidebar-foot .menu-body label:has(> input[type="checkbox"]):hover {
+    background: var(--hover);
+  }
 }
 /* The checkbox drawn as a switch, in CSS alone: a track, and a knob that slides to the end when on. */
 .bar .menu-body input[type="checkbox"],
@@ -2524,9 +2540,11 @@ button.notice-backdrop:hover {
   background-color: transparent;
   font-size: 14px;
 }
-.bar .menu-body select:hover,
-.sidebar-foot .menu-body select:hover {
-  background-color: var(--hover);
+@media (hover: hover) {
+  .bar .menu-body select:hover,
+  .sidebar-foot .menu-body select:hover {
+    background-color: var(--hover);
+  }
 }
 /* Notify this device's reason, when it can't: under its row, inset as the row's name is. */
 .bar .menu-body .notify .why,
