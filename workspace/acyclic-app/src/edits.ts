@@ -184,7 +184,8 @@ export function withPending(items: Item[], pending: Pending | null): Item[] {
           ...one,
           title: changed.title ?? one.title,
           // A done item's state isn't the editor's to change.
-          state: one.state === "done" ? one.state : (changed.state ?? one.state),
+          state:
+            one.state === "done" ? one.state : edited.draft.state === "done" ? "done" : (changed.state ?? one.state),
           thread: or(changed.thread, one.thread),
           notes: or(changed.notes, one.notes),
         },
@@ -196,6 +197,16 @@ export function landed(pending: Pending, items: Item[]): boolean {
   if (pending.kind === "add") return items.some((one) => one.id === pending.item.id);
   const item = items.find((one) => one.id === pending.id);
   if (item === undefined) return false;
+  if (pending.edited.base.state !== "done" && pending.edited.draft.state === "done") {
+    const evidence = item.evidence;
+    return (
+      item.state === "done" &&
+      evidence != null &&
+      !("conflict" in evidence) &&
+      evidence.commit === null &&
+      evidence.text === pending.edited.draft.evidence?.trim()
+    );
+  }
   const now = draftOf(item);
   return Object.entries(changes(pending.edited.base, pending.edited.draft)).every(
     ([field, value]) => now[field as keyof ItemDraft] === value,

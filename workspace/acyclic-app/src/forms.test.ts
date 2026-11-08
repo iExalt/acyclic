@@ -63,3 +63,20 @@ describe("stateHint", () => {
     expect(stateHint({ state: "parked", thread: "thread-1" }, true)).toBeNull();
   });
 });
+
+describe("completion", () => {
+  const base = draftOf(item("a"));
+  it("uses the completion command with trimmed evidence and no force", () => {
+    expect(itemEdit("a", base, { ...base, state: "done", evidence: "  Finished the work  " })).toEqual({
+      item: { done: { item: "a", evidence: "Finished the work" } },
+    });
+  });
+  it("refuses blank evidence and combined field changes instead of partially saving", () => {
+    expect(itemEdit("a", base, { ...base, state: "done", evidence: "  " })).toBeNull();
+    for (const field of ["title", "thread", "notes"] as const)
+      expect(itemEdit("a", base, { ...base, [field]: "Changed", state: "done", evidence: "Finished" })).toBeNull();
+    expect(
+      itemEdit("a", base, { ...base, title: ` ${base.title} `, state: "done", evidence: "Finished" }),
+    ).not.toBeNull();
+  });
+});

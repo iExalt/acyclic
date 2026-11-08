@@ -7,6 +7,7 @@ import type { Command, Item } from "./api";
 export const STATES = ["open", "parked", "canceled"] as const;
 /** Explain an open state separately from the status computed for a leaf. */
 export function stateHint(draft: Pick<ItemDraft, "state" | "thread">, isLeaf: boolean): string | null {
+  if (draft.state === "done") return "Done work lets work waiting on it start. Describe what was completed";
   if (draft.state === "canceled")
     return "Canceled work is dropped: it counts as neither done nor open, and work waiting on it needs you. Open undoes it";
   if (!isLeaf || draft.state !== "open") return null;
@@ -19,6 +20,8 @@ export interface ItemDraft {
   state: string;
   thread: string;
   notes: string;
+  /** Unsaved completion evidence, kept when a failed save restores the editor. */
+  evidence?: string;
 }
 
 export function draftOf(item: Item): ItemDraft {
@@ -47,6 +50,11 @@ export function changes(base: ItemDraft, draft: ItemDraft): Partial<ItemDraft> {
 /** The edit of item `id` that makes the user's changes from `base` to `draft`, or null when they made none. */
 export function itemEdit(id: string, base: ItemDraft, draft: ItemDraft): Command | null {
   const changed = changes(base, draft);
+  if (base.state !== "done" && draft.state === "done") {
+    const evidence = draft.evidence?.trim() ?? "";
+    if (Object.keys(changed).length !== 0 || evidence === "") return null;
+    return { item: { done: { item: id, evidence } } };
+  }
   const edit: Record<string, unknown> = {};
   for (const [field, value] of Object.entries(changed)) {
     if (value === "") edit[`no-${field}`] = true;

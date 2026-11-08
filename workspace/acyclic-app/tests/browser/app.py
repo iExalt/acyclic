@@ -34,7 +34,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import Locator, Page, sync_playwright
+from playwright.sync_api import Locator, Page, expect, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 ACYCLIC, FIXTURES = (str(Path(arg).resolve()) for arg in sys.argv[1:3])
@@ -3778,6 +3778,79 @@ def form_journey(page, view, env, remote, id, name, failures):
     )
 
 
+
+@timed
+def completion_journey(page, view, env, origin, name, failures):
+    """Completes a leaf with evidence, preserving failed drafts and deriving its parent's progress."""
+    initiative = json.loads(run(env, "initiative", "list"))["data"]["initiatives"][0]["id"]
+    parent = json.loads(run(env, "item", "add", "--parent", initiative, "--title", f"Completion group {name}", "--no-thread"))["data"]["item"]
+    leaf = json.loads(run(env, "item", "add", "--parent", parent, "--title", f"Completion task {name}", "--no-thread"))["data"]["item"]
+    page.goto(f"{origin}/?item={quote(parent)}")
+    page.locator("[data-action=edit]").click()
+    editor = page.get_by_test_id("item-form")
+    expect(editor.locator("select[name=state] option[value=done]")).to_have_count(0)
+    editor.get_by_role("button", name="Cancel", exact=True).click()
+    page.goto(f"{origin}/?item={quote(leaf)}")
+    page.locator("[data-action=edit]").click()
+    title = editor.locator("input[name=title]")
+    expect(editor.locator("option[value=done]")).to_have_count(1)
+    title.fill(f"Completed task {name}")
+    expect(editor.locator("option[value=done]")).to_have_attribute("disabled", "")
+    editor.get_by_role("button", name="Save", exact=True).click()
+    editor.wait_for(state="detached")
+    page.locator("main.stage[data-busy=false]").wait_for()
+    page.locator("[data-action=edit]").click()
+    state = editor.locator("select[name=state]")
+    state.select_option("done")
+    evidence = editor.get_by_role("textbox", name="Completion evidence", exact=True)
+    submit = editor.get_by_role("button", name="Mark done", exact=True)
+    evidence.fill("  ")
+    expect(submit).to_be_disabled()
+    evidence.fill("Checked the completed work")
+    state.select_option("open")
+    state.select_option("done")
+    expect(evidence).to_have_value("Checked the completed work")
+    expect(title).to_be_disabled()
+    page.keyboard.press("Escape")
+    expect(editor).to_have_count(1)
+    close_notice_details(page)
+    seen = []
+
+    def refuse(route):
+        body = route.request.post_data_json
+        command = body.get("command", body) if isinstance(body, dict) else body
+        if isinstance(command, dict) and "done" in command.get("item", {}):
+            seen.append(body)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": False, "error": {"code": "invalid", "message": "Completion refused for the journey", "details": None}}))
+        else:
+            route.fallback()
+
+    page.route("**/api/command", refuse)
+    try:
+        submit.click()
+        show_notice(page).get_by_text("Completion refused for the journey", exact=True).wait_for()
+        page.locator("main.stage[data-busy=false]").wait_for()
+        expect(state).to_have_value("done")
+        expect(evidence).to_have_value("Checked the completed work")
+        assert len(seen) == 1 and not seen[0].get("command", seen[0])["item"]["done"].get("force"), "completion did not use the unforced done command"
+    finally:
+        page.unroute("**/api/command", refuse)
+    page.screenshot(path=SHOTS / f"app-{name}-done-evidence.png")
+    close_notice_details(page)
+    submit.click()
+    editor.wait_for(state="detached")
+    page.locator("main.stage[data-busy=false]").wait_for()
+    row = json.loads(run(env, "item", "show", leaf))["data"][0]
+    assert row["state"] == "done" and "Checked the completed work" in json.dumps(row["evidence"]), "completion or its evidence was not saved"
+    group = json.loads(run(env, "item", "show", parent))["data"][0]
+    assert group["state"] == "open" and group["stage"] == "done", "parent completion was not derived"
+    item_action(page, "reopen")
+    page.locator("[data-action=reopen]").wait_for(state="detached")
+    page.locator("main.stage[data-busy=false]").wait_for()
+    assert json.loads(run(env, "item", "show", leaf))["data"][0]["state"] == "open", "completed item did not reopen"
+    print(f"{name}: Done preserved evidence through a refusal, finished a leaf and its parent, and reopened")
+
+
 def settled_control(page, selector, prop, value):
     """Waits until a control shows `value` and is enabled again, once the edit it sent is saved and read back."""
     page.wait_for_function(
@@ -4633,6 +4706,8 @@ def shard_run(shard):
                         plan = Plan(env)
                         guarded_undo_race(page, view, env, plan, name, failures, errors)
                         plan = Plan(env)
+                    completion_journey(page, view, env, origin, name, failures)
+                    plan = Plan(env)
                     page.screenshot(path=SHOTS / f"app-{name}.png")
                     if errors:
                         failures.append(

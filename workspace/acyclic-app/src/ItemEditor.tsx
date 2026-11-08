@@ -4,7 +4,7 @@ import { type FormEvent, useRef, useState } from "react";
 import type { Command, Item } from "./api";
 import type { Edited } from "./edits";
 import { useFieldInView } from "./focus";
-import { draftOf, type ItemDraft, itemEdit, STATES, stateHint } from "./forms";
+import { changes, draftOf, type ItemDraft, itemEdit, STATES, stateHint } from "./forms";
 import { StageLabel } from "./Stage";
 import { stateWords } from "./stages";
 
@@ -25,6 +25,9 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
   const [draft, setDraft] = useState<ItemDraft>(() => initial?.draft ?? base);
   const set = (field: keyof ItemDraft) => (event: { target: { value: string } }) =>
     setDraft((was) => ({ ...was, [field]: event.target.value }));
+  const completing = base.state !== "done" && draft.state === "done";
+  const otherChanges = Object.keys(changes(base, { ...draft, state: base.state })).length !== 0;
+  const leaf = item.progress === undefined && item.stage !== undefined;
   const edit = itemEdit(item.id, base, draft);
   // A leaf core has placed: a parent has a stage too, from its leaves, and progress besides.
   const hint = stateHint(draft, item.progress === undefined && item.stage !== undefined);
@@ -32,6 +35,7 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
   useFieldInView(form);
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (completing && edit === null) return;
     if (edit === null) onCancel();
     else onSave(edit, { base, draft });
   };
@@ -41,10 +45,10 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
       className="fields"
       data-testid="item-form"
       // What the user changed, which no key throws away; unchanged, Escape closes the editor alone.
-      data-dirty={edit !== null}
+      data-dirty={edit !== null || completing}
       onSubmit={submit}
       onKeyDown={(event) => {
-        if (event.key !== "Escape" || edit !== null) return;
+        if (event.key !== "Escape" || edit !== null || completing) return;
         event.stopPropagation();
         onCancel();
       }}
@@ -52,9 +56,9 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
       <label>
         Title
         {/* biome-ignore lint/a11y/noAutofocus: the editor opens to change what it says, its title first */}
-        <input name="title" value={draft.title} autoFocus onChange={set("title")} />
+        <input name="title" value={draft.title} autoFocus onChange={set("title")} disabled={completing} />
       </label>
-      {item.state === "done" ? (
+      {item.state === "done" && !completing ? (
         // Finished work's state is set by finishing it, so it reads as the panel says it, not as a field.
         <div className="fixed-field">
           State
@@ -74,7 +78,16 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
                 {stateWords(state)}
               </option>
             ))}
+            {leaf ? (
+              <option value="done" disabled={otherChanges}>
+                Done
+              </option>
+            ) : null}
           </select>
+          {leaf && otherChanges ? (
+            <span className="hint">Save your other changes before marking this item done.</span>
+          ) : null}
+          {!leaf ? <span className="hint">Done follows the completion of this item's children.</span> : null}
           {hint === null ? null : (
             <span className="hint" id="state-hint">
               {hint}
@@ -82,9 +95,15 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
           )}
         </label>
       )}
+      {completing ? (
+        <label>
+          Completion evidence
+          <textarea name="evidence" rows={3} value={draft.evidence ?? ""} onChange={set("evidence")} required />
+        </label>
+      ) : null}
       <label>
         Thread
-        <select name="thread" value={draft.thread} onChange={set("thread")}>
+        <select name="thread" value={draft.thread} onChange={set("thread")} disabled={completing}>
           <option value="">None</option>
           {threads.map((one) => (
             <option key={one.id} value={one.id}>
@@ -95,11 +114,11 @@ export function ItemEditor({ item, threads, initial, busy, onSave, onCancel }: I
       </label>
       <label>
         Notes
-        <textarea name="notes" rows={4} value={draft.notes} onChange={set("notes")} />
+        <textarea name="notes" rows={4} value={draft.notes} onChange={set("notes")} disabled={completing} />
       </label>
       <div className="actions">
         <button type="submit" className="primary" disabled={busy || edit === null}>
-          Save
+          {completing ? "Mark done" : "Save"}
         </button>
         <button type="button" className="quiet" onClick={onCancel}>
           Cancel
