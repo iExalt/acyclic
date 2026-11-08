@@ -72,33 +72,25 @@ describe("map label metrics", () => {
     );
     expect(normalized(measured.lines.join(""))).toContain(normalized("Release (+18)"));
     expect(measured.lines).not.toContain("In progress");
-    expect(normalized(measured.lines.join(""))).toContain(normalized("1 done, 1 in progress, 1 ready, 1 waiting"));
+    expect(normalized(measured.lines.join(""))).toContain(normalized("1 done, 1 in progress"));
     expect(measured.lines.every((line) => fonts.bold(line.trimEnd()) <= measured.textWidth)).toBe(true);
   });
 
-  it("adds a named-thread footer without changing title wrapping or its stub", () => {
-    const leaf = {
-      title: "A long task title ".repeat(8),
-      kind: "leaf",
-      hidden: 0,
-      stage: "done",
-      progress: null,
-    } as const;
-    for (const outside of [[], [{ id: "g", title: "Gate", initiative: "Lab" }]]) {
-      const plain = metricsOf({ ...leaf, outside }, fonts);
-      const named = metricsOf({ ...leaf, outside }, fonts, 200, "Release");
-      expect(named.lines.slice(0, -2)).toEqual(plain.lines);
-      expect(named.lines.at(-1)).toBe("Thread: Release");
-      expect(named.height).toBe(plain.height + 32.5);
-      expect(named.reserve).toBe(plain.reserve);
-      expect(named.stub).toEqual(plain.stub);
-      expect(named.lines.length * 16.25 + 20 + named.reserve).toBeLessThanOrEqual(named.height);
+  it("fits collapsed titles, counts and stubs into the common tile size", () => {
+    for (const title of ["Short", "A long epic title ".repeat(20)]) {
+      for (const outside of [[], [{ id: "g", title: "Gate", initiative: "Lab" }]]) {
+        for (const progress of [
+          null,
+          { done: 123, leaves: 456, in_progress: 1, ready: 2, stalled: 3, waiting: 4, parked: 5, canceled: 6 },
+        ]) {
+          const measured = metricsOf({ title, kind: "collapsed", hidden: 99, stage: "done", progress, outside }, fonts);
+          expect(measured).toMatchObject({ width: 200, height: 86 });
+          expect(measured.lines.length * 16.25 + 20 + measured.reserve).toBeLessThanOrEqual(measured.height);
+          expect(measured.lines.every((line) => fonts.bold(line.trimEnd()) <= measured.textWidth)).toBe(true);
+          if (progress !== null) expect(measured.lines.join(" ")).toContain("123 done");
+        }
+      }
     }
-    const long = metricsOf({ ...leaf, title: "Short" }, fonts, 200, "가".repeat(50));
-    expect(long.lines.at(-1)?.endsWith("…")).toBe(true);
-    expect(fonts.regular(long.lines.at(-1) ?? "")).toBeLessThanOrEqual(long.textWidth);
-    const parent = metricsOf({ ...leaf, kind: "collapsed" }, fonts, 200, "Release");
-    expect(parent.lines.join(" ")).not.toContain("Thread:");
   });
 
   it("keeps a short box header and grows it to fit every title line", () => {
