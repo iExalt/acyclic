@@ -36,6 +36,9 @@ A quiet tool (Operate mode throughout), in the manner of Linear: neutral surface
 the accent, so colour is left to the threads' lines and the signal. The scheme follows the system's, light or dark,
 unless the menu's Theme picks one on the device (System, Light or Dark; System by default).
 
+The Overview section headings and initiative navigation omit count badges at zero. Empty sections keep their
+explanations, and empty initiatives remain visible and selectable; positive badges keep their existing values.
+
 ## Colors
 
 `PALETTES` in `src/palette.ts` is the source; `app.css` repeats it as custom properties under `/* palettes */`, each

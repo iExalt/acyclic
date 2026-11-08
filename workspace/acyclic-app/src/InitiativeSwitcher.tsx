@@ -30,10 +30,12 @@ export function InitiativeSwitcher({ rows, context, onChoose }: SwitcherProps) {
               <span className="initiative-name">
                 <Prose text={row.title} />
               </span>
-              <span className="initiative-count">
-                {row.open}
-                <span className="open"> open</span>
-              </span>
+              {row.open > 0 && (
+                <span className="initiative-count">
+                  {row.open}
+                  <span className="open"> open</span>
+                </span>
+              )}
             </button>
           </li>
         ))}
