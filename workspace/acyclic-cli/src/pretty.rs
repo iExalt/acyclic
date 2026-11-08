@@ -65,9 +65,8 @@ pub(crate) fn render(
             }
         },
         Command::Compact => format!(
-            "{} local state history · audit history retained · pruned {} audit files",
-            if data["changed"] == true { "compacted" } else { "no compaction needed for" },
-            rows(&data["pruned"]).len()
+            "{} local state history · audit history retained",
+            if data["changed"] == true { "compacted" } else { "no compaction needed for" }
         ),
         Command::Item(ItemCommand::Add { waits_for, .. }) => waits(write(data), waits_for, &[]),
         Command::Item(ItemCommand::Edit(edit)) => {

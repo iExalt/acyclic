@@ -1741,7 +1741,6 @@ fn explicit_compaction_is_local_idempotent_and_preserves_audit_refs() {
     assert_eq!(code, 0, "{}", sh.transcript);
     assert_eq!(first["data"]["changed"], true);
     assert!(first["data"]["squashed"].as_str().is_some());
-    assert_eq!(first["data"]["pruned"], json!([]));
     assert_eq!(git(&tracker, &["rev-parse", "refs/heads/state/mac^{tree}"]), tree_before);
     assert_eq!(sh.output("item list", AGENT).1["data"], items_before);
     assert_eq!(
@@ -1764,7 +1763,7 @@ fn explicit_compaction_is_local_idempotent_and_preserves_audit_refs() {
 
     let (code, second) = sh.output("compact", AGENT);
     assert_eq!(code, 0, "{}", sh.transcript);
-    assert_eq!(second["data"], json!({"changed": false, "squashed": null, "pruned": []}));
+    assert_eq!(second["data"], json!({"changed": false, "squashed": null}));
 }
 
 #[test]

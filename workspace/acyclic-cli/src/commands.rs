@@ -783,12 +783,10 @@ impl<'a> CommandContext<'a> {
     }
 
     fn compact(&self) -> Result<Json, CliError> {
-        let compacted = self.tracker.compact(self.now)?;
-        let changed = compacted.squashed.is_some() || !compacted.pruned.is_empty();
+        let compacted = self.tracker.compact()?;
         Ok(json!({
-            "changed": changed,
+            "changed": compacted.squashed.is_some(),
             "squashed": compacted.squashed,
-            "pruned": compacted.pruned,
         }))
     }
 
