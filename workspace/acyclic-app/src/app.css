@@ -886,7 +886,7 @@ button.project-title {
   z-index: 1;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 12px 12px 24px;
+  padding: 24px;
   background: var(--ground);
 }
 .waves .columns {
@@ -894,6 +894,15 @@ button.project-title {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+.waves > .wave.anytime {
+  width: auto;
+}
+
+.waves > .columns + .wave.anytime {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--rule);
 }
 .wave h2 {
   margin: 0 0 8px;
@@ -919,6 +928,10 @@ button.project-title {
   .wave ul {
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   }
+}
+.anytime > ul {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  align-items: start;
 }
 .thread-tile {
   position: relative;
@@ -1019,6 +1032,9 @@ button.project-title {
   font-size: 0.8rem;
 }
 @media (max-width: 899px) {
+  .waves {
+    padding: 16px;
+  }
   .waves .columns {
     gap: 16px;
   }
@@ -2069,14 +2085,7 @@ button.more {
   }
   .wave {
     flex: none;
-    width: 220px;
-  }
-  /* The divider halfway between Any time and wave 1. */
-  .wave.anytime {
-    padding-right: 32px;
-    margin-right: -32px;
-    border-right: 1px dashed var(--edge);
-    box-sizing: content-box;
+    width: 280px;
   }
 }
 

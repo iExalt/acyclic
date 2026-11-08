@@ -237,9 +237,8 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
         "z-index": 999,
       },
     },
-    // A box's line between its items aside and its graph: dashed, in the controls' edge colour, as the Threads view's
-    // divider before wave 1 is; a pixel-wide node filled with a dash repeated down it, as Cytoscape draws no border on
-    // a node with no width.
+    // A box's line between its unlinked items and its graph: dashed, in the controls' edge colour; a pixel-wide node
+    // filled with a dash repeated down it, as Cytoscape draws no border on a node with no width.
     {
       selector: "node.divider",
       style: {

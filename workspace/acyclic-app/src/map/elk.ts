@@ -123,7 +123,7 @@ export function beside(
     height,
     at,
     // Halfway across the wider gap, from under the title to the padding at the foot: the items that can start any
-    // time stand apart from the ones their links order, as the Threads view's Any time column does.
+    // time stand apart from the ones their links order, as the Threads view's Any time section does.
     divider: { x: placed.right + ASIDE / 2, top: header, bottom: height - PAD },
     ...(routes === undefined ? {} : { routes }),
     ...(junctions === undefined ? {} : { junctions }),

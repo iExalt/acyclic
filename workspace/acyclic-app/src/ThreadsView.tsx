@@ -1,6 +1,5 @@
-// The Threads view: the threads with work left in waves of what to start first, a column a wave, and those that can
-// start any time apart, first, on the left. A tile names what it waits on; side by side, arrows show the picked or
-// hovered thread's links.
+// Dependency waves come first, a column per wave, followed by an independent grid of threads that can start any time.
+// A tile names what it waits on; side by side, arrows show the picked or hovered thread's links.
 
 import { useLayoutEffect, useMemo, useState } from "react";
 import { type Box, boundsOf, type Column, gapWidths, headOf, pathOf, type Route, routes, type Wait } from "./arrows";
@@ -30,6 +29,7 @@ export interface ThreadsViewProps {
 const MOST_TASKS = 3;
 
 export function ThreadsView({ view, lines, picked, wide, onPick, onOpen }: ThreadsViewProps) {
+  const [routedHeight, setRoutedHeight] = useState(0);
   const [hovered, setHovered] = useState<string | null>(null);
   // A state, not a ref: the arrows measure the columns once they are there, which a ref wouldn't tell them.
   const [columns, setColumns] = useState<HTMLDivElement | null>(null);
@@ -135,39 +135,49 @@ export function ThreadsView({ view, lines, picked, wide, onPick, onOpen }: Threa
   return (
     <section className="waves" data-testid="threads-view" aria-label="Threads in waves">
       {empty ? <p className="status">No thread has work left.</p> : null}
-      <div className="columns" ref={setColumns}>
-        {wide && (hovered !== null || picked !== null) ? (
-          <Arrows view={view} waits={waits} widths={widths} lines={lines} lit={hovered ?? picked} within={columns} />
-        ) : null}
-        {view.anytime.length === 0 ? null : (
-          <section className="wave anytime" data-wave="anytime" aria-label="Any time">
-            <h2>
-              Any time <small>No threads to wait for or hold up</small>
-            </h2>
-            <ul>{view.anytime.map(tile)}</ul>
-          </section>
-        )}
-        {view.waves.map((tiles, at) => (
-          <section
-            key={at}
-            className="wave"
-            data-wave={at + 1}
-            aria-label={`Wave ${at + 1}`}
-            style={
-              wide
-                ? {
-                    marginRight: (widths[at] ?? GAP) - (at + 1 < view.waves.length ? GAP : 0),
-                  }
-                : undefined
-            }
-          >
-            <h2>
-              Wave {at + 1} <small>{at === 0 ? "start here" : `after wave ${at}`}</small>
-            </h2>
-            <ul>{tiles.map(tile)}</ul>
-          </section>
-        ))}
-      </div>
+      {view.waves.length === 0 ? null : (
+        <div className="columns" ref={setColumns} style={{ minHeight: wide ? routedHeight : undefined }}>
+          {wide ? (
+            <Arrows
+              view={view}
+              waits={waits}
+              widths={widths}
+              lines={lines}
+              lit={hovered ?? picked}
+              within={columns}
+              onHeight={setRoutedHeight}
+            />
+          ) : null}
+          {view.waves.map((tiles, at) => (
+            <section
+              key={at}
+              className="wave"
+              data-wave={at + 1}
+              aria-label={`Wave ${at + 1}`}
+              style={
+                wide
+                  ? {
+                      marginRight: (widths[at] ?? GAP) - (at + 1 < view.waves.length ? GAP : 0),
+                    }
+                  : undefined
+              }
+            >
+              <h2>
+                Wave {at + 1} <small>{at === 0 ? "start here" : `after wave ${at}`}</small>
+              </h2>
+              <ul>{tiles.map(tile)}</ul>
+            </section>
+          ))}
+        </div>
+      )}
+      {view.anytime.length === 0 ? null : (
+        <section className="wave anytime" data-wave="anytime" aria-label="Any time">
+          <h2>
+            Any time <small>No threads to wait for or hold up</small>
+          </h2>
+          <ul>{view.anytime.map(tile)}</ul>
+        </section>
+      )}
     </section>
   );
 }
@@ -184,6 +194,7 @@ function Arrows({
   lines,
   lit,
   within,
+  onHeight,
 }: {
   view: WavesView;
   waits: Wait[];
@@ -191,6 +202,7 @@ function Arrows({
   lines: ReadonlyMap<string, Line>;
   lit: string | null;
   within: HTMLDivElement | null;
+  onHeight: (height: number) => void;
 }) {
   const [found, setFound] = useState<Route[]>([]);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -225,6 +237,8 @@ function Arrows({
       const routed = routes(columns, waits, beyond);
       const bounds = boundsOf(routed);
       setFound(routed);
+      // Reserve the routes before hover too, so revealing one never moves the independent grid.
+      onHeight(bounds === null ? 0 : bounds.bottom + 12);
       // Room for routes that run below the columns or past them, which the scroll then reaches.
       setSize({
         width: Math.max(host.offsetWidth, (bounds?.right ?? 0) + 12),
@@ -234,8 +248,9 @@ function Arrows({
     measure();
     const watch = new ResizeObserver(measure);
     watch.observe(host);
+    for (const wave of host.querySelectorAll(".wave")) watch.observe(wave);
     return () => watch.disconnect();
-  }, [view, waits, widths, within]);
+  }, [view, waits, widths, within, onHeight]);
   const on = (route: Route) => lit !== null && (route.from === lit || route.to === lit);
   const ordered = found.filter(on);
   return (
