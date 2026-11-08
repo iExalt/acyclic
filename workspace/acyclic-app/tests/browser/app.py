@@ -2508,6 +2508,7 @@ def threads_journey(page, view, env, plan, name, failures):
         verify_thread_arrows(page, listed, want, name, failures)
     elif page.locator(".arrows g").count():
         failures.append(f"{name}: the phone drew connectors without hover support")
+    threads_layout(page, view, name)
     # A thread with work to start, whose panel offers it. Its tile goes to the Map with the panel open, as a thread's
     # row anywhere does.
     ready = [row["id"] for row in json.loads(run(env, "thread", "ready"))["data"]["ready"] if row["id"] in want]
@@ -2568,12 +2569,68 @@ def threads_journey(page, view, env, plan, name, failures):
             page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from the Threads view didn't go home to the Overview")
+    if not view.get("has_touch"):
+        tile.click()
+        panel.wait_for(timeout=10_000)
+        page.locator("[data-view=threads]").click()
+        page.get_by_test_id("threads-view").wait_for()
+        threads_panel_clear(page)
+        threads_layout(page, view, name)
+        page.keyboard.press("Escape")
+        panel.wait_for(state="detached", timeout=5_000)
     if empty:
         run(env, "thread", "delete", empty)
         page.reload()
         page.locator(".shell, [role=alert]").first.wait_for(timeout=15_000)
     to_map(page)
     print(f"{name}: the Threads view put {len(want)} threads in their waves, with {arrows} arrows")
+
+
+def threads_layout(page, view, name):
+    """Dependency waves precede a viewport-wide independent grid, even when the waves scroll sideways."""
+    board = page.get_by_test_id("threads-view")
+    anytime = board.get_by_role("region", name="Any time", exact=True)
+    if not anytime.count():
+        return
+    assert anytime.locator("[data-thread-tile]").count() > 0, f"{name}: empty Any time fixture"
+    page.evaluate("document.fonts.ready")
+    page.wait_for_function(
+        """() => {
+            const board = document.querySelector('.waves');
+            const anytime = board.querySelector('[data-wave="anytime"]');
+            const columns = board.querySelector('.columns');
+            const box = anytime.getBoundingClientRect();
+            const style = getComputedStyle(board);
+            const room = board.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+            const sections = [...board.querySelectorAll('[data-wave]')];
+            const grid = getComputedStyle(anytime.querySelector('ul')).gridTemplateColumns.split(' ').length;
+            const wide = matchMedia('(min-width: 900px)').matches;
+            return sections.at(-1) === anytime && Math.abs(box.width - room) <= 0.5
+                && (!wide || room < 572 || grid > 1)
+                && (!columns || !columns.querySelector('[data-wave]')
+                    || box.top >= Math.max(columns.getBoundingClientRect().bottom,
+                        columns.querySelector('.arrows')?.getBoundingClientRect().bottom ?? 0));
+        }""",
+        timeout=5_000,
+    )
+    # Native Tab follows the last wave's controls into the independent grid.
+    waves = board.locator('[data-wave]:not([data-wave="anytime"])')
+    if waves.count() and not view.get("has_touch"):
+        waves.last.get_by_role("button").last.focus()
+        page.keyboard.press("Tab")
+        assert anytime.locator("[data-thread-tile]").first.evaluate("e => e === document.activeElement"), name
+
+
+def threads_panel_clear(page):
+    """The desktop thread pane leaves the Threads view's scroll viewport unobscured."""
+    page.wait_for_function(
+        """() => {
+            const view = document.querySelector('[data-testid="threads-view"]');
+            const pane = document.querySelector('[data-testid="thread-panel"]');
+            return view && pane && Math.abs(view.getBoundingClientRect().right - pane.getBoundingClientRect().left) <= 0.5;
+        }""",
+        timeout=5_000,
+    )
 
 
 def verify_thread_arrows(page, listed, want, name, failures):
@@ -2623,6 +2680,9 @@ def arrows_clear(page, want, name, failures, checked_geometry):
             const origin = view.getBoundingClientRect();
             const tiles = [...document.querySelectorAll('.wave [data-thread-tile]')].map(tile => [tile.dataset.threadTile,
                 tile.getBoundingClientRect()]);
+            for (const heading of document.querySelectorAll('.wave h2')) {
+                tiles.push([`heading-${heading.closest('.wave').dataset.wave}`, heading.getBoundingClientRect()]);
+            }
             const seen = new Set(checked);
             const added = [];
             const addedPairs = [];
