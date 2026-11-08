@@ -121,6 +121,9 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
   an entry written before one was chosen, which leaves the one in context. The address bar's link carries it; the link
   copied from an item's or a thread's panel does not. It orders the lists, is where New item goes, and marks the
   switcher; the Map, the Threads view and the outline show only its work.
+- **Threads put work needing attention first.** Within each wave and Any time, tiles sort by stalled, in progress,
+  ready, waiting, parked, then empty. A mixed thread takes its first applicable stage; ties use natural ID order.
+  Sorting keeps threads in their dependency waves.
 - **The Threads view names what crosses initiatives.** It includes truly empty threads, but not threads whose members
   are only in other initiatives. Waves are computed across the whole tracker and numbered for
   the view without gaps. A tile with work in another initiative, or after a thread in one, has a tray under it that

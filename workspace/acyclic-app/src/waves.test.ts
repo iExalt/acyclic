@@ -61,6 +61,40 @@ describe("wavesView", () => {
   });
 });
 
+describe("thread attention order", () => {
+  it("sorts each column by its first applicable stage, with natural ID ties, without changing the input", () => {
+    const rows = [
+      ["t1", { parked: 20 }],
+      ["t10", { ready: 1, waiting: 3, parked: 8 }],
+      ["t2", { ready: 1, done: 9 }],
+      ["t3", { waiting: 1, parked: 5 }],
+      ["t4", { in_progress: 1, ready: 9 }],
+      ["t5", { stalled: 1, in_progress: 20 }],
+      ["t6", {}],
+    ] as const;
+    const threads = ["a", "b", "c"].flatMap((prefix) =>
+      rows.map(([id, counts]) => ({
+        id: `${prefix}-${id}`,
+        title: id,
+        task: null,
+        waitsFor: prefix === "c" ? ["b-t1"] : [],
+        counts: { ...none, ...counts },
+      })),
+    );
+    const ids = (prefix: string) => rows.map(([id]) => `${prefix}-${id}`);
+    const input = { threads, anytime: ids("a"), waves: [ids("b"), ids("c")] };
+    // A truly empty thread that core did not place must follow even the parked tiles.
+    input.anytime = input.anytime.filter((id) => id !== "a-t6");
+    const before = structuredClone(input);
+    const view = wavesView(input, outlineOf(buildModel([]), []), new Map(), new Set(["a-t6"]));
+    const expected = (prefix: string) => ["t5", "t4", "t2", "t10", "t3", "t1", "t6"].map((id) => `${prefix}-${id}`);
+    expect(view.anytime.map((tile) => tile.id)).toEqual(expected("a"));
+    expect(view.waves.map((wave) => wave.map((tile) => tile.id))).toEqual([expected("b"), expected("c")]);
+    expect(view.waves[1]?.every((tile) => tile.after.join() === "b-t1")).toBe(true);
+    expect(input).toEqual(before);
+  });
+});
+
 describe("truly empty threads", () => {
   it("adds only scoped, known, unplaced empty records to Anytime, in natural id order", () => {
     const threads = [

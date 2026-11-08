@@ -73,6 +73,13 @@ export function scopeThreads(listed: Threads, keep: ReadonlySet<string>): Thread
 
 const NOTHING: Outside = { after: [], looped: [], tasks: [] };
 
+/** First applicable stage wins, even when the thread also has less urgent work. */
+function attention(counts: Counts): number {
+  const stages = [counts.stalled, counts.in_progress, counts.ready, counts.waiting, counts.parked];
+  const first = stages.findIndex((count) => count > 0);
+  return first < 0 ? stages.length : first;
+}
+
 /**
  * What each thread in `keep` has outside it, from `listed`, which holds every thread with the waves core computed
  * across them: the threads it waits on that aren't kept, those in earlier waves apart from those in its own, named by
@@ -154,10 +161,12 @@ export function wavesView(
       outside: outside.get(id) ?? NOTHING,
     };
   };
+  const order = (a: string, b: string) =>
+    attention(counts.get(a) ?? NO_COUNTS) - attention(counts.get(b) ?? NO_COUNTS) || natural(a, b);
   const placed = new Set([...listed.waves.flat(), ...listed.anytime]);
   const unplacedEmpty = listed.threads.filter((one) => empty.has(one.id) && !placed.has(one.id)).map((one) => one.id);
   return {
-    waves: listed.waves.map((ids) => ids.map(tile)),
-    anytime: [...listed.anytime, ...unplacedEmpty].sort(natural).map(tile),
+    waves: listed.waves.map((ids) => [...ids].sort(order).map(tile)),
+    anytime: [...listed.anytime, ...unplacedEmpty].sort(order).map(tile),
   };
 }
