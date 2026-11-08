@@ -156,7 +156,7 @@ export function Overview({
       <section className="overview-section" aria-labelledby="overview-needs">
         <header>
           <h2 id="overview-needs">Needs you</h2>
-          <span className="count muted">{countText(needs.length)}</span>
+          {needs.length > 0 && <span className="count muted">{countText(needs.length)}</span>}
           <span className="grow" />
           {/* With more than fit, the link under the rows opens the list, and one link to it is enough. */}
           {needs.length === 0 || needs.length > needsShown ? null : (
@@ -202,7 +202,7 @@ export function Overview({
         <section className="overview-section" aria-labelledby="overview-working">
           <header>
             <h2 id="overview-working">In progress</h2>
-            <span className="count muted">{working.length}</span>
+            {working.length > 0 && <span className="count muted">{working.length}</span>}
           </header>
           {working.length === 0 ? (
             <p className="empty">No thread has work in progress or in review.</p>
@@ -215,7 +215,7 @@ export function Overview({
         <section className="overview-section" aria-labelledby="overview-next">
           <header>
             <h2 id="overview-next">Up next</h2>
-            <span className="count muted">{next.length}</span>
+            {next.length > 0 && <span className="count muted">{next.length}</span>}
             <span className="grow" />
             <button type="button" className="quiet" onClick={() => onView("threads")}>
               Open Threads
@@ -233,7 +233,9 @@ export function Overview({
       <section className="overview-section overview-projects" aria-labelledby="overview-projects">
         <header>
           <h2 id="overview-projects">Projects</h2>
-          <span className="count muted">{outline?.projects.length ?? 0}</span>
+          {outline !== null && outline.projects.length > 0 && (
+            <span className="count muted">{outline.projects.length}</span>
+          )}
           <span className="grow" />
           <button type="button" className="quiet" onClick={() => onView("map")}>
             Open the Map
