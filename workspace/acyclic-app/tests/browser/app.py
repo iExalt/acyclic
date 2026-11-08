@@ -2569,6 +2569,15 @@ def threads_journey(page, view, env, plan, name, failures):
             page.get_by_test_id("threads-view").wait_for(state="detached", timeout=5_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: Back from the Threads view didn't go home to the Overview")
+    if not view.get("has_touch"):
+        tile.click()
+        panel.wait_for(timeout=10_000)
+        page.locator("[data-view=threads]").click()
+        page.get_by_test_id("threads-view").wait_for()
+        threads_panel_clear(page)
+        threads_layout(page, view, name)
+        page.keyboard.press("Escape")
+        panel.wait_for(state="detached", timeout=5_000)
     if empty:
         run(env, "thread", "delete", empty)
         page.reload()
@@ -2610,6 +2619,18 @@ def threads_layout(page, view, name):
         waves.last.get_by_role("button").last.focus()
         page.keyboard.press("Tab")
         assert anytime.locator("[data-thread-tile]").first.evaluate("e => e === document.activeElement"), name
+
+
+def threads_panel_clear(page):
+    """The desktop thread pane leaves the Threads view's scroll viewport unobscured."""
+    page.wait_for_function(
+        """() => {
+            const view = document.querySelector('[data-testid="threads-view"]');
+            const pane = document.querySelector('[data-testid="thread-panel"]');
+            return view && pane && Math.abs(view.getBoundingClientRect().right - pane.getBoundingClientRect().left) <= 0.5;
+        }""",
+        timeout=5_000,
+    )
 
 
 def verify_thread_arrows(page, listed, want, name, failures):

@@ -1961,7 +1961,7 @@ input[aria-invalid="true"] + .hint,
     --wide-pane-width: 360px;
   }
 
-  .stage:has(> .inspector, > .sheet.add) > .map {
+  .stage:has(> .inspector, > .sheet.add) > :is(.map, .waves) {
     right: var(--wide-pane-width);
   }
 

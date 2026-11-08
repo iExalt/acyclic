@@ -127,7 +127,8 @@ then 13 px read a smidge small beside Linear at the same window size, as Overpas
 - **Dependency waves come before Any time.** Wide, each wave is a 280 px column with its arrows; narrow, waves stack.
   Any time follows in a full-width grid of tiles at least 280 px wide, wrapping to one column on a phone. It uses the
   same grid with no dependency waves. A horizontal rule separates the sections when both have work. Routes below the
-  wave tiles keep their own space, so hovering a thread never pushes the grid down.
+  wave tiles keep their own space, so hovering a thread never pushes the grid down. An open desktop pane keeps its
+  width clear of the Threads view, whose grid reflows in the remaining space.
 - **The Threads view names what crosses initiatives.** It includes truly empty threads, but not threads whose members
   are only in other initiatives. Waves are computed across the whole tracker and numbered for
   the view without gaps. A tile with work in another initiative, or after a thread in one, has a tray under it that
