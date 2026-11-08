@@ -200,12 +200,12 @@ describe("draw", () => {
   });
 
   it("changes nothing when nothing changed, and only what did otherwise", () => {
-    const before = elements(start);
+    const before = elements({ ...start, routed: true });
     const drawn = new Map(before.map((one) => [one.data.id, one]));
-    expect(diff(drawn, elements(start))).toEqual({ add: [], remove: [], update: [] });
+    expect(diff(drawn, elements({ ...start, routed: true }))).toEqual({ add: [], remove: [], update: [] });
     const retitled = diff(
       drawn,
-      elements({ items: base.map((one) => (one.id === "sow" ? { ...one, title: "Sow seeds" } : one)) }),
+      elements({ items: base.map((one) => (one.id === "sow" ? { ...one, title: "Sow seeds" } : one)), routed: true }),
     );
     expect(retitled).toEqual({
       add: [],
@@ -215,8 +215,8 @@ describe("draw", () => {
   });
 
   it("changes a selection of no thread in classes only, and leaves unlit color out of data", () => {
-    const before = elements(start);
-    const selected = elements({ items: base, selection: { item: "sow", thread: null } });
+    const before = elements({ ...start, routed: true });
+    const selected = elements({ items: base, selection: { item: "sow", thread: null }, routed: true });
     for (const element of selected) {
       expect(element.data).not.toHaveProperty("lit");
       expect(element.data).not.toHaveProperty("dim");
@@ -235,12 +235,45 @@ describe("draw", () => {
       },
     ]);
 
-    const recoloured = elements({ items: base, colour: "#123456" });
+    const recoloured = elements({ items: base, colour: "#123456", routed: true });
     expect(diff(new Map(before.map((element) => [element.data.id, element])), recoloured)).toEqual({
       add: [],
       remove: [],
       update: [],
     });
+  });
+
+  it("updates a junction when its owners are added or removed", () => {
+    const before = elements({ items: base, routed: true });
+    const drawn = new Map(before.map((one) => [one.data.id, one]));
+    const id = "junction 20,10";
+    expect(drawn.get(id)?.data.owners).toEqual(["dig", "sow"]);
+    for (const owners of [["dig", "sow", "water"], ["dig"], []]) {
+      const next = before.map((one) => (one.data.id === id ? { ...one, data: { ...one.data, owners } } : one));
+      expect(diff(drawn, next)).toEqual({
+        add: [],
+        remove: [],
+        update: [{ id, data: { owners }, unset: [], position: null, classes: null }],
+      });
+    }
+  });
+
+  it("does not read dimensions for a class-only selection update", () => {
+    const core = cytoscape({ headless: true });
+    const drawn = apply(core, new Map(), elements(start));
+    const node = core.getElementById("sow");
+    const width = vi.spyOn(node, "width"),
+      height = vi.spyOn(node, "height");
+    try {
+      apply(core, drawn, elements({ items: base, selection: { item: "sow", thread: null } }));
+      expect(node.hasClass("selected")).toBe(true);
+      expect(width).not.toHaveBeenCalled();
+      expect(height).not.toHaveBeenCalled();
+    } finally {
+      width.mockRestore();
+      height.mockRestore();
+      core.destroy();
+    }
   });
 
   it("keeps computed lit styles through lit, unlit and recoloured transitions", () => {

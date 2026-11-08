@@ -6,6 +6,8 @@
 import { type PointerEvent, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
 import { type Detent, detentAfter, draggableFrom, endOnRow, firstHeight, type Sample, SLOP, velocity } from "./sheets";
 
+import { useWide } from "./wide";
+
 export interface SheetDrag {
   detent: Detent;
   /** The handle, first in the sheet. */
@@ -23,13 +25,14 @@ export interface SheetDrag {
  * `--first`) and for where a drag lands.
  */
 export function useSheet(panel: RefObject<HTMLElement | null>, onClose: () => void, half = false): SheetDrag {
+  const wide = useWide();
   const [detent, setDetent] = useState<Detent>("first");
   /** How tall the first height must be to show the main action, 0 without one. */
   const needs = useRef(0);
   // After every render, as what the panel holds changes, and whenever its header rewraps, as when the window turns.
   useLayoutEffect(() => {
     const sheet = panel.current;
-    if (sheet === null || half) return;
+    if (sheet === null || half || wide) return;
     const measure = () => {
       const main = sheet.querySelector<HTMLElement>("[data-main]");
       // From the sheet's top, as if unscrolled, wherever in it the main thing sits.
