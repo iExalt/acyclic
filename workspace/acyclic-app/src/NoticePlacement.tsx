@@ -77,24 +77,28 @@ export function NoticePlacement({
       const host = origin.current;
       const map = stage.current;
       if (host === null || map === null) return;
-      const panels = [...map.querySelectorAll<HTMLElement>(":scope > .inspector, :scope > .sheet")].filter(
-        (panel) => panel.getBoundingClientRect().height > 0,
-      );
-      const targets = new Set<Element>([map, ...panels]);
+      const state = current.current;
+      const measure = !!state.notice && state.phone;
+      const panels = measure
+        ? [...map.querySelectorAll<HTMLElement>(":scope > .inspector, :scope > .sheet")].filter(
+            (panel) => panel.getBoundingClientRect().height > 0,
+          )
+        : [];
+      const targets = new Set<Element>(measure ? [map, ...panels] : []);
       for (const panel of panels) {
         const header = panel.querySelector(":scope > header, :scope > .form-head");
         if (header !== null) targets.add(header);
       }
-      const card = container.querySelector(".notice");
+      const card = measure ? container.querySelector(".notice") : null;
       if (card !== null) targets.add(card);
       for (const target of observed) if (!targets.has(target)) resize.unobserve(target);
       for (const target of targets) if (!observed.has(target)) resize.observe(target);
       observed = targets;
-      const state = current.current;
-      const area = map.getBoundingClientRect();
-      const edge = Math.min(area.bottom, ...panels.map((panel) => panel.getBoundingClientRect().top));
-      const fit = map.querySelector(".map-fit")?.getBoundingClientRect();
-      const top = Math.max(area.top + 8, fit === undefined ? area.top + 8 : fit.bottom + 8);
+      const area = measure ? map.getBoundingClientRect() : null;
+      const edge =
+        area === null ? 0 : Math.min(area.bottom, ...panels.map((panel) => panel.getBoundingClientRect().top));
+      const fit = measure ? map.querySelector(".map-fit")?.getBoundingClientRect() : undefined;
+      const top = area === null ? 0 : Math.max(area.top + 8, fit === undefined ? area.top + 8 : fit.bottom + 8);
       const bottom = edge - 8;
       const room = bottom - top;
       const next: Mode = !state.notice
@@ -117,7 +121,7 @@ export function NoticePlacement({
       if (hidden && !state.suspended && container.contains(document.activeElement)) returnFocus.current = true;
       container.hidden = hidden;
       container.inert = container.hidden;
-      if (next === "floating") {
+      if (next === "floating" && area !== null) {
         Object.assign(container.style, {
           position: "fixed",
           left: `${area.left + 8}px`,

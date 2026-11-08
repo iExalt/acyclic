@@ -151,7 +151,20 @@ export function diff(drawn: ReadonlyMap<string, Drawn>, next: Drawn[]): Changes 
     }
     kept.add(id);
     const data: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(element.data)) if (was.data[key] !== value) data[key] = value;
+    for (const [key, value] of Object.entries(element.data)) {
+      const previous = was.data[key];
+      // A scene rebuilds its junction owner lists even when their links have not changed.
+      if (
+        previous === value ||
+        (key === "owners" &&
+          Array.isArray(previous) &&
+          Array.isArray(value) &&
+          previous.length === value.length &&
+          previous.every((owner, index) => owner === value[index]))
+      )
+        continue;
+      data[key] = value;
+    }
     const unset = Object.keys(was.data).filter((key) => !(key in element.data));
     const moved =
       element.position !== undefined &&
@@ -455,7 +468,10 @@ export function apply(core: Core, drawn: ReadonlyMap<string, Drawn>, next: Drawn
         resized || (update.position !== null && motion.moving.get(update.id)?.size !== undefined)
           ? { width: Number(data?.width), height: Number(data?.height) }
           : undefined;
-      const from = { width: element.width(), height: element.height() };
+      const from =
+        size !== undefined && glide !== undefined && !glide.reduced
+          ? { width: element.width(), height: element.height() }
+          : null;
       const target = update.position ?? to.get(update.id)?.position;
       if (update.position !== null || resized) stopMoving(core, update.id);
       change(update);
@@ -473,7 +489,7 @@ export function apply(core: Core, drawn: ReadonlyMap<string, Drawn>, next: Drawn
         touchesView(glide.extent, element.position(), target, width, height)
       ) {
         candidates.set(update.id, { ...target });
-        if (size !== undefined) {
+        if (size !== undefined && from !== null) {
           sizes.set(update.id, size);
           element.style(from);
         }

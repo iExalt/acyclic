@@ -4297,6 +4297,26 @@ def labels_journey(browser, link, ids, titles):
             tap_middle(page, view, ids[1])
             inspector = page.get_by_test_id("inspector")
             inspector.get_by_role("heading", name=titles[1], exact=True).wait_for()
+            if name == "desktop":
+                # Wide panes need no sheet measurement; the same mounted panel must measure when it becomes a sheet.
+                assert inspector.evaluate("p => p.style.getPropertyValue('--first')") == "", (
+                    "wide Inspector measured the unused phone sheet height"
+                )
+                page.evaluate("() => { window.responsivePanel = document.querySelector('[data-testid=inspector]'); }")
+                page.set_viewport_size(VIEWS["phone"]["viewport"])
+                page.wait_for_function("""() => {
+                    const p = document.querySelector('[data-testid=inspector]'), main = p?.querySelector('[data-main]');
+                    if (p !== window.responsivePanel || !main || parseFloat(p.style.getPropertyValue('--first')) <= 0
+                        || !p.style.getPropertyValue('--first') || p.getAnimations().length) return false;
+                    const body = p.getBoundingClientRect(), action = main.getBoundingClientRect();
+                    return body.height > 0 && action.top >= body.top - .5 && action.bottom <= body.bottom + .5;
+                }""")
+                page.set_viewport_size(view["viewport"])
+                page.wait_for_function("""() => {
+                    const p = document.querySelector('[data-testid=inspector]');
+                    return p === window.responsivePanel && matchMedia('(min-width: 900px)').matches
+                        && Math.abs(p.getBoundingClientRect().width - 360) <= .5 && !p.getAnimations().length;
+                }""")
             inspector.get_by_role("button", name="Close", exact=True).click()
             point = page.get_by_test_id("map").evaluate(
                 r"""(m,id)=>{
