@@ -545,8 +545,7 @@ pub enum ItemCommand {
         /// The item.
         item: String,
     },
-    /// Deletes an item nothing refers to: no children, nothing waiting for it or that it waits for, no evidence, not
-    /// done, and no one else's live claim.
+    /// Deletes an item in any state, removing its dependency links and detaching its children.
     Delete {
         /// The item.
         item: String,

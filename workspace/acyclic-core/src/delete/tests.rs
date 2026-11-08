@@ -28,60 +28,69 @@ fn with_items(ids: &[&str]) -> Replica {
     r
 }
 
-fn refusal(r: &mut Replica, id: &str, by: By<'_>) -> Vec<String> {
-    match delete_item(r, id, by) {
-        Err(WriteError::InUse { reasons, .. }) => reasons
-            .into_iter()
-            .map(|reason| serde_json::to_value(reason).unwrap()["why"].as_str().unwrap().to_owned())
-            .collect(),
-        other => vec![format!("{other:?}")],
+#[test]
+fn any_item_can_be_deleted_and_known_references_are_removed() {
+    let mut r =
+        with_items(&["parent", "kid", "a", "b", "done", "evidence", "canceled", "claimed", "free"]);
+    set_parent(&mut r, "kid", Some("parent"), user(2)).unwrap();
+    link(&mut r, "a", "parent", user(2)).unwrap();
+    link(&mut r, "parent", "b", user(2)).unwrap();
+    set_state(&mut r, "done", ItemState::Done, user(2)).unwrap();
+    crate::model::put(
+        &mut r,
+        &item_key("evidence").unwrap(),
+        crate::schema::item::EVIDENCE,
+        Some(&crate::model::Evidence { text: Some("completed".into()), ..Default::default() }),
+        user(2),
+    )
+    .unwrap();
+    set_state(&mut r, "canceled", ItemState::Canceled, user(2)).unwrap();
+    let held = Key::new(kind::THREAD, "held").unwrap();
+    crate::model::set(&mut r, &held, crate::schema::thread::TITLE, Some(&"Held"), user(2)).unwrap();
+    crate::model::put(
+        &mut r,
+        &item_key("claimed").unwrap(),
+        crate::schema::item::THREAD,
+        Some(&"held"),
+        user(2),
+    )
+    .unwrap();
+    claim::claim(&mut r, "held", "session/other", NOW, (60_000, 480 * 60_000), false).unwrap();
+    for id in ["parent", "done", "evidence", "canceled", "claimed", "free"] {
+        assert_eq!(delete_item(&mut r, id, user(NOW)), Ok(true));
     }
+    let model = Model::read(r.state()).unwrap();
+    assert_eq!(model.items.keys().map(String::as_str).collect::<Vec<_>>(), ["a", "b", "kid"]);
+    assert_eq!(model.items["kid"].parent, crate::model::Value::None);
+    assert_eq!(model.links, [] as [model::Link; 0]);
+    assert_eq!(claim::live(r.state(), &held, NOW).unwrap()[0].holder, "session/other");
+    assert!(matches!(delete_item(&mut r, "nope", user(NOW)), Err(WriteError::NoItem(_))));
+    let before = r.changes();
+    assert_eq!(delete_item(&mut r, "free", user(NOW)), Ok(false));
+    assert_eq!(r.changes(), before);
 }
 
 #[test]
-fn only_an_item_nothing_refers_to_is_deleted() {
-    let mut r = with_items(&["parent", "kid", "a", "b", "done", "claimed", "mine", "free"]);
-    set_parent(&mut r, "kid", Some("parent"), user(2)).unwrap();
-    link(&mut r, "a", "b", user(2)).unwrap();
-    set_state(&mut r, "done", ItemState::Done, user(2)).unwrap();
-    let held = Key::new(kind::THREAD, "held").unwrap();
-    crate::model::set(&mut r, &held, crate::schema::thread::TITLE, Some(&"Held"), user(2)).unwrap();
-    for id in ["claimed", "mine"] {
-        crate::model::put(
-            &mut r,
-            &item_key(id).unwrap(),
-            crate::schema::item::THREAD,
-            Some(&"held"),
-            user(2),
-        )
-        .unwrap();
-    }
-    claim::claim(&mut r, "held", "session/pi", NOW, (60_000, 480 * 60_000), false).unwrap();
-    assert_eq!(refusal(&mut r, "parent", user(NOW)), ["has-children"]);
-    // A link either way, and a link of any kind.
-    assert_eq!(refusal(&mut r, "a", user(NOW)), ["linked"]);
-    assert_eq!(refusal(&mut r, "b", user(NOW)), ["linked"]);
-    assert_eq!(refusal(&mut r, "done", user(NOW)), ["finished"]);
-    // Someone else's claim on its thread holds it; the deleter's own doesn't.
-    assert_eq!(refusal(&mut r, "claimed", user(NOW)), ["claimed"]);
-    assert_eq!(delete_item(&mut r, "mine", By { actor: "session/pi", at: NOW }), Ok(true));
-    // The refusal says why in one line.
-    let message = delete_item(&mut r, "parent", user(NOW)).unwrap_err().to_string();
-    assert_eq!(message, "parent can't be deleted: it has children (kid)");
-    let message = delete_item(&mut r, "a", user(NOW)).unwrap_err().to_string();
-    assert_eq!(message, "a can't be deleted: a waits-for b");
-    // The details name a link's kind as the command line does.
-    let Err(WriteError::InUse { reasons, .. }) = delete_item(&mut r, "a", user(NOW)) else {
-        panic!("in use")
-    };
-    assert_eq!(serde_json::to_value(&reasons).unwrap()[0]["kind"], "waits-for");
-    assert!(matches!(delete_item(&mut r, "nope", user(NOW)), Err(WriteError::NoItem(_))));
-    // A claim that has lapsed no longer holds it.
-    assert_eq!(delete_item(&mut r, "claimed", user(NOW + 61_000)), Ok(true));
-    assert_eq!(delete_item(&mut r, "free", user(NOW)), Ok(true));
-    let before = r.changes();
-    assert_eq!(delete_item(&mut r, "free", user(NOW)), Ok(false), "a repeat changes nothing");
-    assert_eq!(r.changes(), before);
+fn deleting_removes_only_the_deleted_parent_and_cleanup_survives_a_stale_join() {
+    let mut mac = with_items(&["gone", "other", "kid", "dependent"]);
+    let mut pi = Replica::open(ReplicaId::new("pi").unwrap(), mac.state().clone());
+    set_parent(&mut mac, "kid", Some("gone"), user(2)).unwrap();
+    set_parent(&mut pi, "kid", Some("other"), user(2)).unwrap();
+    link(&mut pi, "dependent", "gone", user(2)).unwrap();
+    mac.join(pi.state()).unwrap();
+    let stale = mac.state().clone();
+    assert!(matches!(
+        Model::read(mac.state()).unwrap().items["kid"].parent,
+        crate::model::Value::Conflict(_)
+    ));
+    delete_item(&mut mac, "gone", user(3)).unwrap();
+    mac.join(&stale).unwrap();
+    let model = Model::read(mac.state()).unwrap();
+    assert_eq!(model.items["kid"].parent, crate::model::Value::One("other".into()));
+    assert_eq!(model.links, [] as [model::Link; 0]);
+    assert!(!model.items.contains_key("gone"));
+    assert!(needs_of(&mac).iter().all(|entry| !matches!(entry,
+        Entry::Dangling { target, .. } if target == "gone")));
 }
 
 #[test]
@@ -224,10 +233,14 @@ fn a_tasks_thread_of_one_is_never_deleted_but_deleting_the_task_lets_its_own_cla
         "emptied and unheld is hidden"
     );
 
-    // Someone else's claim still refuses the delete, as on any thread.
+    // Someone else's claim on an emptied task thread is released too.
     let one_y = crate::ids::one("y");
     claim::claim(&mut r, &one_y, "session/other", 8, (10_000, 10_000), true).unwrap();
-    assert_eq!(refusal(&mut r, "y", user(9)), ["claimed"]);
+    assert_eq!(delete_item(&mut r, "y", user(9)), Ok(true));
+    assert_eq!(
+        claim::live(r.state(), &claim::thread_key(&one_y).unwrap(), 9).unwrap(),
+        [] as [claim::Claim; 0]
+    );
 }
 
 /// An initiative `id` with a title, as the judge writes it.

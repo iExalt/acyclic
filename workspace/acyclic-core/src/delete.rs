@@ -12,8 +12,8 @@
 //! replica reaches the same state in any join order, since the tombstone and the stray writes are independent
 //! fields.
 //!
-//! Only an item that nothing refers to is deleted, judged against the replica's own view: no children, no link either
-//! way, not done and with no evidence, and no live claim on its thread but the deleter's own.
+//! Any existing item can be deleted. Known child-parent references and dependencies in either direction are removed.
+//! Children survive, retaining any other concurrent parent values. Completion and evidence do not prevent deletion.
 //!
 //! A thread is deleted the same way, by the same field, once no item is in it and no one holds a live claim on it.
 //! The exception is a loose task's thread of one, never deleted by hand: it is derived from its task, so a tombstone
@@ -24,31 +24,15 @@ use std::fmt;
 use serde::Serialize;
 
 use crate::claim;
-use crate::model::{self, By, Model, Value, WriteError};
+use crate::model::{self, By, Model, WriteError};
 use crate::schema::{initiative, item as field, kind};
-use crate::state::{Error, Key, Replica};
+use crate::state::{Key, Replica};
 
-/// Why an item isn't deleted.
+/// Why a thread or initiative cannot be deleted.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "why")]
 pub enum Reason {
-    /// Items are under it.
-    HasChildren {
-        /// The children.
-        children: Vec<String>,
-    },
-    /// A link joins it to another item, either way.
-    Linked {
-        /// The dependent item.
-        from: String,
-        /// The item it depends on.
-        to: String,
-        /// The link's kind as the command line names it: always `waits-for`.
-        kind: &'static str,
-    },
-    /// It is done, or holds evidence of it.
-    Finished,
-    /// Someone else holds a live claim on its thread, or, for a thread, anyone holds one on it.
+    /// Someone holds a live claim on the thread.
     Claimed {
         /// The holder.
         holder: String,
@@ -71,13 +55,6 @@ pub enum Reason {
 impl fmt::Display for Reason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::HasChildren { children } => {
-                write!(f, "it has children ({})", crate::say::list(children, ", "))
-            },
-            Self::Linked { from, to, kind } => write!(f, "{from} {kind} {to}"),
-            Self::Finished => {
-                write!(f, "it is done, or holds evidence of it, and finished work stays")
-            },
             Self::Claimed { holder } => write!(f, "{holder} holds a claim on its thread"),
             Self::TaskThread => {
                 write!(f, "it is a task's own thread, which goes when the task does")
@@ -92,49 +69,11 @@ impl fmt::Display for Reason {
     }
 }
 
-/// Why `actor` can't delete `id` in `model`; empty when it can. The actor's own claim on the item's thread is no
-/// reason.
-///
-/// # Errors
-///
-/// Fails when a claim can't be read.
-pub fn reasons(
-    replica: &Replica,
-    model: &Model,
-    id: &str,
-    actor: &str,
-    now: crate::state::Millis,
-) -> Result<Vec<Reason>, Error> {
-    let mut found = Vec::new();
-    let children: Vec<String> = model.children(id).into_iter().map(str::to_owned).collect();
-    if !children.is_empty() {
-        found.push(Reason::HasChildren { children });
-    }
-    for link in model.links.iter().filter(|link| link.from == id || link.to == id) {
-        found.push(Reason::Linked {
-            from: link.from.clone(),
-            to: link.to.clone(),
-            kind: "waits-for",
-        });
-    }
-    if let Some(item) = model.items.get(id)
-        && (item.is_done() || item.evidence != Value::None)
-    {
-        found.push(Reason::Finished);
-    }
-    for held in claim::covering(&replica.state, model, id, now)? {
-        if held.holder != actor {
-            found.push(Reason::Claimed { holder: held.holder });
-        }
-    }
-    Ok(found)
-}
-
 /// Deletes an item, or does nothing when it is deleted already; returns whether it wrote.
 ///
 /// # Errors
 ///
-/// Fails when the item doesn't exist, when it is in use, or when the state layer refuses.
+/// Fails when the item doesn't exist or when the state layer refuses.
 pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, WriteError> {
     let key = model::item_key(id)?;
     if model::is_deleted(&replica.state, &key) {
@@ -142,19 +81,29 @@ pub fn delete_item(replica: &mut Replica, id: &str, by: By<'_>) -> Result<bool, 
     }
     model::existing(&replica.state, id)?;
     let model = Model::read(&replica.state)?;
-    let reasons = reasons(replica, &model, id, by.actor, by.at)?;
-    if !reasons.is_empty() {
-        return Err(WriteError::InUse { item: id.to_owned(), reasons });
+    for child in model.children(id) {
+        replica.retain(&model::item_key(child)?, field::PARENT, |stamped| {
+            stamped.value.as_str() != Some(id)
+        });
+    }
+    for link in model.links.iter().filter(|link| link.from == id || link.to == id) {
+        replica.write(
+            &model::link_key(&link.from, &link.to)?,
+            crate::schema::link::PRESENT,
+            by.actor,
+            by.at,
+            None,
+        )?;
     }
     model::put(replica, &key, field::DELETED, Some(&true), by)?;
-    // The actor's own claim on the task's thread of one goes with it, unless others share that thread: the thread
-    // would stay held with nothing in it.
+    // Release all observed claims on an emptied task thread, preserving claims on shared threads.
     let one = crate::ids::one(id);
     let alone = !model.items.values().any(|other| {
         other.id != id && model.thread_value(other).all().iter().any(|named| **named == one)
     });
     if alone {
-        claim::release(replica, &claim::thread_key(&one)?, by.actor);
+        let thread = claim::thread_key(&one)?;
+        replica.retain(&thread, claim::FIELD, |_| false);
     }
     Ok(true)
 }

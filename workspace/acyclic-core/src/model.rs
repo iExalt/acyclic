@@ -952,13 +952,6 @@ pub enum WriteError {
     InvalidName(String),
     /// The item doesn't exist.
     NoItem(String),
-    /// The item is in use and can't be deleted.
-    InUse {
-        /// The item.
-        item: String,
-        /// Why not.
-        reasons: Vec<crate::delete::Reason>,
-    },
     /// The item or thread was deleted, and its id isn't used again.
     Deleted(String),
     /// No such initiative, or it was deleted.
@@ -996,8 +989,7 @@ impl fmt::Display for WriteError {
                 "{name:?} is not a valid name: use at most {MAX_ID_LEN} lowercase letters, digits, '-', '_' or '.'"
             ),
             Self::NoItem(id) => write!(f, "no item {id}"),
-            Self::InUse { item, reasons }
-            | Self::ThreadInUse { thread: item, reasons }
+            Self::ThreadInUse { thread: item, reasons }
             | Self::InitiativeInUse { initiative: item, reasons } => {
                 write!(f, "{item} can't be deleted: {}", crate::say::list(reasons, "; "))
             },
