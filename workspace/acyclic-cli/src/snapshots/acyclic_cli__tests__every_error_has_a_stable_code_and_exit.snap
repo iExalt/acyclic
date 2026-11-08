@@ -16,7 +16,6 @@ expression: table
 1 parent-cycle
 1 waits-for-cycle
 1 self-link
-1 in-use
 4 git
 4 conflict
 1 duplicate-replica

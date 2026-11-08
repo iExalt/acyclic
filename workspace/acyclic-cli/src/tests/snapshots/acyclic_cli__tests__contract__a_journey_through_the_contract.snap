@@ -1522,42 +1522,53 @@ $ ACYCLIC_ACTOR=session/mac acyclic item add --id 01900000-0000-7000-8000-000000
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic item delete Doomed
-# exit 1
+# exit 0
 {
-  "error": {
-    "code": "in-use",
-    "details": {
-      "item": "01900000-0000-7000-8000-0000000000d1",
-      "reasons": [
-        {
-          "children": [
-            "01900000-0000-7000-8000-0000000000d2"
-          ],
-          "why": "has-children"
-        }
-      ]
-    },
-    "message": "01900000-0000-7000-8000-0000000000d1 can't be deleted: it has children (01900000-0000-7000-8000-0000000000d2)"
+  "data": {
+    "changed": true,
+    "item": "01900000-0000-7000-8000-0000000000d1"
   },
-  "ok": false
+  "ok": true
+}
+
+$ ACYCLIC_ACTOR=session/mac acyclic item show Doomed-part
+# exit 0
+{
+  "data": [
+    {
+      "children": [],
+      "claims": [],
+      "done_at": null,
+      "evidence": null,
+      "id": "01900000-0000-7000-8000-0000000000d2",
+      "initiative": null,
+      "links": {
+        "waited_on_by": [],
+        "waits_for": []
+      },
+      "notes": null,
+      "parent": null,
+      "readiness": {
+        "readiness": "ready"
+      },
+      "role": "task",
+      "stage": "ready",
+      "state": "open",
+      "thread": null,
+      "title": "Doomed-part"
+    }
+  ],
+  "ok": true
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic item delete First
-# exit 1
+# exit 0
 {
-  "error": {
-    "code": "in-use",
-    "details": {
-      "item": "01900000-0000-7000-8000-0000000000a1",
-      "reasons": [
-        {
-          "why": "finished"
-        }
-      ]
-    },
-    "message": "01900000-0000-7000-8000-0000000000a1 can't be deleted: it is done, or holds evidence of it, and finished work stays"
+  "data": {
+    "changed": true,
+    "item": "01900000-0000-7000-8000-0000000000a1"
   },
-  "ok": false
+  "ok": true
 }
 
 $ ACYCLIC_ACTOR=session/mac acyclic item delete Doomed-part
@@ -1566,16 +1577,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic item delete Doomed-part
   "data": {
     "changed": true,
     "item": "01900000-0000-7000-8000-0000000000d2"
-  },
-  "ok": true
-}
-
-$ ACYCLIC_ACTOR=session/mac acyclic item delete Doomed
-# exit 0
-{
-  "data": {
-    "changed": true,
-    "item": "01900000-0000-7000-8000-0000000000d1"
   },
   "ok": true
 }
@@ -1896,7 +1897,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic initiative list
     "initiatives": [
       {
         "counts": {
-          "items": 6
+          "items": 5
         },
         "id": "01900000-0000-7000-8000-0000000000b0",
         "title": "Garden"
@@ -1919,7 +1920,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic initiative list
 $ ACYCLIC_ACTOR=session/mac acyclic initiative list -o pretty
 # exit 0
 ID      TITLE    ITEMS
-0000b0  Garden   6
+0000b0  Garden   5
 0000b1  Orchard  1
 
 $ ACYCLIC_ACTOR=session/mac acyclic initiative show Garden Orchard
@@ -1928,7 +1929,6 @@ $ ACYCLIC_ACTOR=session/mac acyclic initiative show Garden Orchard
   "data": [
     {
       "children": [
-        "01900000-0000-7000-8000-0000000000a1",
         "01900000-0000-7000-8000-0000000000a2",
         "01900000-0000-7000-8000-0000000000a3",
         "01900000-0000-7000-8000-0000000000b3",
@@ -1936,7 +1936,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic initiative show Garden Orchard
         "01900000-0000-7000-8000-0000000000c3"
       ],
       "counts": {
-        "items": 6
+        "items": 5
       },
       "id": "01900000-0000-7000-8000-0000000000b0",
       "notes": null,

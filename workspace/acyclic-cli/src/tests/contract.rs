@@ -401,18 +401,17 @@ fn a_journey_through_the_contract() {
     sh.run(&format!("item add --id {g2} --title Aim"), AGENT);
     sh.run(&format!("item add --id {g2a} --title Part --parent 0000c3"), AGENT);
     assert_eq!(sh.run("item done 0000c3 --force", AGENT), 1, "forcing doesn't finish a parent");
-    // Only an item nothing refers to is deleted, and it is gone for good.
+    // Any item can be deleted, leaving its children and retiring its id.
     let [d1, d1a] = ["d1", "d2"].map(id);
     assert_eq!(sh.run(&format!("item add --id {d1} --title Doomed"), AGENT), 0);
     assert_eq!(
         sh.run(&format!("item add --id {d1a} --title Doomed-part --parent Doomed"), AGENT),
         0
     );
-    let (code, out) = sh.output("item delete Doomed", AGENT);
-    assert_eq!((code, &out["error"]["details"]["reasons"][0]["why"]), (1, &json!("has-children")));
-    assert_eq!(sh.run("item delete First", AGENT), 1, "item done work stays");
-    assert_eq!(sh.run("item delete Doomed-part", AGENT), 0);
     assert_eq!(sh.run("item delete Doomed", AGENT), 0);
+    assert_eq!(sh.output("item show Doomed-part", AGENT).0, 0, "the child survives");
+    assert_eq!(sh.run("item delete First", AGENT), 0, "done work can be deleted");
+    assert_eq!(sh.run("item delete Doomed-part", AGENT), 0);
     let (code, out) = sh.output(&format!("item delete {d1}"), AGENT);
     assert_eq!(
         (code, out["data"]["changed"].as_bool()),

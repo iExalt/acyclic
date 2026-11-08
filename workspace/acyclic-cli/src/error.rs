@@ -116,9 +116,6 @@ impl From<WriteError> for CliError {
             WriteError::NoItem(_) | WriteError::NoThread(_) | WriteError::NoInitiative(_) => {
                 Self::new("not-found", exit::NOT_FOUND, message)
             },
-            WriteError::InUse { item, reasons } => {
-                Self::refused("in-use", message).with(json!({"item": item, "reasons": reasons}))
-            },
             WriteError::InitiativeInUse { initiative, reasons } => Self::refused("in-use", message)
                 .with(json!({"initiative": initiative, "reasons": reasons})),
             WriteError::ThreadInUse { thread, reasons } => {

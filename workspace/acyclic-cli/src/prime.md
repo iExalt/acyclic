@@ -80,8 +80,9 @@ finished work names the unfinished. An import that would clash is refused as `in
 title and the initiative. Replicas that made one title apart leave a `duplicate-title` on `acyclic needs`.
 Never put counters in titles.
 
-`acyclic item` also has `reopen` and `delete`; `delete` refuses an item with children, anything it waits
-for or that waits for it, evidence, a done state or someone else's live claim on its thread. `acyclic import <file>`
+`acyclic item` also has `reopen` and `delete`; `delete` accepts any item, including done work with evidence or a
+live claim. It removes dependency links in both directions and detaches children, preserving the children themselves.
+The deleted id stays retired so a replica cannot bring the item back. `acyclic import <file>`
 applies a whole plan document, its records named by ids from `acyclic id`, and `--dry-run` reports what it would
 change. `acyclic import --schema` prints the plan format, and `acyclic export` prints the whole tracker in it, as raw
 JSON, so `acyclic export > plan.json` then `acyclic import plan.json` in another tracker copies it. It refuses as
