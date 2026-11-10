@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
+use std::rc::Rc;
 
 use acyclic_core::claim;
 use acyclic_core::delete;
@@ -169,6 +170,8 @@ struct CommandContext<'a> {
     expected: Option<Vec<write::Expectation>>,
     observed: Option<BTreeSet<String>>,
     acknowledged: RefCell<Vec<String>>,
+    /// The learned clones this command has looked up, shared by every check of its commit evidence.
+    learned: Rc<crate::learned::Learned>,
 }
 
 impl<'a> CommandContext<'a> {
@@ -195,6 +198,7 @@ impl<'a> CommandContext<'a> {
             expected,
             observed: observed.map(|ids| ids.into_iter().collect()),
             acknowledged: RefCell::new(Vec::new()),
+            learned: Rc::default(),
         })
     }
 
@@ -571,6 +575,7 @@ impl<'a> CommandContext<'a> {
             if changed {
                 *unchecked.borrow_mut() = crate::evidence::check(
                     self.env,
+                    &self.learned,
                     &commits_before,
                     &Model::read(replica.state())?,
                     prepared,
@@ -857,8 +862,9 @@ impl<'a> CommandContext<'a> {
             import::apply(&doc, &mut probe, by)?;
             let after = Model::read(probe.state())?;
             let added = crate::evidence::commits(&after).difference(&before).cloned().collect();
-            let prepared = crate::evidence::preflight(self.env, &added, &after);
-            let unchecked = crate::evidence::check(self.env, &before, &after, &prepared)?;
+            let prepared = crate::evidence::preflight(self.env, &self.learned, &added, &after);
+            let unchecked =
+                crate::evidence::check(self.env, &self.learned, &before, &after, &prepared)?;
             let mut shown = import_json(&report, true);
             if !unchecked.is_empty() {
                 shown["unchecked_commits"] = Json::Array(unchecked);
@@ -868,7 +874,7 @@ impl<'a> CommandContext<'a> {
         let prepared = if import::apply(&doc, &mut probe, by).is_ok() {
             let after = Model::read(probe.state())?;
             let added = crate::evidence::commits(&after).difference(&before).cloned().collect();
-            crate::evidence::preflight(self.env, &added, &after)
+            crate::evidence::preflight(self.env, &self.learned, &added, &after)
         } else {
             crate::evidence::Prepared::default()
         };
@@ -897,7 +903,12 @@ impl<'a> CommandContext<'a> {
         if crate::evidence::commits(&model).contains(&candidate) {
             return Ok(crate::evidence::Prepared::default());
         }
-        Ok(crate::evidence::preflight(self.env, &BTreeSet::from([candidate]), &model))
+        Ok(crate::evidence::preflight(
+            self.env,
+            &self.learned,
+            &BTreeSet::from([candidate]),
+            &model,
+        ))
     }
 
     fn claim(&self, reference: &str, lease: Option<u32>, force: bool) -> Result<Json, CliError> {

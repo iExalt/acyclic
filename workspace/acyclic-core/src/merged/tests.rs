@@ -153,14 +153,18 @@ fn noncommit_refs_configured_remotes_and_invalid_config_never_look_originless() 
 fn an_unmapped_repository_or_branch_is_unchecked() {
     let record = Repository {
         id: "code".to_owned(),
-        owner: Value::None,
-        name: Value::None,
+        owner: Value::One("me".to_owned()),
+        name: Value::One("code".to_owned()),
         default_branch: Value::One("main".to_owned()),
     };
     let none = GitAncestry::new(|_: &Repository| None);
     assert_eq!(
         none.check(&record, &"ab".repeat(20)),
-        Check::Unchecked("no clone of the repository is mapped".to_owned())
+        Check::Unchecked(
+            "no clone of me/code is known on this machine: run any acyclic command inside a clone of it whose origin is on \
+             github.com, or map it in ~/.config/acyclic/clones.toml"
+                .to_owned()
+        )
     );
     let branchless = Repository { default_branch: Value::None, ..record };
     let mapped = GitAncestry::new(|_: &Repository| Some(std::path::PathBuf::from("/nonexistent")));

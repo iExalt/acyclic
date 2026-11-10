@@ -19,9 +19,8 @@ impl Shell {
         Self { dir: TempDir::new().unwrap(), transcript: String::new() }
     }
 
-    fn env(&self, extra: &[(&str, &str)]) -> Env {
-        let mut env =
-            Env { vars: Default::default(), cwd: self.dir.path().to_path_buf(), terminal: None };
+    fn env_in(&self, cwd: &Path, extra: &[(&str, &str)]) -> Env {
+        let mut env = Env { vars: Default::default(), cwd: cwd.to_path_buf(), terminal: None };
         for (name, value) in
             [("ACYCLIC_NOW", NOW), ("ACYCLIC_TRACKER", "tracker"), ("HOME", "/nonexistent")]
                 .iter()
@@ -38,8 +37,19 @@ impl Shell {
     }
 
     fn output(&mut self, line: &str, extra: &[(&str, &str)]) -> (u8, serde_json::Value) {
+        let cwd = self.dir.path().to_path_buf();
+        self.output_in(&cwd, line, extra)
+    }
+
+    /// Like [`Shell::output`], run from `cwd`.
+    fn output_in(
+        &mut self,
+        cwd: &Path,
+        line: &str,
+        extra: &[(&str, &str)],
+    ) -> (u8, serde_json::Value) {
         let args = std::iter::once("acyclic").chain(line.split(' ')).map(Into::into);
-        let outcome = execute(args, &self.env(extra));
+        let outcome = execute(args, &self.env_in(cwd, extra));
         let code = outcome.code;
         let output = outcome.stdout.replace(self.dir.path().to_str().unwrap(), "[dir]");
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap_or_default();
@@ -369,6 +379,61 @@ fn a_merged_commit_counts_done_from_another_thread_through_the_clone_mapped_by_o
     assert_eq!(made["data"][0]["readiness"]["readiness"], "done", "{made}");
     let (_, used) = sh.output("item show Used", &at_home);
     assert_eq!(used["data"][0]["readiness"]["readiness"], "ready", "{used}");
+}
+
+/// With no clones.toml, one command run from a worktree teaches acyclic where the repository's main checkout is, and a
+/// later commit write from the tracker refuses an unmerged commit there.
+#[test]
+fn a_clone_learned_from_a_worktree_checks_commits_with_no_clones_toml() {
+    let mut sh = Shell::new();
+    let root = sh.path().canonicalize().unwrap();
+    let (origin, code, tree) = (root.join("origin"), root.join("code"), root.join("tree"));
+    git(&root, &["init", "-q", "-b", "main", "origin"]);
+    git(&origin, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    git(&root, &["clone", "-q", "origin", "code"]);
+    // The clone's origin is named as GitHub names it, and reaches the local repository standing in for it.
+    git(&code, &["remote", "set-url", "origin", "https://github.com/me/code.git"]);
+    let local = format!("url.{}.insteadOf", origin.display());
+    git(&code, &["config", &local, "https://github.com/me/code.git"]);
+    git(&code, &["worktree", "add", "-q", "-b", "work", tree.to_str().unwrap()]);
+    git(&tree, &["commit", "-q", "--allow-empty", "-m", "unmerged"]);
+    let unmerged = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&tree)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    let unmerged = String::from_utf8(unmerged.stdout).unwrap().trim().to_owned();
+
+    let home = root.join("home");
+    let state = root.join("state");
+    let tracker = root.join("tracker");
+    let machine = [
+        ("HOME", home.to_str().unwrap()),
+        ("XDG_STATE_HOME", state.to_str().unwrap()),
+        ("ACYCLIC_TRACKER", tracker.to_str().unwrap()),
+        ("ACYCLIC_ACTOR", "session/mac"),
+    ];
+    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
+    for line in
+        [INITIATIVE, "repository add --name me/code --default-branch main", "item add --title Ship"]
+    {
+        assert_eq!(sh.run(line, &machine), 0, "{line}");
+    }
+    let done = format!("item done Ship --commit me/code@{unmerged}");
+    assert_eq!(sh.output_in(&tree, "item list", &machine).0, 0);
+    let learned = std::fs::read_to_string(state.join("acyclic/clones.json")).unwrap();
+    assert!(learned.contains(&format!("{:?}", code.to_str().unwrap())), "{learned}");
+    assert!(!learned.contains("tree"), "{learned}");
+
+    let (status, out) = sh.output(&done, &machine);
+    assert_eq!(
+        (status, out["error"]["details"]["reason"].as_str()),
+        (1, Some("not-merged")),
+        "{out}"
+    );
+    let (_, ship) = sh.output("item show Ship", &machine);
+    assert_eq!(ship["data"][0]["state"], "open", "{ship}");
 }
 
 /// A directory that isn't a tracker is a setup problem, `no-replica`, as it always was, and not a Git failure.

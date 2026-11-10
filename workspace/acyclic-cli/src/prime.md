@@ -187,12 +187,15 @@ give the item the parent, waits-for and thread it belongs with.
 
 Done means merged: work waiting on a done item may start at once. So a commit is checked when it is written, by
 `item done --commit`, `import` and any other write that records one: it must be on the repository's default branch in
-this machine's clone of it (named in `~/.config/acyclic/clones.toml`, by the repository's `owner/name`). One not there
-yet is fetched first, so a pull request merged a moment ago passes; a branch's commit, or one no clone knows, is refused
-as `unmerged`, `--force` or not, and nothing is written. With no clone mapped, no single default branch, or a valid
-mapped clone with neither an `origin` remote nor refs for that branch, the write goes through and its result lists the
+this machine's clone of it. Any command run inside a clone whose `origin` is a `github.com/owner/name` repository
+records that repository's main checkout (a worktree's too) in `~/.local/state/acyclic/clones.json`, or under
+`$XDG_STATE_HOME`; an entry whose directory is gone, or whose `origin` no longer names that repository, is dropped.
+`~/.config/acyclic/clones.toml`, mapping a repository's `owner/name` to a path, is an optional override and wins. One
+not there yet is fetched first, so a pull request merged a moment ago passes; a branch's commit, or one no clone knows,
+is refused as `unmerged`, `--force` or not, and nothing is written. With no clone known, no single default branch, or a
+valid clone with neither an `origin` remote nor refs for that branch, the write goes through and its result lists the
 commit under `unchecked_commits`; `acyclic doctor` later checks every recorded commit, as last fetched, on a machine
-that has the clones.
+that has the clones, and lists those it couldn't check under `data.commits.unchecked_commits`, each with its reason.
 
 ## SSH transport
 

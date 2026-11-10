@@ -1019,6 +1019,12 @@ impl Git {
             .ok_or_else(|| StoreError::Git("this operation must be run in a work tree".to_owned()))
     }
 
+    /// The root of the main work tree: for a linked worktree, the checkout that owns it. `None` when that is bare.
+    pub(crate) fn main_workdir(&self) -> Result<Option<PathBuf>, StoreError> {
+        let main = self.handle()?.main_repo().map_err(failed)?;
+        Ok(main.workdir().map(|dir| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_owned())))
+    }
+
     /// The commits reachable from `tip`, at most `limit` of them.
     pub(crate) fn recent_commits(
         &self,

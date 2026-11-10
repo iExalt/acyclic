@@ -1,5 +1,6 @@
 ---
 source: workspace/acyclic-cli/src/tests/contract.rs
+assertion_line: 677
 expression: sh.transcript
 ---
 $ acyclic init tracker --replica mac
@@ -58,6 +59,7 @@ $ ACYCLIC_ACTOR=session/mac acyclic doctor
     "commits": {
       "checked": 0,
       "unchecked": 0,
+      "unchecked_commits": [],
       "unmerged": []
     },
     "counts": {

@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use acyclic_core::merged::{Check, GitAncestry};
 use acyclic_core::model::Model;
@@ -12,6 +13,7 @@ use serde_json::{Value as Json, json};
 use crate::Env;
 use crate::context;
 use crate::error::CliError;
+use crate::learned::Learned;
 
 /// One commit evidence: the item it finishes, its repository record and the commit.
 type Commit = (String, String, String);
@@ -54,9 +56,14 @@ pub(crate) fn commits(model: &Model) -> BTreeSet<Commit> {
 }
 
 /// Fetches any default branches needed to check commits a prospective write adds, before its store batch.
-pub(crate) fn preflight(env: &Env, candidates: &BTreeSet<Commit>, model: &Model) -> Prepared {
+pub(crate) fn preflight(
+    env: &Env,
+    learned: &Rc<Learned>,
+    candidates: &BTreeSet<Commit>,
+    model: &Model,
+) -> Prepared {
     let mut prepared = Prepared::default();
-    let Ok(clones) = context::clones(env) else { return prepared };
+    let Ok(clones) = context::clones_with(env, learned) else { return prepared };
     let ancestry = GitAncestry::new(&clones);
     let mut refreshed: BTreeMap<(PathBuf, String), Result<(), String>> = BTreeMap::new();
     for candidate in candidates {
@@ -89,6 +96,7 @@ pub(crate) fn preflight(env: &Env, candidates: &BTreeSet<Commit>, model: &Model)
 /// have already run before the store batch. Returns commits this machine can't check, and refuses unmerged evidence.
 pub(crate) fn check(
     env: &Env,
+    learned: &Rc<Learned>,
     before: &BTreeSet<Commit>,
     after: &Model,
     prepared: &Prepared,
@@ -102,7 +110,7 @@ pub(crate) fn check(
             "item": item, "repository": name_of(after, repository), "commit": commit, "reason": reason,
         })
     };
-    let clones = match context::clones(env) {
+    let clones = match context::clones_with(env, learned) {
         Ok(clones) => clones,
         Err(error) => {
             let mut found = Vec::new();
@@ -242,25 +250,40 @@ fn refusal(model: &Model, (item, repository, commit): (&str, &str, &str), why: &
 }
 
 /// Every commit evidence in `model` checked as this machine's clones were last fetched, fetching nothing: those not on
-/// their default branch, or unknown, by item, and how many were checked and how many couldn't be.
+/// their default branch, or unknown, by item, how many were checked and how many couldn't be, and each of those, with
+/// the reason.
 pub(crate) fn audit(env: &Env, model: &Model) -> Json {
     let all = commits(model);
-    let Ok(clones) = context::clones(env) else {
-        return json!({"checked": 0, "unchecked": all.len(), "unmerged": []});
+    let unchecked_row = |item: &str, repository: &str, commit: &str, reason: &str| {
+        json!({
+            "item": item, "repository": name_of(model, repository), "commit": commit, "reason": reason,
+        })
+    };
+    let clones = match context::clones(env) {
+        Ok(clones) => clones,
+        Err(error) => {
+            let rows: Vec<Json> = all
+                .iter()
+                .map(|(item, repository, commit)| {
+                    unchecked_row(item, repository, commit, &error.message)
+                })
+                .collect();
+            return json!({"checked": 0, "unchecked": rows.len(), "unmerged": [], "unchecked_commits": rows});
+        },
     };
     let ancestry = GitAncestry::new(clones);
-    let (mut checked, mut unchecked, mut unmerged) = (0, 0, Vec::new());
+    let (mut checked, mut unchecked, mut unmerged) = (0, Vec::new(), Vec::new());
     for (item, repository, commit) in &all {
         let Some(record) = model.repositories.get(repository) else {
-            unchecked += 1;
+            unchecked.push(unchecked_row(item, repository, commit, "no such repository record"));
             continue;
         };
         let why = match ancestry.check(record, commit) {
             Check::Merged => None,
             Check::NotMerged => Some("not-merged"),
             Check::UnknownCommit => Some("unknown-commit"),
-            Check::NoBranch(_) | Check::Unchecked(_) => {
-                unchecked += 1;
+            Check::NoBranch(reason) | Check::Unchecked(reason) => {
+                unchecked.push(unchecked_row(item, repository, commit, &reason));
                 continue;
             },
         };
@@ -271,7 +294,7 @@ pub(crate) fn audit(env: &Env, model: &Model) -> Json {
             }));
         }
     }
-    json!({"checked": checked, "unchecked": unchecked, "unmerged": unmerged})
+    json!({"checked": checked, "unchecked": unchecked.len(), "unmerged": unmerged, "unchecked_commits": unchecked})
 }
 
 #[cfg(test)]

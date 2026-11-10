@@ -9,6 +9,7 @@ mod context;
 mod edit;
 mod evidence;
 mod keep;
+mod learned;
 mod pretty;
 mod resolve;
 mod view;
@@ -169,6 +170,9 @@ fn execute_with(
             Ok(()) => Outcome::out(exit::OK, String::new()),
             Err(err) => failed(err),
         };
+    }
+    if matches!(cli.command.class(), args::Class::Clone | args::Class::Read | args::Class::Write) {
+        learned::learn(env);
     }
     let result = match output {
         Format::Json => commands::run(&cli, env).map(|output| (output, commands::Names::new())),
