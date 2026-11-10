@@ -452,8 +452,10 @@ before what went wrong.
   arrives at its own point with its own arrowhead. Sharing both ends would let an outgoing trunk and an incoming one
   run as one line, and a link would seem to join items it doesn't. A dot marks only where a trunk splits; links that
   cross have none.
-- **Opening view.** The whole plan when it fits at 1:1 or closer, fitted up to 2×, on every screen, a phone's too (at
-  0.85, a phone's titles read at 11 px); otherwise the first box's corner, its title and first item whole, at 1:1.
+- **Opening view.** Choosing another initiative opens its plan with this view, including Back and Forward; updates
+  within the same initiative keep the camera. An explicit item or thread navigation takes precedence. The whole plan
+  when it fits at 1:1 or closer, fitted up to 2×, on every screen, a phone's too (at 0.85, a phone's titles read at 11
+  px); otherwise the first box's corner, its title and first item whole, at 1:1.
 - **Fit the whole plan.** A Fit button on the Map frames the whole drawn plan in the uncovered part of the Map,
   including beside a panel or above a phone sheet. Automatic views keep its top-left control strip clear, even if the
   Map first draws under another view. Fit changes only the viewport; selection and folds stay put. The button is a

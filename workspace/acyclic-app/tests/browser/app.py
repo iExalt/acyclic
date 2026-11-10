@@ -2237,6 +2237,101 @@ HOSTILE = '<img src=x onerror="window.pwned = true">'
 
 
 @timed
+def initiative_framing_journey(page, view, plan, name, failures):
+    """Scope changes open a readable plan; a refresh within that scope leaves the camera alone."""
+    # Earlier journeys can pan the mounted Map while another view is open.
+    page.reload()
+    to_map(page)
+    jmap = page.get_by_test_id("map")
+    wait_drawn(page, len(plan.default()))
+    settled_map(page)
+    camera = lambda: jmap.evaluate("m => ({zoom:m.cy.zoom(), pan:m.cy.pan()})")
+    opening = camera()
+    phone = view.get("has_touch")
+
+    def choose(id):
+        if phone:
+            page.get_by_test_id("projects-button").click()
+            page.get_by_test_id("projects").wait_for()
+        page.locator(f"button.initiative[data-initiative='{id}']").click()
+        if phone:
+            page.get_by_test_id("projects-button").click()
+            page.get_by_test_id("projects").wait_for(state="detached")
+
+    def opened(label):
+        wait_drawn(page, len(plan.default()))
+        settled_map(page)
+        found = camera()
+        assert abs(found["zoom"] - opening["zoom"]) <= .001, (name, label, opening, found)
+        assert all(abs(found["pan"][axis] - opening["pan"][axis]) <= .5 for axis in ("x", "y")), (name, label, opening, found)
+
+    # These ids come from the real fixture's switcher, not an assumed record order.
+    if phone:
+        page.get_by_test_id("projects-button").click()
+        page.get_by_test_id("projects").wait_for()
+    choices = page.locator("button.initiative")
+    small = choices.filter(has=page.locator(".initiative-name", has_text="Standalone initiative")).get_attribute("data-initiative")
+    empty = choices.filter(has=page.locator(".initiative-name", has_text="Empty initiative with a long name")).get_attribute("data-initiative")
+    assert small and empty
+    if phone:
+        page.get_by_test_id("projects-button").click()
+        page.get_by_test_id("projects").wait_for(state="detached")
+    choose(small)
+    wait_drawn(page, 1)
+    settled_map(page)
+    jmap.evaluate("m => { m.cy.viewport({zoom:2,pan:{x:192,y:367}}); }")
+    settled_map(page)
+    choose(plan.initiative)
+    opened("small to large")
+    page.screenshot(path=SHOTS / f"map-scope-{name}.png")
+    choose(empty)
+    expect(page.get_by_test_id("empty-plan")).to_be_visible()
+    choose(plan.initiative)
+    opened("empty to large")
+    jmap.evaluate("m => { m.cy.viewport({zoom:1.3,pan:{x:23,y:81}}); }")
+    settled_map(page)
+    manual = camera()
+    reads = int(page.locator("main.stage").get_attribute("data-reads"))
+    refresh(page)
+    page.wait_for_function("r => Number(document.querySelector('main.stage').dataset.reads) > r", arg=reads)
+    settled_map(page)
+    assert camera() == manual, (name, "same-scope refresh", manual, camera())
+    # Following a dependency creates same-depth history entries, each with its own initiative.
+    waiter = next(row for row in plan.elsewhere.values() if any(id in plan.items for id in row["links"]["waits_for"]))
+    wanted = next(id for id in waiter["links"]["waits_for"] if id in plan.items)
+    choose(waiter["initiative"])
+    page.locator("[data-action=search]").click()
+    menu = page.get_by_test_id("command-menu")
+    menu.get_by_role("combobox").fill(waiter["title"])
+    menu.locator(f"[data-command='item:{waiter['id']}']").click()
+    menu.wait_for(state="detached")
+    page.get_by_test_id("inspector").get_by_role("heading", name=waiter["title"], exact=True).wait_for()
+    page.locator(f"[data-testid=waits-for] [data-select='{wanted}']").click()
+
+    def focused(id, initiative):
+        page.wait_for_function("([id,initiative]) => {const q=new URLSearchParams(location.search);"
+                               "return q.get('item')===id && q.get('initiative')===initiative;}", arg=[id, initiative])
+        settled_map(page)
+        bounds = fit_occlusion(page, lit_only=False)["open"]
+        tile = jmap.evaluate("(m,id)=>{const b=m.cy.getElementById(id).renderedBoundingBox({includeLabels:false});"
+                             "return {x1:b.x1,y1:b.y1,x2:b.x2,y2:b.y2};}", id)
+        assert all(tile[k] >= bounds[k] - .5 for k in ("x1", "y1")), (name, id, tile, bounds)
+        assert all(tile[k] <= bounds[k] + .5 for k in ("x2", "y2")), (name, id, tile, bounds)
+
+    focused(wanted, plan.initiative)
+    page.go_back()
+    focused(waiter["id"], waiter["initiative"])
+    page.go_forward()
+    focused(wanted, plan.initiative)
+    # Leave the original opening view for the existing Map journey's independent geometry checks.
+    page.goto(f"{page.url.split('?')[0]}?view=map&initiative={plan.initiative}")
+    to_map(page)
+    wait_drawn(page, len(plan.default()))
+    settled_map(page)
+    print(f"{name}: initiative opening, history, explicit focus and same-scope camera preservation checked")
+
+
+@timed
 def outline_journey(page, view, env, plan, name, failures):
     """Selecting an item marks its project and its thread's row there, opening the project. On a phone the projects
     come as a sheet over the item's, and Back closes the sheet first, staying in the app."""
@@ -2354,7 +2449,7 @@ def outline_journey(page, view, env, plan, name, failures):
                 inspector.wait_for(timeout=5_000)
                 page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
                 added = inspector.locator("code.id").inner_text()
-                check_tracker(env, added, lambda row: row["parent"] == target and row["initiative"] == target,
+                check_tracker(env, added, lambda row, target=target: row["parent"] == target and row["initiative"] == target,
                               "empty Map item in its selected initiative", failures, name)
                 expect(empty).not_to_be_visible()
                 inspector.get_by_role("button", name="Close", exact=True).click()
@@ -4610,7 +4705,7 @@ def hover_tints_journey(page, view, name):
 @timed
 def hover_focus_journey(browser):
     """Focus paint works without hover, and disabled/selected fills remain unchanged with it."""
-    for name, view in VIEWS.items():
+    for view in VIEWS.values():
         context = browser.new_context(**view)
         try:
             page = context.new_page()
@@ -4784,6 +4879,7 @@ def shard_run(shard):
                     overview_journey(page, view, name, failures)
                     to_map(page)
                     # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
+                    initiative_framing_journey(page, view, plan, name, failures)
                     hint = map_journey(page, view, plan, name, failures, hint)
                     outline_journey(page, view, env, plan, name, failures)
                     threads_journey(page, view, env, plan, name, failures)
