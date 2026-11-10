@@ -152,7 +152,7 @@ jobs:
           driver-opts: network=host
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
-          install: python
+          install_args: python
       - run: python3 scripts/promote-image-test.py
       - run: sh scripts/publish-image.sh localhost:5000/acyclic-server rehearsal images --dest-tls-verify=false
       - name: Check the index holds both architectures and runs here

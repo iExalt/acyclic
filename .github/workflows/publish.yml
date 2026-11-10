@@ -143,7 +143,7 @@ jobs:
           ref: refs/tags/${{ env.TAG }}
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
-          install: python
+          install_args: python
       - name: Promote the tested index without changing its digest
         run: |
           echo "$GH_TOKEN" | skopeo login ghcr.io --username "$ACTOR" --password-stdin
