@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.12.0](https://github.com/iExalt/acyclic/compare/v0.11.0...v0.12.0) (2026-11-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* require approval for redundant dependencies ([#275](https://github.com/iExalt/acyclic/issues/275))
+
+### Features
+
+* **app:** delete items, threads, and initiatives ([#277](https://github.com/iExalt/acyclic/issues/277)) ([ee9bebf](https://github.com/iExalt/acyclic/commit/ee9bebf07a2cba4c13d6e63e7c130a094ff200cd))
+* **app:** preview sidebar references on the map ([#276](https://github.com/iExalt/acyclic/issues/276)) ([dd250a3](https://github.com/iExalt/acyclic/commit/dd250a352cd7b8059bdeff6323034197c9346c0a))
+* require approval for redundant dependencies ([#275](https://github.com/iExalt/acyclic/issues/275)) ([15257a1](https://github.com/iExalt/acyclic/commit/15257a191037f927ded1ef32722fa6cd561d25be))
+
+
+### Bug Fixes
+
+* **app:** preserve themes and layout with Dark Reader ([#272](https://github.com/iExalt/acyclic/issues/272)) ([11d3402](https://github.com/iExalt/acyclic/commit/11d34020e91ab03fd5060d1141dc15c168f3b39d))
+* **app:** reframe the map when switching initiatives ([#274](https://github.com/iExalt/acyclic/issues/274)) ([c6b7e3e](https://github.com/iExalt/acyclic/commit/c6b7e3e31da0a46fb9108c3518827bc3da5b4808))
+
 ## [0.11.0](https://github.com/iExalt/acyclic/compare/v0.10.0...v0.11.0) (2026-11-10)
 
 

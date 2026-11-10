@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "acyclic"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "acyclic-cli",
  "acyclic-core",
@@ -16,11 +16,11 @@ dependencies = [
 
 [[package]]
 name = "acyclic-app-assets"
-version = "0.11.0"
+version = "0.12.0"
 
 [[package]]
 name = "acyclic-cli"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "acyclic-core",
  "acyclic-fixtures",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "acyclic-core"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "gix",
  "hegeltest",
@@ -51,14 +51,14 @@ dependencies = [
 
 [[package]]
 name = "acyclic-fixtures"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "acyclic-core",
 ]
 
 [[package]]
 name = "acyclic-server"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "acyclic-app-assets",
  "acyclic-cli",
