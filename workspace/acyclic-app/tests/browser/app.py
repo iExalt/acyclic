@@ -357,6 +357,12 @@ def compose_seeded_import(data, include_small_scenarios):
         ]
         ids.update(second_epic=epic, second_thread=second_thread, second_task_1=tasks[0], second_task_2=tasks[1])
 
+    if include_small_scenarios:
+        initiative("Empty initiative with a long name to check that the outline stays within its available width")
+        standalone = initiative("Standalone initiative")
+        solo_thread = thread("Standalone work")
+        item("Standalone task", standalone, thread_id=solo_thread)
+
     all_ids = [record["id"] for kind in ("items", "threads", "initiatives", "repositories") for record in composed[kind]]
     assert len(all_ids) == len(set(all_ids)), "composed import ids must be unique"
     return composed, ids
@@ -2248,6 +2254,7 @@ def outline_journey(page, view, plan, name, failures):
         failures.append(f"{name}: the switcher didn't list the initiatives with the first in context")
     else:
         initiative = chosen.get_attribute("data-initiative")
+        second_items = {id: row for id, row in plan.elsewhere.items() if row["initiative"] == initiative}
         title = chosen.locator(".initiative-name").inner_text()
         was = first.get_attribute("data-initiative")
         marked_now = lambda id: f"button.initiative[data-initiative='{id}'][aria-current=true]"
@@ -2261,17 +2268,17 @@ def outline_journey(page, view, plan, name, failures):
         # The Map draws the initiative in context alone: the other's epic and its tasks, none of the first's, and it
         # settles on them. A tracker with nothing in the other leaves the Map empty.
         try:
-            wait_drawn(page, len(plan.elsewhere))
+            wait_drawn(page, len(second_items))
             settled_map(page)
         except PlaywrightTimeout:
             drawn = page.get_by_test_id("map").evaluate("m => ({ ...m.dataset })")
-            failures.append(f"{name}: choosing {title} left the Map {drawn}, not settled on its {len(plan.elsewhere)} items")
+            failures.append(f"{name}: choosing {title} left the Map {drawn}, not settled on its {len(second_items)} items")
         if phone:
             page.get_by_test_id("projects-button").click()
             sheet.wait_for(state="detached", timeout=5_000)
         # A wait that leaves the initiative is a stub on its tile; tapped, it follows the item, putting the item's
         # initiative in context, and the second is chosen again after.
-        waiter = next((id for id, row in plan.elsewhere.items() if row["links"]["waits_for"]), None)
+        waiter = next((id for id, row in second_items.items() if row["links"]["waits_for"]), None)
         if waiter is None:
             failures.append(f"{name}: no task in {title} waits for an item of the first initiative, so the stub went unchecked")
         else:
@@ -2294,7 +2301,7 @@ def outline_journey(page, view, plan, name, failures):
                     if phone:
                         page.get_by_test_id("projects-button").click()
                         sheet.wait_for(state="detached", timeout=5_000)
-                    wait_drawn(page, len(plan.elsewhere))
+                    wait_drawn(page, len(second_items))
                     settled_map(page)
             except PlaywrightTimeout:
                 failures.append(f"{name}: tapping {waiter}'s stub didn't open {wanted} in its own initiative, at {page.url}")
@@ -2309,7 +2316,29 @@ def outline_journey(page, view, plan, name, failures):
             page.locator(marked_now(initiative)).wait_for(timeout=10_000)
         except PlaywrightTimeout:
             failures.append(f"{name}: a reload didn't keep {title} in context")
+        # Empty epics must not hide standalone work. Exercise the actual switcher with the keyboard and both themes.
+        for label, has_thread in (("Empty initiative with a long name to check that the outline stays within its available width", False), ("Standalone initiative", True)):
+            choice = page.locator("button.initiative").filter(has=page.locator(".initiative-name", has_text=label))
+            target = choice.get_attribute("data-initiative")
+            choice.focus()
+            page.keyboard.press("Enter")
+            page.locator(marked_now(target)).wait_for(timeout=5_000)
+            page.locator(".outline .subheading", has_text="No epics in this initiative").wait_for(timeout=5_000)
+            outline = sheet.locator(".outline:not(.initiatives)") if phone else page.locator(".outline:not(.initiatives)")
+            if has_thread and not outline.locator("text=Other threads").count():
+                failures.append(f"{name}: Other threads absent for {label}")
+            if has_thread and not outline.locator("button.thread", has_text="Standalone work").count():
+                failures.append(f"{name}: standalone thread is absent from the outline")
+            overflow = outline.evaluate("e => e.scrollWidth - e.clientWidth")
+            if overflow > 0:
+                failures.append(f"{name}: empty outline overflows by {overflow} px")
+            for scheme in ("light", "dark"):
+                page.emulate_media(color_scheme=scheme)
+                page.screenshot(path=SHOTS / f"outline-{name}-{has_thread}-{scheme}.png")
+        page.emulate_media(color_scheme=view.get("color_scheme", "light"))
         page.locator(f"button.initiative[data-initiative='{was}']").click()
+        if page.locator(".outline .subheading", has_text="No epics in this initiative").count():
+            failures.append(f"{name}: empty message remained after returning to populated initiative")
         if phone:
             page.get_by_test_id("projects-button").click()
             sheet.wait_for(state="detached", timeout=5_000)

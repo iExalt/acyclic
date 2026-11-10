@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { NO_COUNTS } from "./api";
 import { InitiativeSwitcher } from "./InitiativeSwitcher";
 import { Overview, type OverviewProps } from "./Overview";
+import { Projects } from "./Projects";
 
 const empty: OverviewProps = {
   needs: [],
@@ -71,4 +72,19 @@ describe("decorative zero counts", () => {
     expect(html).toContain('class="initiative-count">3<span class="open"> open</span>');
     expect(html).toContain("Empty initiative");
   });
+});
+
+it("names an empty outline without an initiative in context", () => {
+  const html = renderToStaticMarkup(
+    <Projects
+      outline={{ projects: [], others: [] }}
+      initiative={null}
+      lines={new Map()}
+      picked={null}
+      current={{ project: null, thread: null }}
+      onPickThread={() => {}}
+      onSelectProject={() => {}}
+    />,
+  );
+  expect(html).toContain(">No epics</p>");
 });
