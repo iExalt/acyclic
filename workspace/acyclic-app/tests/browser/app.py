@@ -3886,14 +3886,13 @@ def completion_journey(page, view, env, origin, name, failures):
 
     # A separately finished leaf carries a repository record and commit across a full reload.
     repo_name = f"sample/{name}"
-    repo = json.loads(run(env, "repository", "add", "--name", repo_name, "--default-branch", "main"))["data"]["repository"]
+    run(env, "repository", "add", "--name", repo_name, "--default-branch", "main")
     commit_leaf = json.loads(run(env, "item", "add", "--parent", parent, "--title", f"Commit task {name}", "--no-thread"))["data"]["item"]
     run(env, "item", "done", commit_leaf, "--commit", f"{repo_name}@abc1234")
     page.goto(f"{origin}/?item={quote(commit_leaf)}")
     page.reload()
     saved = page.get_by_test_id("completion-evidence")
-    expect(saved).to_contain_text(repo)
-    expect(saved).to_contain_text("abc1234")
+    expect(saved).to_contain_text(f"{repo_name}@abc1234")
 
     # Inject only the response field to exercise legacy missing and concurrent alternatives at the UI boundary.
     if name == "desktop":
@@ -3914,7 +3913,7 @@ def completion_journey(page, view, env, origin, name, failures):
         try:
             page.reload()
             expect(saved).to_contain_text("No completion evidence recorded")
-            response_evidence[0] = {"conflict": [{"text": "<script>unsafe</script> " + "long" * 100, "repository": "sample", "commit": "abc"}, None]}
+            response_evidence[0] = {"conflict": [{"text": "<script>unsafe</script> " + "long" * 100, "commit": "sample/code@abc"}, None]}
             page.reload()
             expect(saved).to_contain_text("Conflicting evidence")
             expect(saved).to_contain_text("Cleared (no evidence)")
