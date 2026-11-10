@@ -2720,3 +2720,14 @@ button.overview-row:not(:has(> .badge)):has(> .initiative-tag) {
 .group-head + .needs > li:first-child {
   border-top: none;
 }
+
+.completion-evidence {
+  overflow-wrap: anywhere;
+}
+.completion-evidence p {
+  margin: 4px 0;
+}
+.completion-evidence h4 {
+  margin: 8px 0 0;
+  font-size: inherit;
+}

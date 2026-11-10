@@ -3871,12 +3871,18 @@ def completion_journey(page, view, env, origin, name, failures):
     page.locator("main.stage[data-busy=false]").wait_for()
     row = json.loads(run(env, "item", "show", leaf))["data"][0]
     assert row["state"] == "done" and "Checked the completed work" in json.dumps(row["evidence"]), "completion or its evidence was not saved"
+    page.reload()
+    expect(page.get_by_test_id("completion-evidence")).to_contain_text("Checked the completed work")
+    page.goto(f"{origin}/?item={quote(parent)}")
+    expect(page.get_by_test_id("completion-evidence")).to_have_count(0)
+    page.goto(f"{origin}/?item={quote(leaf)}")
     group = json.loads(run(env, "item", "show", parent))["data"][0]
     assert group["state"] == "open" and group["stage"] == "done", "parent completion was not derived"
     item_action(page, "reopen")
     page.locator("[data-action=reopen]").wait_for(state="detached")
     page.locator("main.stage[data-busy=false]").wait_for()
     assert json.loads(run(env, "item", "show", leaf))["data"][0]["state"] == "open", "completed item did not reopen"
+    expect(page.get_by_test_id("completion-evidence")).to_have_count(0)
     print(f"{name}: Done preserved evidence through a refusal, finished a leaf and its parent, and reopened")
 
 
