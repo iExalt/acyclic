@@ -2,7 +2,7 @@ name: Publish
 
 # Publishes a `v*` tag: builds it through build.yml, then the GitHub release with the archives, and the server's image
 # on GitHub's container registry under the tag and `latest`. A release PR's merge makes the tag; running this by hand
-# with a tag publishes it again, such as after a failed run. Only the `release` job can write.
+# with a tag publishes it again, such as after a failed run. Only `release` and `promote` can write; only `promote` makes images eligible for automatic updates.
 on:
   push:
     tags: ["v*"]
@@ -51,6 +51,8 @@ jobs:
     permissions:
       contents: write
       packages: write
+    outputs:
+      digest: ${{ steps.index.outputs.digest }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -89,6 +91,11 @@ jobs:
           echo "$GH_TOKEN" | skopeo login ghcr.io --username "$ACTOR" --password-stdin
           echo "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
           sh scripts/publish-image.sh "$IMAGE" "$TAG" images
+      - name: Capture the exact published index
+        id: index
+        run: |
+          digest="sha256:$(skopeo inspect --raw "docker://$IMAGE:$TAG" | sha256sum | cut -d' ' -f1)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Publish the release
         run: gh release edit "$TAG" --draft=false --latest
 
@@ -104,6 +111,7 @@ jobs:
     permissions:
       packages: read
     env:
+      INDEX_DIGEST: ${{ needs.release.outputs.digest }}
       GH_TOKEN: ${{ github.token }}
       GITHUB_TOKEN: ${{ github.token }}
     steps:
@@ -112,8 +120,30 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           echo "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
-          docker run --rm "$IMAGE:$TAG" --version | tee /dev/stderr | grep -qx "acyclic ${TAG#v}"
+          docker run --rm "$IMAGE@$INDEX_DIGEST" --version | tee /dev/stderr | grep -qx "acyclic ${TAG#v}"
       # The README's install command, against the release just published.
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
       - name: Install the release with mise
         run: mise exec "github:iExalt/acyclic@${TAG#v}" -- acyclic --version | tee /dev/stderr | grep -qx "acyclic ${TAG#v}"
+
+  promote:
+    name: promote verified image
+    needs: [release, verify]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    env:
+      INDEX_DIGEST: ${{ needs.release.outputs.digest }}
+      GH_TOKEN: ${{ github.token }}
+      ACTOR: ${{ github.actor }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
+        with:
+          install: python
+      - name: Promote the tested index without changing its digest
+        run: |
+          echo "$GH_TOKEN" | skopeo login ghcr.io --username "$ACTOR" --password-stdin
+          python3 scripts/promote-image.py "$IMAGE" "$TAG" "$INDEX_DIGEST"
