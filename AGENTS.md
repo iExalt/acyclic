@@ -18,6 +18,12 @@
 - Most behaviour is covered by unit tests in the core library. The CLI's contract against one tracker runs in its
   unit tests, in process; integration tests cover what needs several tracker clones syncing; browser journeys run in
   `mise run check:browser`, outside the routine check.
+- The binary runs no `git` and starts no process except itself, to repack in the background: storage, sync and commit
+  checks all go through gix. `no_production_code_runs_git` in `workspace/acyclic/tests/no_git.rs` enforces this, and
+  the server's image ships without Git. Design anything that would need another program, such as `gh`, without it.
+- Before opening a pull request, run `mise run check:integration` as well as the routine check: it holds the tests that
+  guard these rules and multi-clone sync, and CI runs it. Run `mise run check:browser` too when the change touches the
+  app or the server.
 - Commit messages follow Conventional Commits.
 - Pull requests are squash-merged, and release-please reads only the squashed commit: its title, from the pull
   request's title, and its body, from the description. Title a pull request as a Conventional Commit that covers
