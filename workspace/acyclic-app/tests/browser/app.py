@@ -2237,7 +2237,7 @@ HOSTILE = '<img src=x onerror="window.pwned = true">'
 
 
 @timed
-def outline_journey(page, view, plan, name, failures):
+def outline_journey(page, view, env, plan, name, failures):
     """Selecting an item marks its project and its thread's row there, opening the project. On a phone the projects
     come as a sheet over the item's, and Back closes the sheet first, staying in the app."""
     # The switcher: a row to each initiative, the first in context until one is chosen; choosing another moves the mark
@@ -2335,8 +2335,38 @@ def outline_journey(page, view, plan, name, failures):
             for scheme in ("light", "dark"):
                 page.emulate_media(color_scheme=scheme)
                 page.screenshot(path=SHOTS / f"outline-{name}-{has_thread}-{scheme}.png")
+            if phone:
+                page.get_by_test_id("projects-button").click()
+                sheet.wait_for(state="detached", timeout=5_000)
+            empty = page.get_by_test_id("empty-plan")
+            if has_thread:
+                expect(empty).not_to_be_visible()
+            else:
+                expect(empty.get_by_role("heading")).to_have_text("No items in this initiative")
+                for scheme in ("light", "dark"):
+                    page.emulate_media(color_scheme=scheme)
+                    page.screenshot(path=SHOTS / f"map-empty-{name}-{scheme}.png")
+                empty.get_by_role("button", name="New item", exact=True).click()
+                form = page.get_by_test_id("add-form")
+                form.locator("input[name=title]").fill("Created from the empty Map")
+                form.get_by_role("button", name="Add item", exact=True).click()
+                inspector = page.get_by_test_id("inspector")
+                inspector.wait_for(timeout=5_000)
+                page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+                added = inspector.locator("code.id").inner_text()
+                check_tracker(env, added, lambda row: row["parent"] == target and row["initiative"] == target,
+                              "empty Map item in its selected initiative", failures, name)
+                expect(empty).not_to_be_visible()
+                inspector.get_by_role("button", name="Close", exact=True).click()
+                run(env, "item", "delete", added)
+                refresh(page)
+                expect(empty).to_be_visible()
+            if phone:
+                page.get_by_test_id("projects-button").click()
+                sheet.wait_for(timeout=5_000)
         page.emulate_media(color_scheme=view.get("color_scheme", "light"))
         page.locator(f"button.initiative[data-initiative='{was}']").click()
+        expect(page.get_by_test_id("empty-plan")).not_to_be_visible()
         if page.locator(".outline .subheading", has_text="No epics in this initiative").count():
             failures.append(f"{name}: empty message remained after returning to populated initiative")
         if phone:
@@ -4755,7 +4785,7 @@ def shard_run(shard):
                     to_map(page)
                     # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                     hint = map_journey(page, view, plan, name, failures, hint)
-                    outline_journey(page, view, plan, name, failures)
+                    outline_journey(page, view, env, plan, name, failures)
                     threads_journey(page, view, env, plan, name, failures)
                     deep_link_journey(context, origin, view, plan, name, failures)
                     history_journey(context, origin, view, plan, name, failures)
