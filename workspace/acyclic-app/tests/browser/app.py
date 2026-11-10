@@ -3883,6 +3883,46 @@ def completion_journey(page, view, env, origin, name, failures):
     page.locator("main.stage[data-busy=false]").wait_for()
     assert json.loads(run(env, "item", "show", leaf))["data"][0]["state"] == "open", "completed item did not reopen"
     expect(page.get_by_test_id("completion-evidence")).to_have_count(0)
+
+    # A separately finished leaf carries a repository record and commit across a full reload.
+    repo_name = f"sample/{name}"
+    repo = json.loads(run(env, "repository", "add", "--name", repo_name, "--default-branch", "main"))["data"]["repository"]
+    commit_leaf = json.loads(run(env, "item", "add", "--parent", parent, "--title", f"Commit task {name}", "--no-thread"))["data"]["item"]
+    run(env, "item", "done", commit_leaf, "--commit", f"{repo_name}@abc1234")
+    page.goto(f"{origin}/?item={quote(commit_leaf)}")
+    page.reload()
+    saved = page.get_by_test_id("completion-evidence")
+    expect(saved).to_contain_text(repo)
+    expect(saved).to_contain_text("abc1234")
+
+    # Inject only the response field to exercise legacy missing and concurrent alternatives at the UI boundary.
+    if name == "desktop":
+        response_evidence = [None]
+        def evidence_response(route):
+            body = route.request.post_data_json
+            command = body.get("command", body) if isinstance(body, dict) else body
+            if isinstance(command, dict) and isinstance(command.get("item"), dict) and "show" in command["item"]:
+                response = route.fetch()
+                payload = response.json()
+                for row in payload.get("data", []):
+                    if row.get("id") == commit_leaf:
+                        row["evidence"] = response_evidence[0]
+                route.fulfill(response=response, json=payload)
+            else:
+                route.fallback()
+        page.route("**/api/command", evidence_response)
+        try:
+            page.reload()
+            expect(saved).to_contain_text("No completion evidence recorded")
+            response_evidence[0] = {"conflict": [{"text": "<script>unsafe</script> " + "long" * 100, "repository": "sample", "commit": "abc"}, None]}
+            page.reload()
+            expect(saved).to_contain_text("Conflicting evidence")
+            expect(saved).to_contain_text("Cleared (no evidence)")
+            expect(saved).to_contain_text("<script>unsafe</script>")
+            expect(saved.locator("script, a")).to_have_count(0)
+            page.screenshot(path=SHOTS / f"app-{name}-completion-conflict.png")
+        finally:
+            page.unroute("**/api/command", evidence_response)
     print(f"{name}: Done preserved evidence through a refusal, finished a leaf and its parent, and reopened")
 
 
