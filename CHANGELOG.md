@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.11.0](https://github.com/iExalt/acyclic/compare/v0.10.0...v0.11.0) (2026-11-10)
+
+
+### Features
+
+* **app:** complete leaf items from the state editor ([#264](https://github.com/iExalt/acyclic/issues/264)) ([86ffcf1](https://github.com/iExalt/acyclic/commit/86ffcf158877f07f65d6095537d189d2a04815e4))
+* **cli:** find code clones without clones.toml ([#265](https://github.com/iExalt/acyclic/issues/265)) ([e87d7d3](https://github.com/iExalt/acyclic/commit/e87d7d331e577f3d9c672389d713c64824be6f72))
+* show completion evidence in item details ([#269](https://github.com/iExalt/acyclic/issues/269)) ([f09130c](https://github.com/iExalt/acyclic/commit/f09130cb73ee13416fef0300c037e02434eec971))
+
+
+### Bug Fixes
+
+* **app:** hide zero-count overview and initiative badges ([#262](https://github.com/iExalt/acyclic/issues/262)) ([7fb9a4c](https://github.com/iExalt/acyclic/commit/7fb9a4cdeddc8b638a5cc93cb7ab61a61416d665))
+* coordinate blocked fetch contract tests ([#267](https://github.com/iExalt/acyclic/issues/267)) ([8cadb4e](https://github.com/iExalt/acyclic/commit/8cadb4e3ffcce53f448d3f5b9d5463653ebfea92))
+* explain empty epic outlines ([#268](https://github.com/iExalt/acyclic/issues/268)) ([6516423](https://github.com/iExalt/acyclic/commit/65164234dfa2b13851cee48b51f371d50a669cb0))
+* explain empty initiatives on the Map ([#270](https://github.com/iExalt/acyclic/issues/270)) ([2a9bbf2](https://github.com/iExalt/acyclic/commit/2a9bbf2b557fb865551ef96a1865842f9d6d07cf))
+
 ## [0.10.0](https://github.com/iExalt/acyclic/compare/v0.9.0...v0.10.0) (2026-11-08)
 
 
