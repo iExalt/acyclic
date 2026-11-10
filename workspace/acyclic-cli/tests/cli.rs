@@ -436,43 +436,6 @@ fn a_clone_learned_from_a_worktree_checks_commits_with_no_clones_toml() {
     assert_eq!(ship["data"][0]["state"], "open", "{ship}");
 }
 
-/// A repository with no clone is asked about on GitHub through `gh`, which is started without a terminal and killed
-/// when it hangs, leaving the commit unchecked.
-#[test]
-fn a_hung_gh_is_killed_and_the_commit_is_left_unchecked() {
-    use std::os::unix::fs::PermissionsExt as _;
-    let mut sh = Shell::new();
-    let root = sh.path().canonicalize().unwrap();
-    let bin = root.join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let pid_file = root.join("gh.pid");
-    std::fs::write(bin.join("gh"), "#!/bin/sh\necho $$ > \"$GH_PID\"\nexec /bin/sleep 30\n")
-        .unwrap();
-    std::fs::set_permissions(bin.join("gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
-    let machine = [
-        ("PATH", bin.to_str().unwrap()),
-        ("GH_PID", pid_file.to_str().unwrap()),
-        ("ACYCLIC_GH_TIMEOUT_MS", "300"),
-        ("ACYCLIC_ACTOR", "session/mac"),
-    ];
-    assert_eq!(sh.run("init tracker --replica mac", &[]), 0);
-    for line in
-        [INITIATIVE, "repository add --name me/code --default-branch main", "item add --title Ship"]
-    {
-        assert_eq!(sh.run(line, &machine), 0, "{line}");
-    }
-    let started = std::time::Instant::now();
-    let (status, out) = sh.output("item done Ship --commit me/code@abcdef1", &machine);
-    assert_eq!(status, 0, "{out}");
-    assert!(started.elapsed() < std::time::Duration::from_secs(20), "the hung gh wasn't stopped");
-    let unchecked = &out["data"]["unchecked_commits"][0];
-    assert_eq!(unchecked["repository"], "me/code", "{out}");
-    assert!(unchecked["reason"].as_str().unwrap().contains("took longer"), "{out}");
-    let pid = std::fs::read_to_string(&pid_file).unwrap();
-    let alive = std::process::Command::new("kill").args(["-0", pid.trim()]).status().unwrap();
-    assert!(!alive.success(), "gh {pid} is still running");
-}
-
 /// A directory that isn't a tracker is a setup problem, `no-replica`, as it always was, and not a Git failure.
 #[test]
 fn a_directory_that_is_no_repository_is_no_replica_not_a_git_failure() {

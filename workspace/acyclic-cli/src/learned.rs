@@ -24,28 +24,22 @@ struct Cache {
 
 /// Where the cache lives: under `$XDG_STATE_HOME` when that is an absolute path, else `~/.local/state`.
 pub(crate) fn cache_path(env: &Env) -> Option<PathBuf> {
-    state_file(env, "clones.json")
-}
-
-/// A file of acyclic's best-effort state, `name` under `$XDG_STATE_HOME/acyclic`, else `~/.local/state/acyclic`.
-pub(crate) fn state_file(env: &Env, name: &str) -> Option<PathBuf> {
     let base = match env.var("XDG_STATE_HOME") {
         Some(dir) if Path::new(dir).is_absolute() => PathBuf::from(dir),
         _ => PathBuf::from(env.var("HOME")?).join(".local/state"),
     };
-    Some(base.join("acyclic").join(name))
+    Some(base.join("acyclic/clones.json"))
 }
 
-/// A state file's contents; empty when it is missing or corrupt.
-pub(crate) fn read<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
+fn read(path: &Path) -> Cache {
     std::fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
 }
 
-/// Writes through a temporary file renamed into place, so a reader never sees half a file.
-pub(crate) fn write<T: Serialize>(path: &Path, cache: &T) -> std::io::Result<()> {
+/// Writes through a temporary file renamed into place, so a reader never sees half a cache.
+fn write(path: &Path, cache: &Cache) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
     let temp = parent.join(format!(".clones.json.{}.tmp", std::process::id()));
@@ -71,7 +65,7 @@ fn try_learn(env: &Env) -> Option<()> {
     let name = settings.github_name()?;
     // A bare repository has no checkout to record.
     let main = settings.main_checkout().ok()??.to_str()?.to_owned();
-    let mut cache: Cache = read(&path);
+    let mut cache = read(&path);
     if cache.clones.get(&name) == Some(&main) {
         return Some(());
     }
@@ -93,7 +87,7 @@ impl Learned {
 }
 
 fn lookup(cache: &Path, name: &str) -> Option<PathBuf> {
-    let mut learned: Cache = read(cache);
+    let mut learned = read(cache);
     let path = PathBuf::from(learned.clones.get(name)?);
     let valid = path.is_dir()
         && Settings::read(&path).ok().and_then(|settings| settings.github_name()).as_deref()
