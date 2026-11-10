@@ -141,6 +141,7 @@ export class CommandError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly details: unknown = null,
   ) {
     super(message);
     this.name = "CommandError";
@@ -150,7 +151,10 @@ export class CommandError extends Error {
 /** A failure as the app tells it: a refusal or a lost request by its code, and anything else as `network`. */
 export function failure(err: unknown): { code: string; message: string } {
   if (err instanceof CommandError) {
-    return { code: err.code, message: REFUSALS[err.code] ?? sentence(err.message) };
+    return {
+      code: err.code,
+      message: err.code === "in-use" ? inUseMessage(err.details) : (REFUSALS[err.code] ?? sentence(err.message)),
+    };
   }
   return { code: "network", message: err instanceof Error ? err.message : String(err) };
 }
@@ -168,6 +172,38 @@ const REFUSALS: Record<string, string> = {
   "changed-since": "Changed since, so it can't be undone",
   locked: "The tracker is busy with another write: try again in a moment",
 };
+
+const IN_USE_MESSAGES = {
+  "has-members": "Move or delete this thread's items before deleting the thread",
+  claimed: "Release this thread's active claim before deleting the thread",
+  "holds-items": "Move or delete this initiative's items before deleting the initiative",
+  "task-thread": "Delete the task instead of its thread",
+};
+
+/** Refusals name the action to take, never the server's record IDs or claim holder. */
+function inUseMessage(details: unknown): string {
+  const fallback = "It is still in use and can't be deleted yet";
+  if (
+    typeof details !== "object" ||
+    details === null ||
+    !("reasons" in details) ||
+    !Array.isArray(details.reasons) ||
+    details.reasons.length === 0
+  )
+    return fallback;
+  const messages: string[] = [];
+  for (const reason of details.reasons) {
+    if (
+      typeof reason !== "object" ||
+      reason === null ||
+      typeof reason.why !== "string" ||
+      !Object.hasOwn(IN_USE_MESSAGES, reason.why)
+    )
+      return fallback;
+    messages.push(IN_USE_MESSAGES[reason.why as keyof typeof IN_USE_MESSAGES]);
+  }
+  return [...new Set(messages)].join(". ");
+}
 
 /** A message as a sentence: its first letter capitalised, as the server's start in lower case. */
 function sentence(message: string): string {
@@ -208,7 +244,7 @@ export async function command<T>(
   });
   const envelope = (await response.json().catch(() => null)) as Envelope<T> | null;
   if (envelope === null) throw new CommandError("http", `the server answered ${response.status} without an envelope`);
-  if (!envelope.ok) throw new CommandError(envelope.error.code, envelope.error.message);
+  if (!envelope.ok) throw new CommandError(envelope.error.code, envelope.error.message, envelope.error.details);
   return envelope.data;
 }
 

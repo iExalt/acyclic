@@ -548,3 +548,15 @@ before what went wrong.
 - 2026-11-06: top-level tasks with no dependency links stand in columns on the left of the packed boxes, with the
   same dashed separator as inside an epic. Thread membership and stage do not affect placement. Folded boxes stay
   with the boxes. The user approved the left-lane proposal and clarified that the rule is unlinked, not unthreaded.
+
+## Deletion
+
+The item's actions menu ends with Delete item…, separated from the other actions. This applies to leaves and parents,
+including projects, in every state. Thread panels and initiative switcher rows offer their own deletion menus.
+A native modal confirmation names the record, says deletion is permanent and cannot be undone, and focuses Cancel.
+Item confirmations count observed child items that survive without that parent and dependency links removed; waiting
+work may become ready. Thread deletion requires no members or live claim; initiative deletion requires no items.
+The server enforces those rules again on submission. Derived task threads are deleted through their task.
+While sending, both controls are disabled. Failure keeps the dialog open with an error and allows another attempt;
+success closes it, removes the deleted selection from the address, and announces deletion without Undo. A failed
+refresh after a successful write keeps the refresh warning. On phones, the dialog sits above the bottom tabs.

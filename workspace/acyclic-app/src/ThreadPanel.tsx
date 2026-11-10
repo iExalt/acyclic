@@ -5,8 +5,9 @@ import { type Counts, failure, type Stage, type ThreadDetail, thread } from "./a
 import { Badge, lineStyle } from "./Badge";
 import { CopyLink } from "./CopyLink";
 import { useFocusIn } from "./focus";
-import { Icon, X } from "./icons";
+import { Icon, Trash2, X } from "./icons";
 import type { Line } from "./lines";
+import { Menu } from "./Menu";
 import { workOrder } from "./members";
 import { Prose } from "./Prose";
 import { useSheet } from "./Sheet";
@@ -25,6 +26,8 @@ export interface ThreadPanelProps {
   /** Changes after every edit sent, so the panel reads the thread again. */
   version: number;
   onSelect: (id: string) => void;
+  onDelete: (title: string) => void;
+  busy: boolean;
   onClose: () => void;
   /** Closes it as Escape does, for a drag down on a phone: a form holding typing stays, saying how to leave it. */
   onDismiss: () => void;
@@ -43,6 +46,8 @@ export function ThreadPanel({
   waitsFor,
   version,
   onSelect,
+  onDelete,
+  busy,
   onClose,
   onDismiss,
   onCopyLink,
@@ -95,6 +100,14 @@ export function ThreadPanel({
           <Prose text={line?.name ?? detail.title} />
         </h2>
         <CopyLink onCopy={onCopyLink} />
+        {detail.task === null ? (
+          <Menu label="Thread actions" testid="thread-menu" list>
+            <button type="button" className="menu-action danger" disabled={busy} onClick={() => onDelete(detail.title)}>
+              <Icon of={Trash2} size={16} />
+              <span>Delete thread…</span>
+            </button>
+          </Menu>
+        ) : null}
         <button type="button" className="close" aria-label="Close" onClick={onClose}>
           <Icon of={X} />
         </button>

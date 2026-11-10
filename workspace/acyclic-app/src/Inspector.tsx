@@ -11,7 +11,7 @@ import { useFocusIn } from "./focus";
 import { reopenCommand } from "./forms";
 import { useHeld } from "./held";
 import { ItemEditor } from "./ItemEditor";
-import { ArrowUpLeft, FolderInput, Icon, LinkIcon, Pencil, Plus, RotateCcw, X } from "./icons";
+import { ArrowUpLeft, FolderInput, Icon, LinkIcon, Pencil, Plus, RotateCcw, Trash2, X } from "./icons";
 import type { Line } from "./lines";
 import { Menu } from "./Menu";
 import { conflictOf, keepsIn, type Need, structuralKey } from "./needs";
@@ -38,6 +38,7 @@ export interface InspectorProps {
   onMove: () => void;
   onLink: () => void;
   onAdd: () => void;
+  onDelete: () => void;
   onClose: () => void;
   /** Closes it as Escape does, for a drag down on a phone: a form holding typing stays, saying how to leave it. */
   onDismiss: () => void;
@@ -75,6 +76,7 @@ export function Inspector({
   onMove,
   onLink,
   onAdd,
+  onDelete,
   onClose,
   onDismiss,
   onCopyLink,
@@ -252,6 +254,10 @@ export function Inspector({
             {action("waits-for", "Waits for…", ArrowUpLeft, onLink, "W")}
             {/* In the menu rather than beside it, so the title keeps the header's width. */}
             {action("copy-link", "Copy link", LinkIcon, onCopyLink)}
+            <button type="button" className="menu-action delete-action danger" onClick={onDelete} disabled={busy}>
+              <Icon of={Trash2} size={16} />
+              <span>Delete item…</span>
+            </button>
           </Menu>
           <button type="button" className="close" aria-label="Close" onClick={onClose}>
             <Icon of={X} />

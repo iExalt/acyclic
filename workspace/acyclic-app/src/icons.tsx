@@ -21,6 +21,7 @@ export {
   RotateCcw,
   RotateCw,
   Search,
+  Trash2,
   Waypoints,
   X,
 } from "lucide-react";

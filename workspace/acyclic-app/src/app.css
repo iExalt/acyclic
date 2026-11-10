@@ -2769,3 +2769,69 @@ button.overview-row:not(:has(> .badge)):has(> .initiative-tag) {
   margin: 8px 0 0;
   font-size: inherit;
 }
+
+/* Destructive actions stay in the menus; the native modal keeps the plan inert until answered. */
+.menu-action.delete-action {
+  border-top: 1px solid var(--rule);
+  border-radius: 0;
+  margin-top: 4px;
+}
+.initiative-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.initiative-row > button.initiative {
+  flex: 1;
+  min-width: 0;
+}
+.initiative-row .menu {
+  flex: none;
+}
+.delete-dialog {
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  box-shadow: 0 12px 40px #0003;
+  font-size: 14px;
+}
+.delete-dialog::backdrop {
+  background: #0005;
+}
+.delete-dialog h2 {
+  margin: 0 0 14px;
+  font-size: 19px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.delete-dialog p {
+  line-height: 1.5;
+}
+.delete-effects {
+  border-block: 1px solid var(--rule);
+  padding: 12px 0;
+  margin: 18px 0;
+}
+.delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+@media (max-width: 899px) {
+  .delete-dialog {
+    margin: auto auto 60px;
+    max-height: calc(100dvh - 76px);
+    padding: 20px;
+  }
+}
+
+.menu-action.danger,
+.delete-dialog .danger {
+  color: var(--danger);
+}

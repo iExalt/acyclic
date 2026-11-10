@@ -12,6 +12,8 @@ import {
 import { AddForm } from "./AddForm";
 import { CommandMenu } from "./CommandMenu";
 import { entries as commandEntries, type OnItem, onMac, opensMenu, type Run, targets, undoes } from "./commands";
+import { DeleteDialog } from "./DeleteDialog";
+import { type DeleteTarget, deleteCommand, deletionImpact } from "./deletion";
 import { addCommand, type NewItem, type Pick, pick, unlinkCommand } from "./edits";
 import {
   boundary,
@@ -145,6 +147,7 @@ function rowsInView(): HTMLElement[] {
 }
 
 export function App() {
+  const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
   const noticeStage = useRef<HTMLElement>(null);
   const noticeChrome = useRef<HTMLDivElement>(null);
   const selectNoticeLink = useCallback(
@@ -455,6 +458,7 @@ export function App() {
     const mac = onMac();
     let pending: Waiting = null;
     const onKey = (event: KeyboardEvent) => {
+      if (document.querySelector("dialog[open]") !== null) return;
       if (event.key === "Escape" && !event.defaultPrevented) closeTop.current(1);
       // Taken from the browser only when it opens or closes the menu: the listener is the app's page's, so only while
       // the app has the focus.
@@ -937,7 +941,13 @@ export function App() {
       menu={menu}
       initiatives={
         !wide || switcher.length === 0 ? null : (
-          <InitiativeSwitcher rows={switcher} context={context} onChoose={chooseInitiative} />
+          <InitiativeSwitcher
+            rows={switcher}
+            context={context}
+            onChoose={chooseInitiative}
+            busy={busy}
+            onDelete={(id, title) => setDeleting({ kind: "initiative", id, title })}
+          />
         )
       }
       // With one initiative there is nothing to tell apart, so the bar leaves it unsaid.
@@ -1083,6 +1093,7 @@ export function App() {
             onPreview={setPreview}
             key={chosen.id}
             item={chosen}
+            onDelete={() => setDeleting({ kind: "item", id: chosen.id, title: chosen.title })}
             isProject={outline?.projects.some((project) => project.id === chosen.id) ?? false}
             reopen={requests.reopenEditor?.id === chosen.id ? requests.reopenEditor : undefined}
             titleOf={titleOf}
@@ -1121,7 +1132,13 @@ export function App() {
         )}
         {panel === "projects" && scopedOutline !== null ? (
           <ProjectsSheet onClose={() => go({ kind: "shut", layer: "projects" })} onDismiss={() => closeTop.current(1)}>
-            <InitiativeSwitcher rows={switcher} context={context} onChoose={chooseInitiative} />
+            <InitiativeSwitcher
+              rows={switcher}
+              context={context}
+              onChoose={chooseInitiative}
+              busy={busy}
+              onDelete={(id, title) => setDeleting({ kind: "initiative", id, title })}
+            />
             <Projects
               outline={scopedOutline}
               initiative={contextTitle(context, switcher)}
@@ -1139,10 +1156,12 @@ export function App() {
             />
           </ProjectsSheet>
         ) : null}
-        {panel === "thread" && thread !== null ? (
+        {panel === "thread" && thread !== null && sorted.some((one) => one.id === thread) ? (
           <ThreadPanel
             key={thread}
             id={thread}
+            busy={busy}
+            onDelete={(title) => setDeleting({ kind: "thread", id: thread, title })}
             line={lines.get(thread)}
             counts={counts.get(thread)}
             titleOf={titleOf}
@@ -1156,6 +1175,27 @@ export function App() {
           />
         ) : null}
       </main>
+      {deleting === null ? null : (
+        <DeleteDialog
+          target={deleting}
+          impact={deletionImpact(deleting.id, load.items)}
+          onClose={() => setDeleting(null)}
+          onDelete={async () => {
+            const saved = await send(deleteCommand(deleting), {
+              select: null,
+              pin: null,
+              done: `${deleting.kind.charAt(0).toUpperCase()}${deleting.kind.slice(1)} deleted`,
+            });
+            if (saved) {
+              go({ kind: "deleted", record: deleting.kind, id: deleting.id });
+              return null;
+            }
+            const message = tracker.snapshot().notice?.text ?? "Couldn't delete it. Try again.";
+            tracker.dismiss();
+            return message;
+          }}
+        />
+      )}
       <NoticePlacement
         notice={noticeView}
         phone={!wide}
