@@ -1,6 +1,7 @@
 //! Commit evidence is checked once, where a batch writes it: every commit a write adds or changes must be on its
-//! repository's default branch in this machine's clone, fetched first when it isn't yet. Reads never check, so this is
-//! where a typo or an unmerged commit is caught.
+//! repository's default branch in this machine's clone, fetched first when it isn't yet, or, for a repository with no
+//! clone, on GitHub's word, asked once before the write takes the tracker's lock. Reads never check, so this is where
+//! a typo or an unmerged commit is caught.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -13,6 +14,7 @@ use serde_json::{Value as Json, json};
 use crate::Env;
 use crate::context;
 use crate::error::CliError;
+use crate::github::Github;
 use crate::learned::Learned;
 
 /// One commit evidence: the item it finishes, its repository record and the commit.
@@ -30,6 +32,8 @@ enum PriorCheck {
     Merged,
     Unchecked,
     Refreshed(Result<(), String>),
+    /// Asked GitHub, for a repository with no clone: there is nothing to refresh, and the verdict stands.
+    GitHub(Check),
 }
 
 #[derive(Clone)]
@@ -65,12 +69,16 @@ pub(crate) fn preflight(
     let mut prepared = Prepared::default();
     let Ok(clones) = context::clones_with(env, learned) else { return prepared };
     let ancestry = GitAncestry::new(&clones);
+    let github = Github::new(env);
     let mut refreshed: BTreeMap<(PathBuf, String), Result<(), String>> = BTreeMap::new();
     for candidate in candidates {
         let Some(record) = model.repositories.get(&candidate.1) else { continue };
         let id = identity(&clones, record);
         let prior = match ancestry.check(record, &candidate.2) {
             Check::Merged => PriorCheck::Merged,
+            Check::Unchecked(_) if id.clone.is_none() => {
+                PriorCheck::GitHub(github.check(record, &candidate.2))
+            },
             Check::Unchecked(_) => PriorCheck::Unchecked,
             Check::NotMerged | Check::UnknownCommit | Check::NoBranch(_) => {
                 let refresh = match (&id.clone, &id.branch) {
@@ -146,7 +154,13 @@ pub(crate) fn check(
                 }
                 match (&candidate.prior, &checked) {
                     (PriorCheck::Unchecked, Check::Unchecked(_)) => {},
-                    (PriorCheck::Merged | PriorCheck::Unchecked, _)
+                    (PriorCheck::GitHub(verdict), Check::Unchecked(_)) => {
+                        if let Some(reason) = settle(after, (item, repository, commit), verdict)? {
+                            found.push(unchecked(item, repository, commit, &reason));
+                        }
+                        continue;
+                    },
+                    (PriorCheck::Merged | PriorCheck::Unchecked | PriorCheck::GitHub(_), _)
                     | (PriorCheck::Refreshed(Ok(())), Check::NoBranch(_) | Check::Unchecked(_)) => {
                         return Err(stale_preflight(after, (item, repository, commit)));
                     },
@@ -191,6 +205,20 @@ pub(crate) fn check(
         }
     }
     Ok(found)
+}
+
+/// What GitHub's verdict on a commit means for the write: a refusal, or the reason it stays unchecked.
+fn settle(
+    model: &Model,
+    evidence: (&str, &str, &str),
+    verdict: &Check,
+) -> Result<Option<String>, CliError> {
+    match verdict {
+        Check::Merged => Ok(None),
+        Check::NotMerged => Err(refusal(model, evidence, "not-merged")),
+        Check::UnknownCommit => Err(refusal(model, evidence, "unknown-commit")),
+        Check::NoBranch(reason) | Check::Unchecked(reason) => Ok(Some(reason.clone())),
+    }
 }
 
 fn identity(
@@ -249,9 +277,10 @@ fn refusal(model: &Model, (item, repository, commit): (&str, &str, &str), why: &
     )
 }
 
-/// Every commit evidence in `model` checked as this machine's clones were last fetched, fetching nothing: those not on
-/// their default branch, or unknown, by item, how many were checked and how many couldn't be, and each of those, with
-/// the reason.
+/// Every commit evidence in `model` checked as this machine's clones were last fetched, fetching nothing, and, for a
+/// repository with no clone, on GitHub's word, asked once for each commit and no more once GitHub proves unreachable:
+/// those not on their default branch, or unknown, by item, how many were checked and how many couldn't be, and each
+/// of those, with the reason.
 pub(crate) fn audit(env: &Env, model: &Model) -> Json {
     let all = commits(model);
     let unchecked_row = |item: &str, repository: &str, commit: &str, reason: &str| {
@@ -271,14 +300,19 @@ pub(crate) fn audit(env: &Env, model: &Model) -> Json {
             return json!({"checked": 0, "unchecked": rows.len(), "unmerged": [], "unchecked_commits": rows});
         },
     };
-    let ancestry = GitAncestry::new(clones);
+    let ancestry = GitAncestry::new(&clones);
+    let github = Github::new(env);
     let (mut checked, mut unchecked, mut unmerged) = (0, Vec::new(), Vec::new());
     for (item, repository, commit) in &all {
         let Some(record) = model.repositories.get(repository) else {
             unchecked.push(unchecked_row(item, repository, commit, "no such repository record"));
             continue;
         };
-        let why = match ancestry.check(record, commit) {
+        let mut verdict = ancestry.check(record, commit);
+        if matches!(verdict, Check::Unchecked(_)) && clones(record).is_none() {
+            verdict = github.check(record, commit);
+        }
+        let why = match verdict {
             Check::Merged => None,
             Check::NotMerged => Some("not-merged"),
             Check::UnknownCommit => Some("unknown-commit"),

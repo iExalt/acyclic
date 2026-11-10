@@ -192,10 +192,15 @@ records that repository's main checkout (a worktree's too) in `~/.local/state/ac
 `$XDG_STATE_HOME`; an entry whose directory is gone, or whose `origin` no longer names that repository, is dropped.
 `~/.config/acyclic/clones.toml`, mapping a repository's `owner/name` to a path, is an optional override and wins. One
 not there yet is fetched first, so a pull request merged a moment ago passes; a branch's commit, or one no clone knows,
-is refused as `unmerged`, `--force` or not, and nothing is written. With no clone known, no single default branch, or a
-valid clone with neither an `origin` remote nor refs for that branch, the write goes through and its result lists the
-commit under `unchecked_commits`; `acyclic doctor` later checks every recorded commit, as last fetched, on a machine
-that has the clones, and lists those it couldn't check under `data.commits.unchecked_commits`, each with its reason.
+is refused as `unmerged`, `--force` or not, and nothing is written. A repository with no clone is asked about on
+github.com instead, with `gh api` (15 seconds at most, no prompts): GitHub saying the commit is on the default branch
+passes, and saying it isn't, or doesn't exist, refuses as above. A repository `gh` can't see, or no `gh`, no sign-in or
+no network, leaves the commit unchecked; a merge GitHub confirmed is remembered in `merged.json` beside the clones
+cache. With no clone and no answer from GitHub, no single default branch, or a valid clone with neither an `origin`
+remote nor refs for that branch, the write goes through and its result lists the commit under `unchecked_commits`.
+`acyclic doctor` later checks every recorded commit, as last fetched in the clones and asking GitHub once about each
+commit in a repository with none (and no more once GitHub proves unreachable), and lists those it couldn't check
+under `data.commits.unchecked_commits`, each with its reason.
 
 ## SSH transport
 

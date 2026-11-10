@@ -8,6 +8,7 @@ mod commands;
 mod context;
 mod edit;
 mod evidence;
+mod github;
 mod keep;
 mod learned;
 mod pretty;

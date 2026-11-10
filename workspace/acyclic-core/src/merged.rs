@@ -1,5 +1,7 @@
 //! Whether a commit is on its repository's default branch, checked in local code clones when commit evidence is
-//! written: reads never run git, so a machine with no clones reads the tracker as one with them.
+//! written, and by asking GitHub, through an injected runner, for a repository with no clone. Only a write, and
+//! `doctor`, check: a read never runs git or reaches the network, so a machine with no clones reads the tracker as
+//! one with them.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -38,6 +40,72 @@ struct Branch {
 
 /// The most of a branch's commits looked up at once; an older commit is walked to on its own.
 const LATEST: usize = 100_000;
+
+/// Runs `gh` with the arguments given and returns its standard output, or on failure what it said: the injected way
+/// to reach GitHub, so that tests never do.
+pub type Gh<'a> = &'a dyn Fn(&[&str]) -> Result<String, String>;
+
+/// What asking GitHub found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asked {
+    /// The verdict: [`Check::Unchecked`] whenever GitHub didn't clearly answer.
+    pub check: Check,
+    /// Whether the question never reached an answer (`gh` missing, signed out, offline, timed out, throttled), so
+    /// asking about another commit would fail alike.
+    pub transport_failed: bool,
+}
+
+/// Whether `commit` is on `repository`'s default branch on github.com, from its compare endpoint. Only "behind" and
+/// "identical" are [`Check::Merged`] and "ahead" and "diverged" [`Check::NotMerged`]; [`Check::UnknownCommit`] only
+/// when GitHub says it has no such commit. A repository this account can't see is [`Check::Unchecked`], not unknown.
+pub fn github_check(run: Gh<'_>, repository: &Repository, commit: &str) -> Asked {
+    let unchecked =
+        |reason: String| Asked { check: Check::Unchecked(reason), transport_failed: false };
+    if !(7..=64).contains(&commit.len()) || !commit.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Asked { check: Check::UnknownCommit, transport_failed: false };
+    }
+    let (Some(owner), Some(name)) = (repository.owner.one(), repository.name.one()) else {
+        return unchecked("the repository has no owner/name to ask GitHub about".to_owned());
+    };
+    let Some(branch) = repository.default_branch.one() else {
+        return unchecked("the repository has no single default branch".to_owned());
+    };
+    let plain = |text: &str, extra: &str| {
+        !text.is_empty()
+            && text
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c) || extra.contains(c))
+    };
+    if !plain(owner, "") || !plain(name, "") || !plain(branch, "/") || branch.contains("..") {
+        return unchecked(format!("{owner}/{name}@{branch} isn't a name to ask GitHub about"));
+    }
+    let endpoint = format!("repos/{owner}/{name}/compare/{branch}...{commit}");
+    match run(&["api", "--hostname", "github.com", &endpoint]) {
+        Ok(reply) => {
+            let status = serde_json::from_str::<serde_json::Value>(&reply)
+                .ok()
+                .and_then(|reply| reply["status"].as_str().map(str::to_owned));
+            let check = match status.as_deref() {
+                Some("behind" | "identical") => Check::Merged,
+                Some("ahead" | "diverged") => Check::NotMerged,
+                _ => Check::Unchecked(
+                    "GitHub's reply didn't say how the commit relates to the branch".to_owned(),
+                ),
+            };
+            Asked { check, transport_failed: false }
+        },
+        Err(said) if said.to_ascii_lowercase().contains("no commit found") => {
+            Asked { check: Check::UnknownCommit, transport_failed: false }
+        },
+        Err(said) if said.contains("HTTP 404") || said.contains("Not Found") => unchecked(format!(
+            "GitHub has no repository {owner}/{name} with {branch}, or this account can't see it"
+        )),
+        Err(said) => Asked {
+            check: Check::Unchecked(format!("couldn't ask GitHub: {}", said.trim())),
+            transport_failed: true,
+        },
+    }
+}
 
 impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
     /// Checks in the clone `clone_of` names for each repository record.

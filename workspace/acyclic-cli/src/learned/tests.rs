@@ -63,7 +63,7 @@ impl Machine {
     }
 
     fn learned(&self) -> BTreeMap<String, String> {
-        read(&self.cache()).clones
+        read::<Cache>(&self.cache()).clones
     }
 }
 
