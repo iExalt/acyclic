@@ -39,6 +39,18 @@ struct Branch {
 /// The most of a branch's commits looked up at once; an older commit is walked to on its own.
 const LATEST: usize = 100_000;
 
+/// The reason a repository with no known clone can't be checked, naming how to give it one.
+fn no_clone(repository: &Repository) -> String {
+    let name = match (repository.owner.one(), repository.name.one()) {
+        (Some(owner), Some(name)) => format!("{owner}/{name}"),
+        _ => "the repository".to_owned(),
+    };
+    format!(
+        "no clone of {name} is known on this machine: run any acyclic command inside a clone of it, or map it in \
+         ~/.config/acyclic/clones.toml"
+    )
+}
+
 impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
     /// Checks in the clone `clone_of` names for each repository record.
     pub fn new(clone_of: F) -> Self {
@@ -102,7 +114,7 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
             return Check::UnknownCommit;
         }
         let Some(clone) = (self.clone_of)(repository) else {
-            return Check::Unchecked("no clone of the repository is mapped".to_owned());
+            return Check::Unchecked(no_clone(repository));
         };
         let Some(branch) = repository.default_branch.one() else {
             return Check::Unchecked("the repository has no single default branch".to_owned());
@@ -140,7 +152,7 @@ impl<F: Fn(&Repository) -> Option<PathBuf>> GitAncestry<F> {
     ///
     /// Fails, with git's reason, when the repository has no clone or single default branch, or the fetch fails.
     pub fn refresh(&self, repository: &Repository) -> Result<(), String> {
-        let clone = (self.clone_of)(repository).ok_or("no clone of the repository is mapped")?;
+        let clone = (self.clone_of)(repository).ok_or_else(|| no_clone(repository))?;
         let branch =
             repository.default_branch.one().ok_or("the repository has no single default branch")?;
         // Only the remote-tracking ref `Branch::of` reads moves: the checkout and its branches are left alone.
