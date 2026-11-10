@@ -161,8 +161,8 @@ fn an_unmapped_repository_or_branch_is_unchecked() {
     assert_eq!(
         none.check(&record, &"ab".repeat(20)),
         Check::Unchecked(
-            "no clone of me/code is known on this machine: run any acyclic command inside a clone of it, or map it in \
-             ~/.config/acyclic/clones.toml"
+            "no clone of me/code is known on this machine: run any acyclic command inside a clone of it whose origin is on \
+             github.com, or map it in ~/.config/acyclic/clones.toml"
                 .to_owned()
         )
     );

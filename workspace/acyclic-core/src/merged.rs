@@ -46,8 +46,8 @@ fn no_clone(repository: &Repository) -> String {
         _ => "the repository".to_owned(),
     };
     format!(
-        "no clone of {name} is known on this machine: run any acyclic command inside a clone of it, or map it in \
-         ~/.config/acyclic/clones.toml"
+        "no clone of {name} is known on this machine: run any acyclic command inside a clone of it whose origin is on \
+         github.com, or map it in ~/.config/acyclic/clones.toml"
     )
 }
 
