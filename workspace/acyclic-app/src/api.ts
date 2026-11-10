@@ -26,7 +26,7 @@ interface RawItem {
   state: Raw<string>;
   notes: Raw<string>;
   /** Completion evidence is checked when a write loses its response. */
-  evidence?: Raw<{ commit: string | null; text: string | null }>;
+  evidence?: Raw<{ repository?: string | null; commit?: string | null; text?: string | null }>;
   /** The initiative above it at any depth; null when it is in none. */
   initiative: string | null;
   links: { waits_for: string[]; waited_on_by: string[] };

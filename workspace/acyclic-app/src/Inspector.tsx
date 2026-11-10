@@ -306,6 +306,7 @@ export function Inspector({
       ) : null}
       {links("Waits for", item.links.waits_for, (id) => onUnlink(item.id, id), "waits-for")}
       {links("Waited on by", item.links.waited_on_by, (id) => onUnlink(id, item.id), "waited-on-by")}
+      {!editing ? <CompletionEvidence item={item} /> : null}
       {/* While editing, the form's Notes field holds them. */}
       {item.notes === null || editing ? null : (
         <div className="notes-block">
@@ -316,6 +317,50 @@ export function Inspector({
         </div>
       )}
     </aside>
+  );
+}
+
+/** The saved evidence is kept raw: a conflict has no chosen value. */
+export function CompletionEvidence({ item }: { item: Item }) {
+  if (item.state !== "done" || item.progress !== undefined || item.conflicts.state !== undefined) return null;
+  const evidence = item.evidence;
+  const conflict = evidence != null && "conflict" in evidence;
+  const values = conflict ? evidence.conflict : [evidence];
+  return (
+    <section className="notes-block completion-evidence" data-testid="completion-evidence">
+      <h3>Completion evidence</h3>
+      {conflict ? (
+        <p>
+          Conflicting evidence. See Needs you or run <code>acyclic needs</code> to resolve it.
+        </p>
+      ) : null}
+      {values.map((value, index) => (
+        <div key={index} className="evidence-value">
+          {conflict ? <h4>Alternative {index + 1}</h4> : null}
+          {value == null || (!value.text && !value.commit && !value.repository) ? (
+            <p>{conflict && value == null ? "Cleared (no evidence)" : "No completion evidence recorded"}</p>
+          ) : (
+            <>
+              {value.text ? (
+                <p className="notes">
+                  <Prose text={value.text} notes />
+                </p>
+              ) : null}
+              {value.repository ? (
+                <p>
+                  Repository: <code>{value.repository}</code>
+                </p>
+              ) : null}
+              {value.commit ? (
+                <p>
+                  Commit: <code>{value.commit}</code>
+                </p>
+              ) : null}
+            </>
+          )}
+        </div>
+      ))}
+    </section>
   );
 }
 
