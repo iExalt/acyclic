@@ -40,15 +40,6 @@ sooner.
 From a clone, `mise run install` builds the app and installs `acyclic` into `~/.cargo/bin`.
 
 The server's image is `ghcr.io/iexalt/acyclic-server`, tagged with each release's tag, such as `v0.2.0`, and `latest`.
-After both native architecture verification jobs pass, `verified-vX.Y.Z` names the exact tested multiarchitecture
-index digest. A verified alias is never replaced with different contents; failed or incomplete verification makes
-no alias. Automatic image consumers should select stable verified tags and pin their index digest.
-
-Every native image build upgrades synthetic tracker and Web Push state from the pinned 0.9.0 compatibility floor
-and 0.10.0 baseline, checks writes and bidirectional sync, then restarts the candidate. Keep the floor when adding
-baselines so skipping releases remains covered. Run `python3 scripts/check-image-compatibility.py <candidate-image>`
-with Docker (or set `CONTAINER_ENGINE=podman`); it uses disposable volumes and containers without network access.
-These checks cover forward upgrades; a verified alias does not promise safe downgrades.
 
 ## Licence
 
