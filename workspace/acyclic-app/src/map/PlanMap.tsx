@@ -89,6 +89,8 @@ function measuring(family: string): Fonts {
 
 export interface PlanMapProps {
   items: Item[];
+  /** The initiative in context; changing it opens its plan with a fresh camera. */
+  scope: string | null;
   /** The thread picked in the sidebar, if any. */
   thread: string | null;
   /** Each thread's line, whose colour lights its items. */
@@ -129,6 +131,7 @@ export interface Focus {
 
 export default function PlanMap({
   items,
+  scope,
   thread,
   lines,
   palette,
@@ -229,6 +232,7 @@ export default function PlanMap({
       const step = stepFrame(watch, {
         busy:
           !laidOut ||
+          (opening.current && modelNow.current.items.size > 0) ||
           element.dataset.state !== "drawn" ||
           intentsPending({
             shown: shown.current,
@@ -327,6 +331,21 @@ export default function PlanMap({
     core.minZoom(floor * PINCH_SLACK);
     core.viewport(fitted);
   };
+
+  const previousScope = useRef(scope);
+  const opening = useRef(true);
+  useEffect(() => {
+    if (previousScope.current === scope) return;
+    previousScope.current = scope;
+    opening.current = true;
+    gesture.cancel();
+    cancelViewIntent();
+    parked.current = null;
+    toFrame.current = undefined;
+    sought.current = null;
+    clearSuppressedTitles();
+    kickFramed();
+  }, [scope]);
 
   const previousSelected = useRef(selected);
   useEffect(() => {
@@ -692,7 +711,7 @@ export default function PlanMap({
     const core = cy.current;
     const element = host.current;
     if (core === null || element === null || drawn === null || placed === null) return;
-    const first = core.elements().length === 0;
+    const first = core.elements().length === 0 || opening.current;
     const job = () => {
       // Only what changed: on a large plan, a write changes a few elements of thousands.
       if (!sameSuppressionOwner(suppressionOwner.current, { model, view, source, thread, selected }))
@@ -719,6 +738,7 @@ export default function PlanMap({
         );
         const view = firstView(placed, screen, 16, MAX_ZOOM, start, FIRST_ZOOM);
         core.viewport({ zoom: view.zoom, pan: { x: view.pan.x + open.x1, y: view.pan.y + open.y1 } });
+        anchor.current = null;
       } else if (anchor.current !== null) {
         // Pan so the toggled box's top-level box has its corner where it was before the layout changed.
         const box = core.getElementById(anchor.current.id);
@@ -728,6 +748,7 @@ export default function PlanMap({
         }
         anchor.current = null;
       }
+      opening.current = false;
       drawnModel.current = model;
       applied.current = { model, view, aspect, source, placed, drawn };
       // Keep the request until the open Map can show it; a fully covered Map cannot satisfy a reveal.
@@ -760,11 +781,11 @@ export default function PlanMap({
     } else {
       gesture.defer(job);
     }
-  }, [drawn, placed, colour, lines, palette, model, view, aspect, source]);
+  }, [drawn, placed, colour, lines, palette, model, view, aspect, source, scope]);
 
   // A change that will lay out or move the camera, noted before its layout is back, so the signal never reads a stale
   // "true"; and the Map becoming active, since the watch stops while it is not, and a Map drawn then is unsettled.
-  useEffect(kickFramed, [model, view, aspect, source, fontFamily, framed, thread, focus, selected, active]);
+  useEffect(kickFramed, [model, view, aspect, source, fontFamily, framed, thread, focus, selected, active, scope]);
 
   // A picked thread frames every visible member, clear of the panel the pick opens.
   const sought = useRef<string | null>(null);

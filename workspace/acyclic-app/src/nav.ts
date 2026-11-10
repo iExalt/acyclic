@@ -63,7 +63,8 @@ export interface Place {
   needsLeft: NeedsLeft | null;
   /**
    * The initiative the user chose to work in, which orders the lists, is where New item goes and is marked in the
-   * switcher; null until they choose, when the first of the switcher is in context. It scopes nothing else.
+   * switcher; null until they choose, when the first of the switcher is in context. It scopes the Map, Threads view
+   * and outline.
    */
   initiative: string | null;
   overlays: Overlays;

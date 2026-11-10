@@ -980,6 +980,7 @@ export function App() {
         >
           <PlanMap
             items={inScope}
+            scope={context}
             thread={thread}
             lines={lines}
             palette={palette}
