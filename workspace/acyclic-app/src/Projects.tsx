@@ -84,6 +84,9 @@ export function Projects({
           )}
         </span>
       </h2>
+      {outline.projects.length === 0 ? (
+        <p className="subheading">{initiative === null ? "No epics" : "No epics in this initiative"}</p>
+      ) : null}
       <ul>
         {outline.projects.map((project) => {
           const expanded = open.has(project.id);
