@@ -600,6 +600,13 @@ pub enum Change {
     },
     /// Sets one field of a record that exists or that the change set adds.
     Set(Assign),
+    /// Explicitly permits a redundant dependency in this change set.
+    AllowRedundant {
+        /// The waiting item.
+        item: String,
+        /// Its dependency.
+        target: String,
+    },
     /// Finishes an item: marks it done, with this evidence when given. Unless forced, the item must be ready, or held
     /// by the one finishing it, or a parent with no open work, or done already; and done work keeps the evidence it
     /// was finished with.
@@ -693,6 +700,13 @@ pub enum Rule {
     ParentCycle(Vec<String>),
     /// Items would wait for each other in a cycle, through these.
     WaitsForCycle(Vec<String>),
+    /// A new direct dependency already has an indirect path.
+    RedundantDependency {
+        /// The waiting item.
+        from: String,
+        /// Its dependency.
+        to: String,
+    },
     /// An item would wait for one above or below it, which could then never be done: a parent is done only once its
     /// leaves are.
     LineageLink {
@@ -784,6 +798,12 @@ impl fmt::Display for Violation {
             Rule::SelfLink => write!(f, "{at}an item can't wait for itself"),
             Rule::ParentCycle(path) => {
                 write!(f, "items would sit under each other in a cycle: {}", path.join(", "))
+            },
+            Rule::RedundantDependency { from, to } => {
+                write!(
+                    f,
+                    "{from} already waits for {to} through other tasks; pass --allow-redundant to add the direct dependency"
+                )
             },
             Rule::WaitsForCycle(path) => {
                 write!(f, "items would wait for each other in a cycle: {}", path.join(", "))
@@ -938,6 +958,7 @@ impl Judging<'_, '_> {
             let finish;
             let cancel;
             let (record, assigns, repeat) = match change {
+                Change::AllowRedundant { .. } => continue,
                 Change::Add { record, on_repeat, with, .. } => {
                     (record.clone(), with.as_slice(), Some(*on_repeat))
                 },
@@ -1262,6 +1283,7 @@ impl Judging<'_, '_> {
             let lineage = new_lineage_links(self.before, after, steps);
             found.extend(new_cycles(self.before, after, steps, &lineage));
             found.extend(lineage);
+            found.extend(redundant_dependencies(self.before, after, steps, changes));
         }
         found.extend(taken_names(after, steps));
         found.extend(taken_titles(after, changes, steps));
@@ -1408,6 +1430,66 @@ fn cancel_rules(before: &Model, steps: &[Step]) -> Vec<Violation> {
             _ => None,
         })
         .collect()
+}
+
+// Only new explicit edges are judged; existing redundant links remain editable and removable.
+fn redundant_dependencies(
+    before: &Model,
+    after: &Model,
+    steps: &[Step],
+    changes: &ChangeSet,
+) -> Vec<Violation> {
+    let mut found = Vec::new();
+    if !steps.iter().any(|step| {
+        matches!(&step.write, Written::Assign(Assign::Item(_, ItemAssign::WaitsFor(_, true))))
+    }) {
+        return found;
+    }
+    let edges = after.effective_wait_edges();
+    for step in steps {
+        let Written::Assign(assign @ Assign::Item(from, ItemAssign::WaitsFor(to, true))) =
+            &step.write
+        else {
+            continue;
+        };
+        if before.links.iter().any(|edge| edge.from == *from && edge.to == *to)
+            || !after.links.iter().any(|edge| edge.from == *from && edge.to == *to)
+            || changes.0.iter().any(|change| matches!(change, Change::AllowRedundant { item, target } if item == from && target == to))
+        {
+            continue;
+        }
+        let (candidate, others): (Vec<_>, Vec<_>) =
+            edges.iter().partition(|edge| edge.holder == *from && edge.target == *to);
+        if candidate.is_empty() {
+            continue;
+        }
+        let mut adjacent: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for edge in others {
+            adjacent.entry(&edge.from).or_default().push(&edge.to);
+        }
+        let redundant = candidate.iter().all(|edge| {
+            let mut pending = adjacent.get(edge.from.as_str()).cloned().unwrap_or_default();
+            let mut seen = BTreeSet::from([edge.from.as_str()]);
+            while let Some(next) = pending.pop() {
+                if next == edge.to {
+                    return true;
+                }
+                if !seen.insert(next) {
+                    continue;
+                }
+                pending.extend(adjacent.get(next).into_iter().flatten().copied());
+            }
+            false
+        });
+        if redundant {
+            found.push(Violation {
+                change: Some(step.change),
+                at: Some(assign.at()),
+                rule: Rule::RedundantDependency { from: from.clone(), to: to.clone() },
+            });
+        }
+    }
+    found
 }
 
 /// Parent or effective waits-for cycles the change set adds or explicitly chooses.

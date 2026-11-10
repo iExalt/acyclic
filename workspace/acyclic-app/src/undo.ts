@@ -42,7 +42,7 @@ export function undoOf(command: Command, before: Plan): Undo | null {
   const id = edit.item;
   const was = before.items.get(id);
   if (was === undefined) return null;
-  const keys = Object.keys(edit).filter((key) => key !== "item");
+  const keys = Object.keys(edit).filter((key) => key !== "item" && key !== "allow-redundant");
 
   const waits = keys.length === 1 ? waitEnd(edit, keys[0] ?? "") : null;
   if (waits !== null) {

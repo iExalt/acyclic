@@ -72,6 +72,7 @@ pub(crate) struct ItemFields {
     pub force: bool,
     pub notes: Change<String>,
     pub waits_for: Delta,
+    pub allow_redundant: bool,
 }
 
 /// What an initiative's `add` or `edit` sets.
@@ -288,6 +289,12 @@ pub(crate) fn item_changes(id: &str, fields: &ItemFields, adding: Adding) -> Cha
         assigns.extend(list.iter().map(|to| field(ItemAssign::WaitsFor(to.clone(), present))));
     }
     let mut set = changes(Record::Item(id.to_owned()), assigns, adding);
+    if fields.allow_redundant {
+        set.0.extend(fields.waits_for.add.iter().map(|target| WriteChange::AllowRedundant {
+            item: id.to_owned(),
+            target: target.clone(),
+        }));
+    }
     if canceling {
         set.0.push(WriteChange::Cancel { item: id.to_owned(), force: fields.force });
     }
@@ -430,6 +437,7 @@ fn violation_error(violation: &Violation, name: Option<&str>, before: &Model) ->
         Rule::Deleted(record) => WriteError::Deleted(record.id().to_owned()).into(),
         Rule::SelfLink => WriteError::SelfLink(record.map_or("", Record::id).to_owned()).into(),
         Rule::ParentCycle(_) => WriteError::ParentCycle(record.map_or("", Record::id).to_owned()).into(),
+        Rule::RedundantDependency { from, to } => CliError::refused("redundant-dependency", violation.to_string()).with(json!({"item": from, "waits_for": to})),
         Rule::WaitsForCycle(cycle) => WriteError::WaitsForCycle(cycle.clone()).into(),
         Rule::LineageLink { from, to } => CliError::refused("lineage-link", violation.to_string())
             .with(json!({"item": from, "waits_for": to})),

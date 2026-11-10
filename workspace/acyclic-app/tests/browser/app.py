@@ -3327,6 +3327,88 @@ def edit_journey(page, view, env, plan, box, name, failures):
 
 
 @timed
+def redundant_dependency_journey(page, view, env, plan, origin, name, failures, errors):
+    """A redundant link needs a real confirmation answer; Cancel writes no edge."""
+    ids = {}
+    for label in ["A", "B", "Z"]:
+        result = json.loads(run(
+            env, "item", "add", "--title", f"Redundant proof {name} {label}",
+            "--parent", plan.initiative,
+        ))
+        ids[label] = result["data"]["item"]
+    run(env, "item", "edit", ids["B"], "--waits-for", ids["A"])
+    run(env, "item", "edit", ids["Z"], "--waits-for", ids["B"])
+
+    dialogs = []
+    errors_before = len(errors)
+    refusals = []
+
+    def refused_response(response):
+        if response.url.endswith("/api/command") and response.status == 409:
+            body = json.loads(response.request.post_data or "{}")
+            command = body.get("command", body)
+            edit = command.get("item", {}).get("edit", {}) if isinstance(command, dict) else {}
+            if edit.get("item") in ids.values():
+                refusals.append(response.json()["error"]["code"])
+
+    page.on("response", refused_response)
+
+    def choose(source, target, answer):
+        page.goto(origin + "?view=map&item=" + ids[source])
+        page.get_by_test_id("inspector").get_by_role(
+            "heading", name=f"Redundant proof {name} {source}", exact=True,
+        ).wait_for()
+        item_action(page, "waits-for")
+        page.get_by_test_id("prompt").press("r")
+        menu = page.get_by_test_id("command-menu")
+        menu.get_by_role("combobox").fill(f"Redundant proof {name} {target}")
+        if answer is not None:
+            def respond(dialog):
+                dialogs.append(dialog.message)
+                if answer:
+                    dialog.accept()
+                else:
+                    dialog.dismiss()
+            page.once("dialog", respond)
+        menu.locator(f"[data-command='target:{ids[target]}']").click()
+
+    choose("Z", "A", False)
+    show_notice(page)
+    check_tracker(env, ids["Z"], lambda row: row["links"]["waits_for"] == [ids["B"]],
+                  "Cancel kept only the indirect dependency", failures, name)
+    choose("Z", "A", True)
+    page.wait_for_function(
+        "title => document.querySelector('[data-testid=waits-for]')?.textContent.includes(title)",
+        arg=f"Redundant proof {name} A",
+    )
+    check_tracker(env, ids["Z"], lambda row: set(row["links"]["waits_for"]) == {ids["A"], ids["B"]},
+                  "the confirmed redundant dependency", failures, name)
+    settled_map(page)
+    page.screenshot(path=SHOTS / f"redundant-confirmed-{name}.png")
+    choose("A", "Z", None)
+    show_notice(page)
+    check_tracker(env, ids["A"], lambda row: not row["links"]["waits_for"],
+                  "a cycle was still refused", failures, name)
+    if len(dialogs) != 2 or not all("through other tasks" in message for message in dialogs):
+        failures.append(f"{name}: redundant dependency confirmation messages were {dialogs}")
+    page.remove_listener("response", refused_response)
+    if refusals != ["redundant-dependency", "redundant-dependency", "waits-for-cycle"]:
+        failures.append(f"{name}: unexpected dependency refusals: {refusals}")
+    else:
+        # Chromium logs expected HTTP refusals as resource errors, as in guarded_undo_race.
+        removed = 0
+        for index in range(len(errors) - 1, errors_before - 1, -1):
+            if removed < 3 and "409" in errors[index] and "Conflict" in errors[index]:
+                del errors[index]
+                removed += 1
+    # Leave the shared fixture unchanged for the remaining journeys.
+    for label in ["Z", "B", "A"]:
+        run(env, "item", "delete", ids[label])
+    page.goto(origin)
+    page.locator(".shell").wait_for()
+
+
+@timed
 def shrink_undo_journey(page, view, env, project, other, chain, name, failures):
     """Unlinks the last edge of a tall box: its size shrinks, the next root repacks, and Undo restores both."""
     plan = Plan(env)
@@ -4964,6 +5046,7 @@ def shard_run(shard):
                         plan = Plan(env)
                         guarded_undo_race(page, view, env, plan, name, failures, errors)
                         plan = Plan(env)
+                    redundant_dependency_journey(page, view, env, plan, origin, name, failures, errors)
                     completion_journey(page, view, env, origin, name, failures)
                     plan = Plan(env)
                     page.screenshot(path=SHOTS / f"app-{name}.png")
