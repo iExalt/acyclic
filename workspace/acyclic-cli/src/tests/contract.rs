@@ -1960,7 +1960,18 @@ fn a_commit_is_checked_when_it_is_written_and_never_when_read() {
     assert_eq!(sh.output("item show Later", mapped).1["data"][0]["state"], "open");
     // Doctor checks what is stored as last fetched, fetching nothing: the unmapped commit isn't counted as checked.
     let doctor = sh.output("doctor", mapped).1;
-    assert_eq!(doctor["data"]["commits"], json!({"checked": 1, "unchecked": 1, "unmerged": []}));
+    let commits = &doctor["data"]["commits"];
+    assert_eq!(
+        (&commits["checked"], &commits["unchecked"], &commits["unmerged"]),
+        (&json!(1), &json!(1), &json!([]))
+    );
+    assert_eq!(commits["unchecked_commits"].as_array().unwrap().len(), 1, "{commits}");
+    assert_eq!(commits["unchecked_commits"][0]["repository"], "me/other");
+    assert_eq!(commits["unchecked_commits"][0]["commit"], "abcdef1");
+    assert!(
+        commits["unchecked_commits"][0]["reason"].as_str().is_some_and(|reason| !reason.is_empty()),
+        "{commits}"
+    );
     // Reads run no git: with every clone mapped to a path that doesn't exist, they read the same.
     std::fs::write(
         sh.path().join("home/.config/acyclic/clones.toml"),
@@ -1999,7 +2010,18 @@ fn an_originless_mapped_clone_records_unchecked_commit_evidence() {
     );
 
     let doctor = sh.output("doctor", mapped).1;
-    assert_eq!(doctor["data"]["commits"], json!({"checked": 0, "unchecked": 1, "unmerged": []}));
+    assert_eq!(
+        doctor["data"]["commits"],
+        json!({
+            "checked": 0, "unchecked": 1, "unmerged": [],
+            "unchecked_commits": [{
+                "item": id("a1"),
+                "repository": "me/code",
+                "commit": work,
+                "reason": "the clone has neither an origin remote nor refs for default branch main"
+            }]
+        })
+    );
 }
 
 #[test]

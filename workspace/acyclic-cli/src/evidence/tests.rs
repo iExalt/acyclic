@@ -97,3 +97,47 @@ fn a_refreshed_candidate_cannot_become_uncheckable_inside_the_batch() {
     assert_eq!(error.details["reason"], "stale-preflight");
     assert_eq!(error.code, "changed-since");
 }
+
+#[test]
+fn doctor_lists_each_unchecked_commit_with_its_reason() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().display().to_string();
+    let env = |home: &str| crate::Env {
+        vars: BTreeMap::from([("HOME".to_owned(), home.to_owned())]),
+        cwd: temp.path().to_path_buf(),
+        terminal: None,
+    };
+    let mut model = candidate_model("abcdef1");
+    // A commit whose repository record is gone.
+    model.items.get_mut("item").unwrap().evidence.clone_from(&Value::One(Evidence {
+        repository: Some("gone".to_owned()),
+        commit: Some("abcdef1".to_owned()),
+        text: None,
+    }));
+    let audited = audit(&env(&home), &model);
+    assert_eq!(
+        audited,
+        json!({
+            "checked": 0, "unchecked": 1, "unmerged": [],
+            "unchecked_commits": [{
+                "item": "item", "repository": "gone", "commit": "abcdef1", "reason": "no such repository record",
+            }],
+        })
+    );
+
+    // A repository with no clone says why it can't be checked.
+    let model = candidate_model("abcdef1");
+    let audited = audit(&env(&home), &model);
+    assert_eq!(audited["unchecked"], 1);
+    assert_eq!(audited["unchecked_commits"][0]["repository"], "me/code");
+    assert_eq!(audited["unchecked_commits"][0]["commit"], "abcdef1");
+
+    // A broken clones.toml lists every commit with the config error as its reason.
+    let config = temp.path().join(".config/acyclic");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(config.join("clones.toml"), "[clones\n").unwrap();
+    let audited = audit(&env(&home), &model);
+    assert_eq!((&audited["checked"], &audited["unchecked"]), (&json!(0), &json!(1)));
+    let reason = audited["unchecked_commits"][0]["reason"].as_str().unwrap();
+    assert!(reason.contains("clones.toml"), "{reason}");
+}
