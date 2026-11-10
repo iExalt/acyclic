@@ -1035,10 +1035,14 @@ export function App() {
             restore={requests.restoreNeeds}
           />
         ) : null}
-        {view === "map" && shown.length === 0 ? (
+        {view === "map" && inScope.length === 0 ? (
           <div className="empty-plan" data-testid="empty-plan">
-            <h2>No items yet</h2>
-            <p className="muted">Add an item, then the work inside it. What agents import shows here too.</p>
+            <h2>{context === null ? "No items yet" : "No items in this initiative"}</h2>
+            <p className="muted">
+              {context === null
+                ? "Add an item, then the work inside it. What agents import shows here too."
+                : "Add an item here, or choose another initiative."}
+            </p>
             <button type="button" className="primary" onClick={() => startAdd(null)}>
               New item
             </button>

@@ -38,6 +38,8 @@ unless the menu's Theme picks one on the device (System, Light or Dark; System b
 
 The Overview section headings and initiative navigation omit count badges at zero. Empty sections keep their
 explanations, and empty initiatives remain visible and selectable; positive badges keep their existing values.
+The Map explains an empty initiative in its existing empty-state panel; its New item action creates work in that
+initiative. Standalone tasks count as content, even when the initiative has no epics.
 
 ## Colors
 
