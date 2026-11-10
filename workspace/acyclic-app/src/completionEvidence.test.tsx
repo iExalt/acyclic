@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { type Item, NO_COUNTS } from "./api";
 import { CompletionEvidence } from "./Inspector";
 
-const item = { state: "done" } as Item;
+const item = { state: "done", conflicts: {} } as Item;
 const show = (changes: Partial<Item>) => renderToStaticMarkup(<CompletionEvidence item={{ ...item, ...changes }} />);
 
 describe("completion evidence", () => {
@@ -13,6 +13,7 @@ describe("completion evidence", () => {
       expect(show({ evidence })).toContain("No completion evidence recorded");
     }
     expect(show({ state: "open", evidence: { text: "old" } })).toBe("");
+    expect(show({ conflicts: { state: ["done", "open"] }, evidence: { text: "old" } })).toBe("");
     expect(show({ progress: { counts: NO_COUNTS }, evidence: { text: "old" } })).toBe("");
   });
 

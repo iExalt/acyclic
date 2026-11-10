@@ -322,7 +322,7 @@ export function Inspector({
 
 /** The saved evidence is kept raw: a conflict has no chosen value. */
 export function CompletionEvidence({ item }: { item: Item }) {
-  if (item.state !== "done" || item.progress !== undefined) return null;
+  if (item.state !== "done" || item.progress !== undefined || item.conflicts.state !== undefined) return null;
   const evidence = item.evidence;
   const conflict = evidence != null && "conflict" in evidence;
   const values = conflict ? evidence.conflict : [evidence];
