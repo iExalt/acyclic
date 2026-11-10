@@ -4074,6 +4074,209 @@ def form_journey(page, view, env, remote, id, name, failures):
 
 
 @timed
+def deletion_journey(page, view, env, origin, name, failures, errors):
+    """Deletes parents, leaves and empty containers, retaining refusals and safe keyboard focus."""
+    initiative = json.loads(
+        run(env, "initiative", "add", "--title", f"Deletion garden {name}")
+    )["data"]["initiative"]
+    thread_id = json.loads(
+        run(env, "thread", "add", "--title", f"Deletion thread {name}")
+    )["data"]["thread"]
+    parent = json.loads(
+        run(
+            env,
+            "item",
+            "add",
+            "--parent",
+            initiative,
+            "--title",
+            f"Deletion beds {name}",
+            "--no-thread",
+        )
+    )["data"]["item"]
+    child = json.loads(
+        run(
+            env,
+            "item",
+            "add",
+            "--parent",
+            parent,
+            "--title",
+            f"Deletion seeds {name}",
+            "--thread",
+            thread_id,
+        )
+    )["data"]["item"]
+    waiter = json.loads(
+        run(
+            env,
+            "item",
+            "add",
+            "--parent",
+            initiative,
+            "--title",
+            f"Deletion water {name}",
+            "--waits-for",
+            parent,
+            "--no-thread",
+        )
+    )["data"]["item"]
+    dialog = page.get_by_role("dialog")
+
+    def refused(kind, reason):
+        expected = "Failed to load resource: the server responded with a status of 409 (Conflict)"
+        with page.expect_console_message(lambda message: message.type == "error" and message.text == expected) as logged:
+            dialog.get_by_role("button", name=f"Delete {kind}", exact=True).click()
+        expect(dialog.get_by_role("alert")).to_contain_text(reason)
+        # The tested server refusal is expected; retain every other console and page error.
+        errors.remove(logged.value.text)
+
+    def ask_item(item):
+        page.goto(f"{origin}/?item={quote(item)}")
+        page.get_by_test_id("item-menu").click()
+        page.get_by_role("button", name="Delete item…", exact=True).click()
+        expect(dialog).to_be_visible()
+        expect(dialog.get_by_role("button", name="Cancel", exact=True)).to_be_focused()
+        confirm = dialog.get_by_role("button", name="Delete item", exact=True)
+        assert confirm.evaluate("e => { const c = document.createElement('span'); c.style.color = getComputedStyle(e).getPropertyValue('--danger'); e.append(c); const expected = getComputedStyle(c).color; c.remove(); return getComputedStyle(e).color === expected; }")
+
+    ask_item(parent)
+    expect(dialog).to_contain_text("1 child item will be kept")
+    expect(dialog).to_contain_text("1 dependency link will be removed")
+    page.keyboard.press("Shift+Tab")
+    expect(dialog.get_by_role("button", name="Delete item", exact=True)).to_be_focused()
+    page.keyboard.press("Tab")
+    expect(dialog.get_by_role("button", name="Cancel", exact=True)).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(dialog).to_have_count(0)
+    expect(page.get_by_test_id("inspector")).to_be_visible()
+    expect(page.get_by_test_id("item-menu")).to_be_focused()
+    page.get_by_test_id("item-menu").click()
+    page.get_by_role("button", name="Delete item…", exact=True).click()
+    dialog.get_by_role("button", name="Cancel", exact=True).click()
+    expect(dialog).to_have_count(0)
+    expect(page.get_by_test_id("item-menu")).to_be_focused()
+    page.get_by_test_id("item-menu").click()
+    page.get_by_role("button", name="Delete item…", exact=True).click()
+    # The native backdrop has no DOM locator: measure it and check the top layer before tapping it.
+    rect = dialog.bounding_box()
+    assert rect and rect["x"] > 1 and rect["y"] > 1
+    assert page.evaluate("document.elementFromPoint(1, 1).tagName") == "DIALOG"
+    if view.get("has_touch"):
+        page.touchscreen.tap(1, 1)
+    else:
+        page.mouse.click(1, 1)
+    expect(dialog).to_have_count(0)
+    expect(page.get_by_test_id("inspector")).to_be_visible()
+    expect(page.get_by_test_id("item-menu")).to_be_focused()
+    page.get_by_test_id("item-menu").click()
+    page.get_by_role("button", name="Delete item…", exact=True).click()
+    page.screenshot(path=SHOTS / f"app-{name}-delete-item.png")
+    held = []
+    def hold_delete(route):
+        body = route.request.post_data_json
+        command = body.get("command", body) if isinstance(body, dict) else body
+        if isinstance(command, dict) and "delete" in command.get("item", {}):
+            held.append(route)
+        else:
+            route.fallback()
+    page.route("**/api/command", hold_delete)
+    dialog.get_by_role("button", name="Delete item", exact=True).click()
+    expect(dialog.get_by_role("button", name="Deleting…", exact=True)).to_be_disabled()
+    expect(dialog.get_by_role("button", name="Cancel", exact=True)).to_be_disabled()
+    page.keyboard.press("Escape")
+    expect(dialog).to_be_visible()
+    assert len(held) == 1, "delete was not held exactly once"
+    held[0].continue_()
+    expect(dialog).to_have_count(0)
+    page.unroute("**/api/command", hold_delete)
+    expect(page.get_by_test_id("inspector")).to_have_count(0)
+    expect(page).not_to_have_url(re.compile(r"[?&]item="))
+    rows = json.loads(run(env, "item", "show", child, waiter))["data"]
+    assert rows[0]["parent"] is None, (
+        "deletion removed the child or kept its deleted parent"
+    )
+    assert rows[1]["links"]["waits_for"] == [], (
+        "deletion kept a dependency on the retired item"
+    )
+    assert json.loads(run(env, "item", "list"))["data"]["items"] is not None
+
+    # The server, rather than a stale client count, enforces container deletion rules.
+    page.goto(f"{origin}/?thread={quote(thread_id)}")
+    page.get_by_test_id("thread-menu").click()
+    page.get_by_role("button", name="Delete thread…", exact=True).click()
+    refused("thread", "Move or delete this thread's items")
+    expect(
+        dialog.get_by_role("button", name="Delete thread", exact=True)
+    ).to_be_enabled()
+    page.screenshot(path=SHOTS / f"app-{name}-delete-thread-refused.png")
+    run(env, "thread", "claim", thread_id)
+    run(env, "item", "edit", child, "--no-thread")
+    refused("thread", "Release this thread's active claim")
+    run(env, "thread", "release", thread_id)
+    dialog.get_by_role("button", name="Delete thread", exact=True).click()
+    expect(dialog).to_have_count(0)
+    expect(page.get_by_test_id("thread-panel")).to_have_count(0)
+    expect(page).not_to_have_url(re.compile(r"[?&]thread="))
+
+    page.goto(f"{origin}/?initiative={quote(initiative)}")
+    if view["viewport"]["width"] < 900:
+        page.get_by_role("button", name="Outline", exact=True).click()
+    page.get_by_test_id(f"initiative-menu-{initiative}").click()
+    page.get_by_role("button", name="Delete initiative…", exact=True).click()
+    refused("initiative", "Move or delete this initiative's items")
+    page.screenshot(path=SHOTS / f"app-{name}-delete-initiative-refused.png")
+    run(env, "item", "delete", waiter)
+    # A canceled leaf remains deletable, and deletion never offers Undo.
+    run(env, "item", "edit", child, "--state", "canceled")
+    dialog.get_by_role("button", name="Cancel", exact=True).click()
+    ask_item(child)
+    def fail_refresh(route):
+        body = route.request.post_data_json
+        command = body.get("command", body) if isinstance(body, dict) else body
+        if command == {"item": "list"}:
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": False, "error": {"code": "locked", "message": "Refresh unavailable for the journey", "details": None}}))
+        else:
+            route.fallback()
+    page.route("**/api/command", fail_refresh)
+    dialog.get_by_role("button", name="Delete item", exact=True).click()
+    expect(dialog).to_have_count(0)
+    page.unroute("**/api/command", fail_refresh)
+    expect(page).not_to_have_url(re.compile(r"[?&]item="))
+    expect(page.get_by_test_id("notice")).to_contain_text("Saved")
+    expect(page.get_by_test_id("inspector")).to_have_count(0)
+    assert page.get_by_role("button", name="Undo", exact=True).count() == 0
+    page.goto(f"{origin}/?initiative={quote(initiative)}")
+    if view["viewport"]["width"] < 900:
+        page.get_by_role("button", name="Outline", exact=True).click()
+    page.get_by_test_id(f"initiative-menu-{initiative}").click()
+    page.get_by_role("button", name="Delete initiative…", exact=True).click()
+    dialog.get_by_role("button", name="Delete initiative", exact=True).click()
+    expect(dialog).to_have_count(0)
+    assert f"initiative={initiative}" not in page.url, (
+        "deleted initiative remained in the address"
+    )
+    assert initiative not in [
+        row["id"]
+        for row in json.loads(run(env, "initiative", "list"))["data"]["initiatives"]
+    ]
+    for state in ("parked", "done"):
+        home = json.loads(run(env, "initiative", "list"))["data"]["initiatives"][0]["id"]
+        leaf = json.loads(run(env, "item", "add", "--parent", home, "--title", f"Deletion {state} {name}", "--no-thread"))["data"]["item"]
+        if state == "done":
+            run(env, "item", "done", leaf, "--evidence", "Completed for the deletion journey")
+        else:
+            run(env, "item", "edit", leaf, "--state", state)
+        ask_item(leaf)
+        dialog.get_by_role("button", name="Delete item", exact=True).click()
+        expect(dialog).to_have_count(0)
+        expect(page.get_by_test_id("inspector")).to_have_count(0)
+    print(
+        f"{name}: deletion kept children, removed dependencies, enforced container guards and cleared selections"
+    )
+
+
+@timed
 def completion_journey(page, view, env, origin, name, failures):
     """Completes a leaf with evidence, preserving failed drafts and deriving its parent's progress."""
     initiative = json.loads(run(env, "initiative", "list"))["data"]["initiatives"][0]["id"]
@@ -5014,6 +5217,21 @@ def shard_run(shard):
             if shard == "small":
                 chromium = playwright.chromium.launch()
                 hover_focus_journey(chromium)
+                # Deletion owns its small records; it needs no large Map fixture or extra shard.
+                _, deletion_link, deletion_env, _ = serve(50)
+                deletion_origin = deletion_link.rstrip("/")
+                deletion_views = {
+                    **VIEWS,
+                    "tablet": {**VIEWS["phone"], "viewport": {"width": 820, "height": 1180}, "device_scale_factor": 1},
+                }
+                for deletion_name, deletion_view in deletion_views.items():
+                    context, page, _, errors = open_app(chromium, deletion_view, deletion_link, failures, deletion_name)
+                    try:
+                        deletion_journey(page, deletion_view, deletion_env, deletion_origin, deletion_name, failures, errors)
+                        if errors:
+                            failures.append(f"{deletion_name}: deletion logged unexpected errors: {errors}")
+                    finally:
+                        context.close()
                 label_link, label_ids, label_titles = serve_labels()
                 labels_journey(chromium, label_link, label_ids, label_titles)
                 # Only these two roots share the packing, so a shrink can be measured without other roots obscuring it.

@@ -147,6 +147,7 @@ export type Intent =
   | { kind: "tap"; id: string | null }
   /** The item selected went away. */
   | { kind: "gone" }
+  | { kind: "deleted"; record: "item" | "thread" | "initiative"; id: string }
   /** A thread's row or tile anywhere: to the Map, the thread picked with its panel, its items framed. */
   | { kind: "thread"; id: string }
   /** A thread's row in the outline: the thread picked on the Map with nothing over it is unpicked; else as `thread`. */
@@ -250,6 +251,25 @@ function move(place: Place, intent: Intent, world: World): Step {
         thread: intent.id === null ? place.thread : pickedAfter(place.thread, intent.id, world),
         cameFrom: null,
       });
+    case "deleted": {
+      // Clear even over a stale plan: a saved deletion must not keep naming its retired record.
+      if (intent.record === "initiative")
+        return only({
+          ...place,
+          initiative: place.initiative === intent.id ? null : place.initiative,
+          overlays: CLOSED,
+        });
+      const itemGone = intent.record === "item" && place.item === intent.id;
+      const threadGone = place.thread === (intent.record === "thread" ? intent.id : `${intent.id}.one`);
+      const underGone = intent.record === "item" && place.cameFrom?.item === intent.id;
+      return only({
+        ...place,
+        item: itemGone ? null : place.item,
+        thread: threadGone ? null : place.thread,
+        cameFrom: itemGone || threadGone || underGone ? null : place.cameFrom,
+        overlays: CLOSED,
+      });
+    }
     case "gone":
       return only({ ...place, item: null });
     case "thread":

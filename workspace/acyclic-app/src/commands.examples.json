@@ -1,5 +1,5 @@
 {
-  "about": "The commands the app sends, as it sends them, and one it doesn't (an add without an id, which the app always gives), in an order that succeeds on a tracker holding one initiative, item a, item b under a, item e done and thread t. The app's unit tests check its builders make the ones they build; the server's tests run them through the API.",
+  "about": "The commands the app sends, as it sends them, and two setup commands it doesn't (an add without an id, which the app always gives, and an empty initiative for deletion), in an order that succeeds on a tracker holding one initiative, item a, item b under a, item e done and thread t. The app's unit tests check its builders make the ones they build; the server's tests run them through the API.",
   "examples": [
     {
       "name": "list",
@@ -145,6 +145,47 @@
     {
       "name": "needs",
       "command": "needs"
+    },
+    {
+      "name": "delete item",
+      "command": {
+        "item": {
+          "delete": {
+            "item": "01900000-0000-7000-8000-0000000000c1"
+          }
+        }
+      }
+    },
+    {
+      "name": "delete thread",
+      "command": {
+        "thread": {
+          "delete": {
+            "thread": "01900000-0000-7000-8000-0000000000f1"
+          }
+        }
+      }
+    },
+    {
+      "name": "set up an empty initiative for deletion",
+      "command": {
+        "initiative": {
+          "add": {
+            "id": "01900000-0000-7000-8000-0000000000a2",
+            "title": "Empty"
+          }
+        }
+      }
+    },
+    {
+      "name": "delete initiative",
+      "command": {
+        "initiative": {
+          "delete": {
+            "initiative": "01900000-0000-7000-8000-0000000000a2"
+          }
+        }
+      }
     }
   ]
 }

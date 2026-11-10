@@ -323,3 +323,46 @@ describe("countsText", () => {
     expect(countsText({ ...none, leaves: 2, waiting: 2 })).toBe("2 waiting");
   });
 });
+
+describe("deletion refusals", () => {
+  const refused = async (details: unknown) => {
+    const { fetcher } = server({
+      "thread delete": {
+        ok: false,
+        error: { code: "in-use", message: "opaque-record can't be deleted by session/fixture", details },
+      },
+    });
+    const error = await command({ thread: { delete: { thread: ID.t } } }, fetcher).catch((err: unknown) => err);
+    const result = failure(error);
+    expect(result.code).toBe("in-use");
+    expect(result.message).not.toContain("opaque-record");
+    expect(result.message).not.toContain("session/fixture");
+    return result.message;
+  };
+  it("preserves structured reasons through the API and names actions without identifiers", async () => {
+    const members = { why: "has-members", members: ["opaque-record"] };
+    const claim = { why: "claimed", holder: "session/fixture" };
+    expect(await refused({ reasons: [members] })).toBe("Move or delete this thread's items before deleting the thread");
+    expect(await refused({ reasons: [claim] })).toBe("Release this thread's active claim before deleting the thread");
+    expect(await refused({ reasons: [{ why: "holds-items", items: ["opaque-record"] }] })).toBe(
+      "Move or delete this initiative's items before deleting the initiative",
+    );
+    expect(await refused({ reasons: [{ why: "task-thread" }] })).toBe("Delete the task instead of its thread");
+    expect(await refused({ reasons: [members, claim, claim] })).toBe(
+      "Move or delete this thread's items before deleting the thread. Release this thread's active claim before deleting the thread",
+    );
+  });
+  it("uses a safe fallback for missing, malformed or future reasons", async () => {
+    for (const details of [
+      null,
+      {},
+      { reasons: [] },
+      { reasons: [null] },
+      { reasons: [{ why: 1 }] },
+      { reasons: [{ why: "future" }] },
+      { reasons: [{ why: "claimed" }, { why: "future" }] },
+    ]) {
+      expect(await refused(details)).toBe("It is still in use and can't be deleted yet");
+    }
+  });
+});

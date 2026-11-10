@@ -828,3 +828,36 @@ describe("threadIntent", () => {
     expect(threadIntent(tasks, "t", "outline")).toEqual({ kind: "outline", id: "t" });
   });
 });
+
+describe("saved deletion over a stale plan", () => {
+  it("clears a deleted task, its derived thread and the underlying item reference", () => {
+    const before = at({
+      view: "map",
+      item: "a",
+      thread: "a.one",
+      cameFrom: { view: "threads", by: "thread", item: "a" },
+    });
+    const result = go(before, { kind: "deleted", record: "item", id: "a" }).place;
+    expect(result).toMatchObject({ item: null, thread: null, cameFrom: null });
+    expect(addressOf(result)).not.toContain("item=");
+    expect(addressOf(result)).not.toContain("thread=");
+  });
+  it("drops a deleted thread while preserving an unrelated item", () => {
+    const result = go(at({ view: "map", item: "b", thread: "t" }), {
+      kind: "deleted",
+      record: "thread",
+      id: "t",
+    }).place;
+    expect(result).toMatchObject({ item: "b", thread: null });
+  });
+  it("drops the initiative address even when the stale context still names it", () => {
+    const result = go(at({ initiative: "init" }), { kind: "deleted", record: "initiative", id: "init" }).place;
+    expect(result.initiative).toBeNull();
+    expect(addressOf(result)).not.toContain("initiative=");
+  });
+});
+
+it("keeps the current initiative when an inactive initiative is deleted", () => {
+  const result = go(at({ initiative: "other" }), { kind: "deleted", record: "initiative", id: "empty" }).place;
+  expect(result.initiative).toBe("other");
+});
