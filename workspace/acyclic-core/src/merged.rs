@@ -100,9 +100,20 @@ pub fn github_check(run: Gh<'_>, repository: &Repository, commit: &str) -> Asked
         Err(said) if said.contains("HTTP 404") || said.contains("Not Found") => unchecked(format!(
             "GitHub has no repository {owner}/{name} with {branch}, or this account can't see it"
         )),
-        Err(said) => Asked {
-            check: Check::Unchecked(format!("couldn't ask GitHub: {}", said.trim())),
-            transport_failed: true,
+        Err(said) => {
+            let lower = said.to_ascii_lowercase();
+            let fixable = ["isn't installed", "didn't start", "auth", "log in", "login", "token"]
+                .iter()
+                .any(|sign| lower.contains(sign));
+            let hint = if fixable && !said.contains("gh auth login") {
+                "; install gh and run `gh auth login`"
+            } else {
+                ""
+            };
+            Asked {
+                check: Check::Unchecked(format!("couldn't ask GitHub: {}{hint}", said.trim())),
+                transport_failed: true,
+            }
         },
     }
 }

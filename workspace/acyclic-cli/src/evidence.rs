@@ -216,7 +216,7 @@ fn settle(
     match verdict {
         Check::Merged => Ok(None),
         Check::NotMerged => Err(refusal(model, evidence, "not-merged")),
-        Check::UnknownCommit => Err(refusal(model, evidence, "unknown-commit")),
+        Check::UnknownCommit => Err(refusal(model, evidence, "unknown-commit-github")),
         Check::NoBranch(reason) | Check::Unchecked(reason) => Ok(Some(reason.clone())),
     }
 }
@@ -266,13 +266,17 @@ fn refusal(model: &Model, (item, repository, commit): (&str, &str, &str), why: &
         "unknown-commit" => {
             format!("{name} has no commit {commit}, even after fetching {branch}: check the commit")
         },
+        "unknown-commit-github" => {
+            format!("GitHub has no commit {commit} in {name}: check the commit")
+        },
         _ => format!(
             "couldn't fetch {name}'s {branch} to check commit {commit}; nothing was written, so try again"
         ),
     };
     CliError::refused("unmerged", format!("{message} (forcing doesn't skip this check)")).with(
         json!({
-            "item": item, "repository": name, "commit": commit, "reason": why,
+            "item": item, "repository": name, "commit": commit,
+            "reason": why.trim_end_matches("-github"),
         }),
     )
 }

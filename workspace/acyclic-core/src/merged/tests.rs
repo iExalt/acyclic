@@ -244,7 +244,7 @@ fn github_replies_map_to_verdicts() {
         ),
         (
             err("gh: authentication required\n"),
-            Check::Unchecked("couldn't ask GitHub: gh: authentication required".to_owned()),
+            Check::Unchecked("couldn't ask GitHub: gh: authentication required; install gh and run `gh auth login`".to_owned()),
             true,
         ),
         (
