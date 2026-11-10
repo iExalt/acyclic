@@ -15,12 +15,14 @@ describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
   it("is the one app.css declares for its scheme", () => {
     const css = readFileSync(new URL("./app.css", import.meta.url), "utf8");
     const marker = css.indexOf("/* palettes */");
-    const block = css.slice(marker, css.indexOf("}", marker));
+    const palettes = css.slice(marker, css.indexOf(":root {\n  /* At least", marker));
+    const blocks = [...palettes.matchAll(/([^{}]+)\{([^{}]+)\}/g)];
+    const block =
+      blocks.find(([_, selector]) =>
+        scheme === "light" ? selector?.trim().endsWith(":root") : selector?.trim() === ':root[data-theme="dark"]',
+      )?.[2] ?? "";
     const declared = Object.fromEntries(
-      [...block.matchAll(/--([a-z-]+):\s*light-dark\((#[0-9A-Fa-f]{6}),\s*(#[0-9A-Fa-f]{6})\);/g)].map((m) => [
-        m[1],
-        scheme === "light" ? m[2] : m[3],
-      ]),
+      [...block.matchAll(/--([a-z-]+):\s*(#[0-9A-Fa-f]{6});/g)].map((m) => [m[1], m[2]]),
     );
     const named = { ...p, "accent-ink": p.accentInk } as Record<string, unknown>;
     expect(Object.keys(declared).sort()).toEqual(
@@ -43,8 +45,11 @@ describe.each(["dark", "light"] as const)("the %s palette", (scheme) => {
       ].sort(),
     );
     for (const [name, value] of Object.entries(declared)) expect(value, name).toBe(named[name]);
-    expect(block).toContain("color-scheme: light dark");
-    expect(css).toContain(`:root[data-theme="${scheme}"] {\n  color-scheme: ${scheme};`);
+    expect(block).toContain(`color-scheme: ${scheme}`);
+    if (scheme === "dark") {
+      const system = blocks.find(([_, selector]) => selector?.trim() === ':root:not([data-theme="light"])')?.[2];
+      expect(system?.trim().replaceAll(/\n {2}/g, "\n")).toBe(block.trim());
+    }
     const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
     expect(html, "the bar's colour").toContain(
       `<meta name="theme-color" content="${p.chrome}" media="(prefers-color-scheme: ${scheme})" />`,

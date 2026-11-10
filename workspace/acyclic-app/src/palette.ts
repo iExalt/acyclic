@@ -132,6 +132,9 @@ export function applyTheme(theme: Theme) {
   const root = document.documentElement;
   if (theme === "system") delete root.dataset.theme;
   else root.dataset.theme = theme;
+  const scheme = theme === "system" ? (window.matchMedia(QUERY).matches ? "light" : "dark") : theme;
+  const schemeMeta = document.querySelector<HTMLMetaElement>('meta[name="color-scheme"]');
+  if (schemeMeta) schemeMeta.content = scheme;
   for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
     const own: Scheme = meta.media.includes("light") ? "light" : "dark";
     meta.content = PALETTES[theme === "system" ? own : theme].chrome;
@@ -148,19 +151,29 @@ export function setTheme(theme: Theme) {
 
 function subscribe(changed: () => void) {
   const query = window.matchMedia(QUERY);
-  query.addEventListener("change", changed);
+  const systemChanged = () => {
+    applyTheme(readTheme());
+    changed();
+  };
+  query.addEventListener("change", systemChanged);
   window.addEventListener(THEME_CHANGED, changed);
+  // Canvas colours cannot be rewritten by the extension's CSS engine.
+  const extension = new MutationObserver(changed);
+  extension.observe(document.documentElement, { attributes: true, attributeFilter: ["data-darkreader-scheme"] });
   return () => {
-    query.removeEventListener("change", changed);
+    extension.disconnect();
+    query.removeEventListener("change", systemChanged);
     window.removeEventListener(THEME_CHANGED, changed);
   };
 }
 
-/** The scheme shown: the Theme's, else the system's, following either as it changes. */
+/** The canvas scheme follows an active colour extension, else the picked Theme or system scheme. */
 export function useScheme(): Scheme {
   return useSyncExternalStore(
     subscribe,
     () => {
+      const external = document.documentElement.dataset.darkreaderScheme;
+      if (external === "dark" || external === "light") return external;
       const theme = readTheme();
       if (theme !== "system") return theme;
       return window.matchMedia(QUERY).matches ? "light" : "dark";

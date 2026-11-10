@@ -41,6 +41,9 @@ importers:
       "@vitejs/plugin-react":
         specifier: 6.1.2
         version: 6.1.2(vite@8.3.5(@types/node@26.6.5))
+      darkreader:
+        specifier: 4.9.135
+        version: 4.9.135
       rollup-plugin-license:
         specifier: 3.7.1
         version: 3.7.1(picomatch@4.0.7)(rollup@4.65.0)
@@ -399,6 +402,13 @@ packages:
     os: [linux]
     libc: [glibc]
 
+  "@rollup/rollup-linux-x64-gnu@4.66.0":
+    resolution:
+      { integrity: sha512-E46rnZgp7J84Qwe8RMlF+rgimnDo/9fuiGbUArGB0ZkMWf97O7yeSCfKls5x/YJOF0RcuSe9RctuKe1hlxICiA== }
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
   "@rollup/rollup-linux-x64-musl@4.65.0":
     resolution:
       { integrity: sha512-8sT9PemIZfIMED4Vd4KGoOXVDj5CMSWNcGdbheRUx9TYS03yOWdT2Q0lXPyEyNBB9YTilwewIQKNIBk6Nxi0Kg== }
@@ -439,6 +449,12 @@ packages:
   "@rollup/rollup-win32-x64-msvc@4.65.0":
     resolution:
       { integrity: sha512-wPWi++K4Bs1VR4XihOhfGi4IGX6Cub7FlerTf8X2v+2BtDHddgSqWCXwGD+h2yAe4/niIhNDwAltioOC+wEogQ== }
+    cpu: [x64]
+    os: [win32]
+
+  "@rollup/rollup-win32-x64-msvc@4.66.0":
+    resolution:
+      { integrity: sha512-xA+neBh1bqkqaS3b48T2UHZnDsTIpb9B0h+TdBzynjF/ymCpYndhfY10RqW0qSKB1HqqQA83mINVhAdwA+mETg== }
     cpu: [x64]
     os: [win32]
 
@@ -669,6 +685,10 @@ packages:
       { integrity: sha512-msY99tMY8iWTg+sIPGfSqDcPNOt4xcj+v/K/7qUFaCUxxlqnMkUYLBjRUzn9W5CU/R2hrmtJa5+UtovrEM2ctg== }
     engines: { node: ">=0.10" }
 
+  darkreader@4.9.135:
+    resolution:
+      { integrity: sha512-h/gmS/KzY8HgmsgOSFh7ssJnsC5ymuhIwZqxksPKCS1K400OUJyjDPZN1L2YIrzX+oezhVUNnCDZPfmPUvdJNA== }
+
   detect-libc@2.1.2:
     resolution:
       { integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ== }
@@ -814,6 +834,10 @@ packages:
   magic-string@1.4.3:
     resolution:
       { integrity: sha512-z12OxmaPGE0F4xlpGdjuAUckipLpQlTAuAmyGhNoD7ODpYUzvDfvtxUbjM/jwznyP178oju/KDdyi220wNJ0RQ== }
+
+  malevic@0.20.3:
+    resolution:
+      { integrity: sha512-DzUDSf5MkW0Bjrk7l5j6hIN4uxMRGLKmblKvZ84Nu3V5bwAu4tzYX7Mds5HM5Vk1oZaTIeEPFbHaUU1YSWwOnw== }
 
   moment@2.31.0:
     resolution:
@@ -1198,6 +1222,9 @@ snapshots:
   "@rollup/rollup-linux-x64-gnu@4.65.0":
     optional: true
 
+  "@rollup/rollup-linux-x64-gnu@4.66.0":
+    optional: true
+
   "@rollup/rollup-linux-x64-musl@4.65.0":
     optional: true
 
@@ -1217,6 +1244,9 @@ snapshots:
     optional: true
 
   "@rollup/rollup-win32-x64-msvc@4.65.0":
+    optional: true
+
+  "@rollup/rollup-win32-x64-msvc@4.66.0":
     optional: true
 
   "@types/chai@5.2.3":
@@ -1328,6 +1358,13 @@ snapshots:
 
   cytoscape@3.34.4: {}
 
+  darkreader@4.9.135:
+    dependencies:
+      malevic: 0.20.3
+    optionalDependencies:
+      "@rollup/rollup-linux-x64-gnu": 4.66.0
+      "@rollup/rollup-win32-x64-msvc": 4.66.0
+
   detect-libc@2.1.2: {}
 
   elkjs@0.12.0: {}
@@ -1411,6 +1448,8 @@ snapshots:
   magic-string@1.4.3:
     dependencies:
       "@jridgewell/sourcemap-codec": 1.6.0
+
+  malevic@0.20.3: {}
 
   moment@2.31.0: {}
 
