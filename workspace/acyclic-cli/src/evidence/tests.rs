@@ -80,7 +80,7 @@ fn a_refreshed_candidate_cannot_become_uncheckable_inside_the_batch() {
     };
     let model = candidate_model(&commit);
     let candidates = BTreeSet::from([("item".to_owned(), "repo".to_owned(), commit)]);
-    let prepared = preflight(&env, &candidates, &model);
+    let prepared = preflight(&env, &Rc::default(), &candidates, &model);
 
     git(&clone, &["update-ref", "-d", "refs/remotes/origin/main"]);
     git(&clone, &["remote", "remove", "origin"]);
@@ -89,11 +89,11 @@ fn a_refreshed_candidate_cannot_become_uncheckable_inside_the_batch() {
     let mut failed_refresh = Prepared(prepared.0.clone());
     failed_refresh.0.get_mut(&candidate).unwrap().prior =
         PriorCheck::Refreshed(Err("synthetic fetch refusal".to_owned()));
-    let error = check(&env, &BTreeSet::new(), &model, &failed_refresh).unwrap_err();
+    let error = check(&env, &Rc::default(), &BTreeSet::new(), &model, &failed_refresh).unwrap_err();
     assert_eq!(error.details["reason"], "fetch-failed");
     assert_eq!(error.details["fetch_error"], "synthetic fetch refusal");
 
-    let error = check(&env, &BTreeSet::new(), &model, &prepared).unwrap_err();
+    let error = check(&env, &Rc::default(), &BTreeSet::new(), &model, &prepared).unwrap_err();
     assert_eq!(error.details["reason"], "stale-preflight");
     assert_eq!(error.code, "changed-since");
 }

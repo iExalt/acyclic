@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use acyclic_core::locate::{Settings, Trackers};
 use acyclic_core::model::Repository;
@@ -12,6 +13,7 @@ use serde::Deserialize;
 use crate::Env;
 use crate::args::{Cli, Format};
 use crate::error::{CliError, exit};
+use crate::learned::Learned;
 
 /// How to print: `--output`, else pretty for a person at a terminal and JSON for whatever reads a pipe, as an agent's
 /// tool does.
@@ -80,7 +82,8 @@ pub fn tracker(cli: &Cli, env: &Env) -> Result<PathBuf, CliError> {
     Ok(Trackers::load(&home)?.for_remotes(&settings.remotes, &home)?)
 }
 
-/// The machine's code clones, by repository `owner/name`, from `~/.config/acyclic/clones.toml`.
+/// The machine's hand-mapped code clones, by repository `owner/name`, from `~/.config/acyclic/clones.toml`: an
+/// optional override of the clones commands learn.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Clones {
@@ -89,8 +92,19 @@ struct Clones {
 }
 
 /// Where each repository record's clone is on this machine: the one `clones.toml` maps its `owner/name` to, in any
-/// case. A key that isn't an `owner/name` is refused, rather than leaving a merge unchecked.
+/// case, else the one a command was last run in (see [`crate::learned`]) while it still exists and its `origin` still
+/// names the repository. A key that isn't an `owner/name` is refused, rather than leaving a merge unchecked.
 pub fn clones(env: &Env) -> Result<impl Fn(&Repository) -> Option<PathBuf> + use<>, CliError> {
+    clones_with(env, &Rc::default())
+}
+
+/// [`clones`], sharing `learned` lookups with every other call given the same one.
+pub(crate) fn clones_with(
+    env: &Env,
+    learned: &Rc<Learned>,
+) -> Result<impl Fn(&Repository) -> Option<PathBuf> + use<>, CliError> {
+    let learned = Rc::clone(learned);
+    let cache = crate::learned::cache_path(env);
     let home = home(env);
     let mapping = match &home {
         Some(home) => {
@@ -133,9 +147,12 @@ pub fn clones(env: &Env) -> Result<impl Fn(&Repository) -> Option<PathBuf> + use
         mapping.into_iter().map(|(key, path)| (key.to_ascii_lowercase(), path)).collect();
     Ok(move |record: &Repository| {
         let name = crate::resolve::repository_name(record)?.to_ascii_lowercase();
-        mapping.get(&name).map(|path| match (path.strip_prefix("~/"), &home) {
-            (Some(rest), Some(home)) => home.join(rest),
-            _ => Path::new(path).to_path_buf(),
-        })
+        match mapping.get(&name) {
+            Some(path) => Some(match (path.strip_prefix("~/"), &home) {
+                (Some(rest), Some(home)) => home.join(rest),
+                _ => Path::new(path).to_path_buf(),
+            }),
+            None => learned.find(cache.as_deref(), &name),
+        }
     })
 }

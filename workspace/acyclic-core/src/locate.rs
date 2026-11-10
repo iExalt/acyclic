@@ -194,6 +194,8 @@ pub struct Settings {
     pub repo: PathBuf,
     /// Its remotes' URLs, `origin` first and then the others by name.
     pub remotes: Vec<String>,
+    /// The URL of its `origin` remote, when it has one.
+    pub origin: Option<String>,
     /// Whether it is a tracker clone: setup gave it a replica id.
     pub tracker: bool,
 }
@@ -210,8 +212,27 @@ impl Settings {
             .map_err(|e| LocateError::Git(e.to_string()))?;
         let mut remotes = urls;
         remotes.sort_by_key(|(name, _)| (name != "origin", name.clone()));
+        let origin = remotes.iter().find(|(name, _)| name == "origin").map(|(_, url)| url.clone());
         let remotes = remotes.into_iter().map(|(_, url)| url).collect();
-        Ok(Self { repo: repo.to_owned(), remotes, tracker })
+        Ok(Self { repo: repo.to_owned(), remotes, origin, tracker })
+    }
+
+    /// The `owner/name`, in lower case, that `origin` names on github.com, when it is one.
+    #[must_use]
+    pub fn github_name(&self) -> Option<String> {
+        let normal = normalize(self.origin.as_deref()?);
+        let name = normal.strip_prefix("github.com/")?;
+        crate::import::owner_name(name).map(|_| name.to_owned())
+    }
+
+    /// The working directory of the main checkout of the repository this is read in: for a linked worktree, the
+    /// checkout that owns it. `None` for a bare repository.
+    ///
+    /// # Errors
+    ///
+    /// Fails when git can't open the repository.
+    pub fn main_checkout(&self) -> Result<Option<PathBuf>, LocateError> {
+        Git::new(&self.repo).main_workdir().map_err(|e| LocateError::Git(e.to_string()))
     }
 
     /// The working tree's root when the repository is a tracker clone, so a command run anywhere inside one opens

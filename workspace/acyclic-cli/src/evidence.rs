@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use acyclic_core::merged::{Check, GitAncestry};
 use acyclic_core::model::Model;
@@ -12,6 +13,7 @@ use serde_json::{Value as Json, json};
 use crate::Env;
 use crate::context;
 use crate::error::CliError;
+use crate::learned::Learned;
 
 /// One commit evidence: the item it finishes, its repository record and the commit.
 type Commit = (String, String, String);
@@ -54,9 +56,14 @@ pub(crate) fn commits(model: &Model) -> BTreeSet<Commit> {
 }
 
 /// Fetches any default branches needed to check commits a prospective write adds, before its store batch.
-pub(crate) fn preflight(env: &Env, candidates: &BTreeSet<Commit>, model: &Model) -> Prepared {
+pub(crate) fn preflight(
+    env: &Env,
+    learned: &Rc<Learned>,
+    candidates: &BTreeSet<Commit>,
+    model: &Model,
+) -> Prepared {
     let mut prepared = Prepared::default();
-    let Ok(clones) = context::clones(env) else { return prepared };
+    let Ok(clones) = context::clones_with(env, learned) else { return prepared };
     let ancestry = GitAncestry::new(&clones);
     let mut refreshed: BTreeMap<(PathBuf, String), Result<(), String>> = BTreeMap::new();
     for candidate in candidates {
@@ -89,6 +96,7 @@ pub(crate) fn preflight(env: &Env, candidates: &BTreeSet<Commit>, model: &Model)
 /// have already run before the store batch. Returns commits this machine can't check, and refuses unmerged evidence.
 pub(crate) fn check(
     env: &Env,
+    learned: &Rc<Learned>,
     before: &BTreeSet<Commit>,
     after: &Model,
     prepared: &Prepared,
@@ -102,7 +110,7 @@ pub(crate) fn check(
             "item": item, "repository": name_of(after, repository), "commit": commit, "reason": reason,
         })
     };
-    let clones = match context::clones(env) {
+    let clones = match context::clones_with(env, learned) {
         Ok(clones) => clones,
         Err(error) => {
             let mut found = Vec::new();
