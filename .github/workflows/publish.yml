@@ -131,6 +131,7 @@ jobs:
     needs: [release, verify]
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
       packages: write
     env:
       INDEX_DIGEST: ${{ needs.release.outputs.digest }}

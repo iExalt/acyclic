@@ -161,6 +161,24 @@ jobs:
           docker buildx imagetools inspect localhost:5000/acyclic-server:rehearsal --format '{{json .Manifest}}' \
             | jq -e '[.manifests[].platform.architecture] | sort == ["amd64", "arm64"]'
           docker run --rm localhost:5000/acyclic-server:rehearsal --version
+      - name: Rehearse exact verified promotion and an identical retry
+        run: |
+          image=localhost:5000/acyclic-server
+          digest="sha256:$(skopeo inspect --tls-verify=false --raw "docker://$image:rehearsal" | sha256sum | cut -d' ' -f1)"
+          python3 scripts/promote-image.py "$image" v0.0.0 "$digest" --insecure-local-registry
+          python3 scripts/promote-image.py "$image" v0.0.0 "$digest" --insecure-local-registry
+          actual="sha256:$(skopeo inspect --tls-verify=false --raw "docker://$image:verified-v0.0.0" | sha256sum | cut -d' ' -f1)"
+          test "$actual" = "$digest"
+          docker buildx imagetools create --annotation 'index:org.opencontainers.image.description=conflicting fixture' \
+            --tag "$image:conflict" "$image:rehearsal"
+          conflict="sha256:$(skopeo inspect --tls-verify=false --raw "docker://$image:conflict" | sha256sum | cut -d' ' -f1)"
+          test "$conflict" != "$digest"
+          if python3 scripts/promote-image.py "$image" v0.0.0 "$conflict" --insecure-local-registry; then
+            echo 'a conflicting verified alias was accepted' >&2
+            exit 1
+          fi
+          actual="sha256:$(skopeo inspect --tls-verify=false --raw "docker://$image:verified-v0.0.0" | sha256sum | cut -d' ' -f1)"
+          test "$actual" = "$digest"
 
   # The one check a merge requires, so the requirement survives changes to the matrix. A skipped job would count as
   # passing, so this fails unless every job succeeded, or the rehearsal was skipped because the caller asked.
