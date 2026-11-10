@@ -224,3 +224,19 @@ it("draws the root lane divider without a visible root box", () => {
   const out = scene(view, { ...placed, dividers: new Map([[ROOT, line]]) }, { item: null, thread: null }, threadOf);
   expect(out.dividers).toEqual([{ id: `divider ${ROOT}`, owner: ROOT, ...line, layer: 0 }]);
 });
+
+it("previews only a visible reference without changing selection, geometry or links", () => {
+  const selection = { item: "a", thread: null };
+  const before = scene(view, placed, selection, threadOf);
+  for (const id of ["c", "top", "a", "missing", null]) {
+    const after = scene(view, placed, { ...selection, preview: id }, threadOf);
+    expect(after.nodes.filter((node) => node.preview).map((node) => node.id)).toEqual(
+      id !== null && id !== "missing" ? [id] : [],
+    );
+    expect({ ...after, nodes: after.nodes.map((node) => ({ ...node, preview: false })) }).toEqual(before);
+  }
+  const closed = visible(model, { collapsed: new Set(["top"]) });
+  expect(scene(closed, placed, { ...selection, preview: "b" }, threadOf).nodes.some((node) => node.preview)).toBe(
+    false,
+  );
+});

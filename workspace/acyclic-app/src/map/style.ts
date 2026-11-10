@@ -144,12 +144,22 @@ function sheetOf(p: Palette, family: string): cytoscape.StylesheetJson {
       },
     },
     { selector: "node.lit", style: { "border-color": "data(line)", "border-width": 1.5 } },
+    {
+      selector: "node.preview",
+      style: {
+        "outline-color": p.ink,
+        "outline-width": 1,
+        "outline-offset": 3,
+        "outline-opacity": 1,
+      },
+    },
     // The selection is told by its shape as well as its colour, since a lit border may be any hue, a dark one close to
     // ink: an ink edge twice a lit one's, and a faint halo around it that widens the node, as a focused tile's; a
     // stronger one read as a second ring.
     {
       selector: "node.selected",
       style: {
+        "outline-width": 0,
         "border-color": p.ink,
         "border-width": 3,
         "underlay-color": p.ink,

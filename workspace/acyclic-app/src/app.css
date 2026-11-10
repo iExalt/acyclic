@@ -2297,6 +2297,14 @@ dl.facts .chip.line {
   font-weight: 500;
   text-align: left;
 }
+.inspector [data-select]:focus-visible {
+  box-shadow: inset 2px 0 var(--ink);
+}
+@media (hover: hover) {
+  .inspector [data-select]:hover {
+    box-shadow: inset 2px 0 var(--ink);
+  }
+}
 .link-row:hover:not(:disabled) {
   background: none;
 }

@@ -15,6 +15,8 @@ export interface Selection {
   thread: string | null;
   /** The item under the pointer, whose links show, as the selection's do, without fading other elements. */
   hovered?: string | null;
+  /** A sidebar reference: outlines its node without changing links or selection. */
+  preview?: string | null;
 }
 export interface SceneNode {
   id: string;
@@ -38,6 +40,7 @@ export interface SceneNode {
   layer: number;
   lit: boolean;
   selected: boolean;
+  preview: boolean;
 }
 
 /** How wide labels are drawn: a tile's in the face's regular weight, a box's in bold. */
@@ -161,6 +164,7 @@ export function scene(
       layer: depth,
       lit: lit.has(node.id),
       selected: node.id === selection.item,
+      preview: node.id === selection.preview,
     });
     if (metrics.stub !== null) {
       const width = at.width - 2 * STUB_INSET;

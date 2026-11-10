@@ -187,6 +187,7 @@ export function App() {
     }
     return step;
   }, []);
+  const [preview, setPreview] = useState<string | null>(null);
   const { place, requests } = nav;
   const { view, item: selected, thread, needsAt } = place;
   const { command: showCommand, mode, add: adding, projects: showProjects } = place.overlays;
@@ -985,6 +986,7 @@ export function App() {
             lines={lines}
             palette={palette}
             selected={selected}
+            preview={preview}
             onSelect={(id) => go({ kind: "tap", id })}
             outside={outsideWaits}
             onOpen={openOutside}
@@ -1078,6 +1080,7 @@ export function App() {
           />
         ) : panel !== "item" || chosen === undefined ? null : (
           <Inspector
+            onPreview={setPreview}
             key={chosen.id}
             item={chosen}
             isProject={outline?.projects.some((project) => project.id === chosen.id) ?? false}
