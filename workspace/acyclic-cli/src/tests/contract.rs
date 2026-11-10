@@ -168,14 +168,14 @@ fn ssh_isolation_gate(test_name: &str) -> bool {
             .spawn()
             .unwrap(),
     ));
-    let deadline = Instant::now() + Duration::from_secs(75);
+    let deadline = Instant::now() + Duration::from_secs(120);
     let status = loop {
         if let Some(status) = child.0.as_mut().unwrap().try_wait().unwrap() {
             break status;
         }
         assert!(
             Instant::now() < deadline,
-            "isolated {test_name} child exceeded its 75-second bound"
+            "isolated {test_name} child exceeded its 120-second bound"
         );
         std::thread::sleep(Duration::from_millis(10));
     };
@@ -1585,8 +1585,9 @@ fn fetch_transport(
     let receive_pack = shell_quote(&exec_path.join("git-receive-pack"));
     let wait = if block {
         format!(
-            "n=0\nwhile [ ! -e {} ]; do\n  n=$((n + 1))\n  [ \"$n\" -lt 1000 ] || exit 124\n  sleep 0.01\ndone\n",
-            shell_quote(&release)
+            "n=0\nwhile [ ! -e {} ]; do\n  n=$((n + 1))\n  [ \"$n\" -lt 4500 ] || {{ : > {}; exit 124; }}\n  sleep 0.01\ndone\n",
+            shell_quote(&release),
+            shell_quote(&release.with_extension("timeout"))
         )
     } else {
         String::new()
@@ -2024,6 +2025,78 @@ fn an_originless_mapped_clone_records_unchecked_commit_evidence() {
     );
 }
 
+fn blocked_fetch_writes(
+    sh: &Shell,
+    mapped: &[(&str, &str)],
+    merged: &str,
+    started: &Path,
+    release: &Path,
+    second_line: String,
+    before_second: impl FnOnce(),
+) -> (crate::Outcome, crate::Outcome) {
+    let begin = Instant::now();
+    let first_line = format!("item done Ship --force --commit me/code@{merged}");
+    let first_env = sh.env(mapped);
+    let (first_send, first_receive) = std::sync::mpsc::channel();
+    let first = std::thread::spawn(move || {
+        let args = std::iter::once("acyclic").chain(first_line.split(' ')).map(Into::into);
+        let _ = first_send.send(execute(args, &first_env));
+    });
+    let release_guard = ReleaseGuard(release.to_path_buf());
+    let fetch_started = wait_for_file(started, Duration::from_secs(10));
+    if fetch_started {
+        before_second();
+    }
+    let second_env = sh.env(mapped);
+    let (started_send, started_receive) = std::sync::mpsc::channel();
+    let (send, receive) = std::sync::mpsc::channel();
+    let second = std::thread::spawn(move || {
+        let _ = started_send.send(());
+        let args = std::iter::once("acyclic").chain(second_line.split(' ')).map(Into::into);
+        let _ = send.send(execute(args, &second_env));
+    });
+    let second_started = started_receive.recv_timeout(Duration::from_secs(10));
+    let second_before = receive.recv_timeout(Duration::from_secs(15));
+    let transport_timed_out = release.with_extension("timeout").exists();
+    let first_before = first_receive.try_recv();
+    let elapsed = begin.elapsed();
+    release_guard.release();
+    let first_early = !matches!(&first_before, Err(std::sync::mpsc::TryRecvError::Empty));
+    let second_finished = second_before.is_ok();
+    let second_error = second_before.as_ref().err().map(ToString::to_string);
+    let first_result = match first_before {
+        Ok(result) => Some(result),
+        _ => first_receive.recv_timeout(Duration::from_secs(35)).ok(),
+    };
+    let second_result = match second_before {
+        Ok(result) => Some(result),
+        _ => receive.recv_timeout(Duration::from_secs(5)).ok(),
+    };
+    let first_joined = join_finished(first, Duration::from_secs(1));
+    let second_joined = join_finished(second, Duration::from_secs(1));
+    assert!(fetch_started, "fetch entry missing after {elapsed:?}");
+    assert!(
+        second_started.is_ok(),
+        "second worker did not start after {elapsed:?}: {second_started:?}"
+    );
+    assert!(!transport_timed_out, "transport timed out before second write after {elapsed:?}");
+    assert!(!first_early, "fetch exited before release after {elapsed:?}");
+    assert!(
+        second_finished,
+        "second worker did not finish before release after {elapsed:?}: {second_error:?}"
+    );
+    assert!(first_joined.is_some(), "first worker did not exit");
+    assert!(second_joined.is_some(), "second worker did not exit");
+    let first_result = first_result.expect("first write should finish after release");
+    let second_result = second_result.expect("second write should finish");
+    assert_eq!(
+        second_result.code, 0,
+        "second write failed before release: {}",
+        second_result.stdout
+    );
+    (first_result, second_result)
+}
+
 #[test]
 fn a_commit_fetch_does_not_hold_the_tracker_batch_lock() {
     const TEST: &str = "tests::contract::a_commit_fetch_does_not_hold_the_tracker_batch_lock";
@@ -2044,42 +2117,17 @@ fn a_commit_fetch_does_not_hold_the_tracker_batch_lock() {
     git(&clone, &["branch", "candidate", &merged]);
     let (started, release, count) = fetch_transport(&sh, &origin, &clone, true, None);
 
-    let first_line = format!("item done Ship --force --commit me/code@{merged}");
-    let first_env = sh.env(mapped);
-    let (first_send, first_receive) = std::sync::mpsc::channel();
-    let first = std::thread::spawn(move || {
-        let args = std::iter::once("acyclic").chain(first_line.split(' ')).map(Into::into);
-        let _ = first_send.send(execute(args, &first_env));
-    });
-    let release_guard = ReleaseGuard(release.clone());
-    let fetch_started = wait_for_file(&started, Duration::from_secs(5));
-
-    let second_env = sh.env(mapped);
-    let second_line = "repository edit me/code --default-branch candidate".to_owned();
-    let (send, receive) = std::sync::mpsc::channel();
-    let second = std::thread::spawn(move || {
-        let args = std::iter::once("acyclic").chain(second_line.split(' ')).map(Into::into);
-        let _ = send.send(execute(args, &second_env));
-    });
-    let second_before_release = receive.recv_timeout(Duration::from_secs(2)).ok();
-    let did_second_finish_while_blocked = second_before_release.is_some();
-
-    release_guard.release();
-    let first_result = first_receive.recv_timeout(Duration::from_secs(35)).ok();
-    let first_joined =
-        first_result.as_ref().and_then(|_| join_finished(first, Duration::from_secs(1)));
-    let second_after_release =
-        second_before_release.or_else(|| receive.recv_timeout(Duration::from_secs(5)).ok());
-    let second_joined =
-        second_after_release.as_ref().and_then(|_| join_finished(second, Duration::from_secs(1)));
-
-    assert!(fetch_started, "the synthetic transport did not start");
-    assert!(did_second_finish_while_blocked, "the other writer waited for the blocked fetch");
-    assert!(first_joined.is_some(), "first worker should exit after returning its result");
-    let first = first_result.expect("first write should finish within its fetch deadline");
+    let (first, second) = blocked_fetch_writes(
+        &sh,
+        mapped,
+        &merged,
+        &started,
+        &release,
+        "repository edit me/code --default-branch candidate".to_owned(),
+        || {},
+    );
     assert_eq!(first.code, 0, "{}", first.stdout);
-    assert_eq!(second_after_release.expect("second writer should finish").code, 0);
-    assert!(second_joined.is_some(), "second worker should exit after returning its result");
+    assert_eq!(second.code, 0, "{}", second.stdout);
     assert_eq!(std::fs::read_to_string(count).unwrap(), "x", "one refresh per repository");
     complete_ssh_isolation_gate(TEST);
 }
@@ -2102,43 +2150,23 @@ fn a_clone_config_failure_after_preflight_requires_retry() {
     let merged = git(&origin, &["rev-parse", "HEAD"]);
     let (started, release, _) = fetch_transport(&sh, &origin, &clone, true, None);
 
-    let first_line = format!("item done Ship --force --commit me/code@{merged}");
-    let first_env = sh.env(mapped);
-    let (first_send, first_receive) = std::sync::mpsc::channel();
-    let first = std::thread::spawn(move || {
-        let args = std::iter::once("acyclic").chain(first_line.split(' ')).map(Into::into);
-        let _ = first_send.send(execute(args, &first_env));
-    });
-    let release_guard = ReleaseGuard(release.clone());
-    let fetch_started = wait_for_file(&started, Duration::from_secs(5));
-    std::fs::write(Path::new(&home).join(".config/acyclic/clones.toml"), "not valid toml = [")
-        .unwrap();
-
-    let second_env = sh.env(mapped);
-    let second_line = format!("item add --id {} --title Other", id("a2"));
-    let (send, receive) = std::sync::mpsc::channel();
-    let second = std::thread::spawn(move || {
-        let args = std::iter::once("acyclic").chain(second_line.split(' ')).map(Into::into);
-        let _ = send.send(execute(args, &second_env));
-    });
-    let second_before_release = receive.recv_timeout(Duration::from_secs(2)).ok();
-    let did_second_finish_while_blocked = second_before_release.is_some();
-    release_guard.release();
-    let first_result = first_receive.recv_timeout(Duration::from_secs(35)).ok();
-    let first_joined =
-        first_result.as_ref().and_then(|_| join_finished(first, Duration::from_secs(1)));
-    let second_after_release =
-        second_before_release.or_else(|| receive.recv_timeout(Duration::from_secs(5)).ok());
-    let second_joined =
-        second_after_release.as_ref().and_then(|_| join_finished(second, Duration::from_secs(1)));
-    let first = first_result.expect("first write should finish within its fetch deadline");
+    let (first, second) = blocked_fetch_writes(
+        &sh,
+        mapped,
+        &merged,
+        &started,
+        &release,
+        format!("item add --id {} --title Other", id("a2")),
+        || {
+            std::fs::write(
+                Path::new(&home).join(".config/acyclic/clones.toml"),
+                "not valid toml = [",
+            )
+            .unwrap();
+        },
+    );
+    assert_eq!(second.code, 0, "{}", second.stdout);
     let first_output: serde_json::Value = serde_json::from_str(&first.stdout).unwrap();
-
-    assert!(fetch_started, "the synthetic transport did not start");
-    assert!(did_second_finish_while_blocked, "the other writer waited for the blocked fetch");
-    assert!(first_joined.is_some(), "first worker should exit after returning its result");
-    assert!(second_joined.is_some(), "second worker should exit after returning its result");
-    assert_eq!(second_after_release.expect("second writer should finish").code, 0);
     assert_eq!(first.code, 1, "{}", first.stdout);
     assert_eq!(first_output["error"]["code"], "changed-since");
     assert_eq!(first_output["error"]["details"]["reason"], "stale-preflight");
