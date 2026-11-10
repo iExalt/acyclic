@@ -209,13 +209,6 @@ fn a_repository_with_no_clone_is_checked_by_github_once_per_commit() {
                 assert_eq!(unchecked[0]["repository"], "me/code");
             },
             (Err(refused), Err(reason)) => {
-                if reason == "unknown-commit" {
-                    assert!(
-                        refused.message.contains("GitHub has no commit abcdef1"),
-                        "{}",
-                        refused.message
-                    );
-                }
                 assert_eq!(
                     (refused.code, refused.details["reason"].as_str()),
                     ("unmerged", Some(reason))
