@@ -236,6 +236,7 @@ impl<'a> CommandContext<'a> {
                 state,
                 notes,
                 waits_for,
+                allow_redundant,
             }) => {
                 let fields = ItemFields {
                     title: Some(title.clone()),
@@ -243,6 +244,7 @@ impl<'a> CommandContext<'a> {
                     thread: Change::of(thread.clone(), *no_thread),
                     state: state.map(StateWord::state),
                     force: false,
+                    allow_redundant: *allow_redundant,
                     notes: Change::of(notes.clone(), false),
                     waits_for: Delta { add: waits_for.clone(), remove: Vec::new() },
                 };
@@ -281,6 +283,7 @@ impl<'a> CommandContext<'a> {
                     thread: Change::of(edit.thread.clone(), edit.no_thread),
                     state: edit.state.map(StateWord::state),
                     force: edit.force,
+                    allow_redundant: edit.allow_redundant,
                     notes: Change::of(edit.notes.clone(), edit.no_notes),
                     waits_for: Delta {
                         add: edit.waits_for.clone(),

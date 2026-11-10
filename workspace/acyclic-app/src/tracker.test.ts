@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { addCommand } from "./edits";
 import type { Intent } from "./nav";
 import { createTracker, type Notice, type Ports, UNDO_KEY, UNDOING } from "./tracker";
 
-type Fault = "busy" | "self-link" | "changed-since" | "lost" | "lost-applied" | "500";
+type Fault = "redundant-dependency" | "busy" | "self-link" | "changed-since" | "lost" | "lost-applied" | "500";
 
 /** A command's name, as the server's tests name it: `needs`, `item list`, `item edit`. */
 function nameOf(body: unknown): string {
@@ -18,14 +18,27 @@ function nameOf(body: unknown): string {
  */
 function server(titles: Record<string, string> = { a: "A" }) {
   const plan = new Map(Object.entries(titles));
+  const waits = new Map<string, string[]>();
   const faults: Record<string, Fault[]> = {};
   const writes: unknown[] = [];
   const requests: unknown[] = [];
   const needsRows: { kind: string; identity?: string }[] = [];
-  const apply = (body: { item: { add?: { id: string; title: string }; edit?: { item: string; title?: string } } }) => {
+  const apply = (body: {
+    item: {
+      add?: { id: string; title: string };
+      edit?: { item: string; title?: string; "waits-for"?: string[]; "no-waits-for"?: string[] };
+    };
+  }) => {
     const { add, edit } = body.item;
     if (add) plan.set(add.id, add.title);
     if (edit?.title !== undefined) plan.set(edit.item, edit.title);
+    if (edit?.["waits-for"])
+      waits.set(edit.item, [...new Set([...(waits.get(edit.item) ?? []), ...edit["waits-for"]])]);
+    if (edit?.["no-waits-for"])
+      waits.set(
+        edit.item,
+        (waits.get(edit.item) ?? []).filter((id) => !edit["no-waits-for"]?.includes(id)),
+      );
   };
   const answer = (data: unknown) => new Response(JSON.stringify({ ok: true, data }));
   const fetcher: Ports["fetcher"] = async (_url, init) => {
@@ -41,7 +54,7 @@ function server(titles: Record<string, string> = { a: "A" }) {
       throw new TypeError("Failed to fetch");
     }
     if (fault === "500") return new Response("oops", { status: 500 });
-    if (fault === "busy" || fault === "self-link" || fault === "changed-since")
+    if (fault === "redundant-dependency" || fault === "busy" || fault === "self-link" || fault === "changed-since")
       return new Response(JSON.stringify({ ok: false, error: { code: fault, message: fault, details: null } }));
     const conditions = (request as { expect?: { kind: string; item?: string; field?: string; value?: unknown }[] })
       .expect;
@@ -68,7 +81,7 @@ function server(titles: Record<string, string> = { a: "A" }) {
           state: "open",
           notes: null,
           initiative: null,
-          links: { waits_for: [], waited_on_by: [] },
+          links: { waits_for: waits.get(id) ?? [], waited_on_by: [] },
         })),
       );
     if (name === "initiative list")
@@ -326,4 +339,50 @@ describe("a tracker's Undo", () => {
     tracker.tell(null);
     expect(tracker.snapshot().notice).toBeNull();
   });
+});
+
+describe("redundant dependencies", () => {
+  it.each([false, true])("requires the confirmation answer %s before retrying", async (accept) => {
+    const confirm = vi.fn(() => accept);
+    vi.stubGlobal("window", { confirm });
+    try {
+      const { tracker, backend } = open();
+      await tracker.refresh();
+      backend.fail("item edit", "redundant-dependency");
+      const body = { item: { edit: { item: "a", "waits-for": ["b"] } } };
+      expect(await tracker.send(body, { select: "a", pin: null })).toBe(accept);
+      expect(confirm).toHaveBeenCalledOnce();
+      expect(backend.writes).toHaveLength(accept ? 2 : 1);
+      if (accept) expect(backend.writes[1]).toMatchObject({ item: { edit: { "allow-redundant": true } } });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+it.each([false, true])("keeps confirmed link Undo across reload, busy retry: %s", async (busy) => {
+  vi.stubGlobal("window", { confirm: () => true });
+  try {
+    const backend = server({ a: "A", b: "B" });
+    const storage = memory();
+    const { tracker } = open(backend, storage);
+    await tracker.refresh();
+    backend.fail("item edit", "redundant-dependency");
+    if (busy) backend.fail("item edit", "busy");
+    const saved = await tracker.send(
+      { item: { edit: { item: "a", "waits-for": ["b"] } } },
+      { select: "a", pin: null, undo: true },
+    );
+    expect(saved).toBe(!busy);
+    if (busy) expect(await tracker.retry()).toBe(true);
+    expect(tracker.snapshot().notice).toMatchObject({ offer: "undo" });
+    const again = open(backend, storage);
+    expect(again.tracker.snapshot().notice).toMatchObject({ offer: "undo", restored: true });
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot().notice).toMatchObject({ offer: "undo" });
+    await again.tracker.undo();
+    expect(backend.writes.at(-1)).toMatchObject({ item: { edit: { item: "a", "no-waits-for": ["b"] } } });
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

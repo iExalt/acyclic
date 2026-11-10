@@ -2228,3 +2228,33 @@ fn an_import_checks_the_commits_it_writes_and_a_dry_run_too() {
     assert_eq!(std::fs::read_to_string(count).unwrap(), "x", "one refresh for both commits");
     complete_ssh_isolation_gate(TEST);
 }
+
+#[test]
+fn redundant_dependencies_require_the_specific_override() {
+    let mut sh = Shell::new();
+    sh.init();
+    for title in ["A", "B", "Z"] {
+        assert_eq!(sh.run(&format!("item add --title {title}"), AGENT), 0);
+    }
+    assert_eq!(sh.run("item edit B --waits-for A", AGENT), 0);
+    assert_eq!(sh.run("item edit Z --waits-for B", AGENT), 0);
+    let (code, out) = sh.output("item edit Z --waits-for A", AGENT);
+    assert_eq!(code, 1);
+    assert_eq!(out["error"]["code"], "redundant-dependency");
+    assert_eq!(sh.run("item edit Z --waits-for A --force", AGENT), 1);
+    assert_eq!(sh.run("item edit Z --waits-for A --allow-redundant", AGENT), 0);
+    assert_eq!(sh.run("item edit Z --waits-for A", AGENT), 0);
+    let exported = execute(["acyclic".into(), "export".into()], &sh.env(AGENT));
+    assert_eq!(exported.code, 0);
+    std::fs::write(sh.path().join("redundant.json"), &exported.stdout).unwrap();
+    assert_eq!(sh.run("init restored --replica restored", &[]), 0);
+    let restored: &[(&str, &str)] = &[("ACYCLIC_TRACKER", "restored")];
+    assert_eq!(sh.run("import redundant.json", restored), 0);
+    let copied = execute(["acyclic".into(), "export".into()], &sh.env(restored));
+    assert_eq!(copied.stdout, exported.stdout);
+    assert_eq!(sh.run("item add --title Q --waits-for A --waits-for B", AGENT), 1);
+    assert_eq!(
+        sh.run("item add --title Q --waits-for A --waits-for B --allow-redundant", AGENT),
+        0
+    );
+}

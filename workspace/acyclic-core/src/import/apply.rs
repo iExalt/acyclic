@@ -296,6 +296,11 @@ pub(crate) fn changes(doc: &Import, before: &Model) -> ChangeSet {
                 let held: BTreeSet<&String> =
                     before.links.iter().filter(|l| l.from == *id).map(|l| &l.to).collect();
                 for (to, present) in list_changes(&held, list, adding) {
+                    // An import restores the document's exact graph, including intentional redundant links.
+                    if present {
+                        changes
+                            .push(Write::AllowRedundant { item: id.clone(), target: to.clone() });
+                    }
                     changes.push(Write::Set(Assign::Item(
                         id.clone(),
                         ItemAssign::WaitsFor(to, present),

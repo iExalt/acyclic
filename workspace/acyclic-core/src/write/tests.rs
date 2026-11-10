@@ -1464,3 +1464,101 @@ fn a_clash_the_tracker_already_has_is_not_refused_again_by_an_edit_that_leaves_i
     commit_ok(&mut a, 8, vec![item("twin-b", ItemAssign::Title("Other".into()))]);
     assert_eq!(read(&a).duplicate_titles(), Vec::<Vec<&str>>::new());
 }
+
+#[test]
+fn redundant_dependencies_need_explicit_approval_and_retries_are_idempotent() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![
+            add("a", vec![]),
+            add("b", vec![ItemAssign::WaitsFor("a".into(), true)]),
+            add("z", vec![ItemAssign::WaitsFor("b".into(), true)]),
+        ],
+    );
+    let change = item("z", ItemAssign::WaitsFor("a".into(), true));
+    let before = read(&r);
+    let refused = judge(&before, &ChangeSet(vec![change.clone()]), by(2), None).unwrap_err();
+    assert!(refused.iter().any(|v| matches!(v.rule, Rule::RedundantDependency { .. })));
+    assert_eq!(read(&r).links, before.links);
+    commit_ok(
+        &mut r,
+        2,
+        vec![change.clone(), Change::AllowRedundant { item: "z".into(), target: "a".into() }],
+    );
+    commit_ok(&mut r, 3, vec![change]);
+    let cycle = judge(
+        &read(&r),
+        &ChangeSet(vec![
+            item("a", ItemAssign::WaitsFor("z".into(), true)),
+            Change::AllowRedundant { item: "a".into(), target: "z".into() },
+        ]),
+        by(4),
+        None,
+    )
+    .unwrap_err();
+    assert!(cycle.iter().any(|v| matches!(v.rule, Rule::WaitsForCycle(_))));
+}
+
+#[test]
+fn redundant_dependencies_expand_parents_and_require_complete_coverage() {
+    let mut r = replica("a");
+    commit_ok(
+        &mut r,
+        1,
+        vec![
+            add("p", vec![]),
+            add("a", vec![ItemAssign::Parent("p".into())]),
+            add("c", vec![ItemAssign::Parent("p".into())]),
+            add("b", vec![ItemAssign::WaitsFor("p".into(), true)]),
+            add("z", vec![ItemAssign::WaitsFor("b".into(), true)]),
+            add("q", vec![]),
+            add("child", vec![ItemAssign::Parent("q".into())]),
+        ],
+    );
+    assert!(
+        refused(&r, vec![item("z", ItemAssign::WaitsFor("a".into(), true))])
+            .iter()
+            .any(|rule| matches!(rule, Rule::RedundantDependency { .. }))
+    );
+    assert!(
+        refused(&r, vec![item("z", ItemAssign::WaitsFor("p".into(), true))])
+            .iter()
+            .any(|rule| matches!(rule, Rule::RedundantDependency { .. }))
+    );
+    // A parent target is covered only when every leaf is already reachable.
+    commit_ok(&mut r, 2, vec![item("child", ItemAssign::WaitsFor("a".into(), true))]);
+    commit_ok(&mut r, 3, vec![item("q", ItemAssign::WaitsFor("p".into(), true))]);
+    // The inherited parent link also covers a direct leaf link.
+    assert!(
+        refused(&r, vec![item("child", ItemAssign::WaitsFor("c".into(), true))])
+            .iter()
+            .any(|rule| matches!(rule, Rule::RedundantDependency { .. }))
+    );
+    // Removing the only indirect path makes the new direct link useful.
+    commit_ok(
+        &mut r,
+        4,
+        vec![
+            item("z", ItemAssign::WaitsFor("b".into(), false)),
+            item("z", ItemAssign::WaitsFor("a".into(), true)),
+        ],
+    );
+}
+
+#[test]
+fn redundant_dependencies_judge_batch_paths_regardless_of_order() {
+    let mut r = replica("a");
+    commit_ok(&mut r, 1, vec![add("a", vec![]), add("b", vec![]), add("z", vec![])]);
+    let mut changes = vec![
+        item("z", ItemAssign::WaitsFor("a".into(), true)),
+        item("z", ItemAssign::WaitsFor("b".into(), true)),
+        item("b", ItemAssign::WaitsFor("a".into(), true)),
+    ];
+    for _ in 0..2 {
+        assert!(refused(&r, changes.clone()).iter()
+            .any(|rule| matches!(rule, Rule::RedundantDependency { from, to } if from == "z" && to == "a")));
+        changes.reverse();
+    }
+}

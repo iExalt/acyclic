@@ -512,6 +512,10 @@ pub enum ItemCommand {
         #[arg(long, value_name = "ITEM")]
         #[serde(default)]
         waits_for: Vec<String>,
+        /// Add direct dependencies even when an indirect path already exists.
+        #[arg(long)]
+        #[serde(default)]
+        allow_redundant: bool,
     },
     /// Edits an item: `--field` sets a field or adds to a set, `--no-field` clears it or removes from a set.
     Edit(ItemEdit),
@@ -555,6 +559,7 @@ pub enum ItemCommand {
 /// What `item edit` changes.
 #[derive(Debug, clap::Args, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)] // Independent command-line switches.
 pub struct ItemEdit {
     /// The item.
     pub item: String,
@@ -590,6 +595,10 @@ pub struct ItemEdit {
     #[arg(long, value_name = "ITEM")]
     #[serde(default)]
     pub waits_for: Vec<String>,
+    /// Add direct dependencies even when an indirect path already exists.
+    #[arg(long)]
+    #[serde(default)]
+    pub allow_redundant: bool,
     /// Stop it waiting for an item, even one that no longer exists; repeat for more.
     #[arg(long, value_name = "ITEM")]
     #[serde(default)]

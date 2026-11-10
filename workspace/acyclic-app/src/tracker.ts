@@ -267,7 +267,29 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
         : []);
     let sent: Sent;
     try {
-      await command(body, fetcher, expected, observed);
+      try {
+        await command(body, fetcher, expected, observed);
+      } catch (err) {
+        const { code } = failure(err);
+        const item = typeof body === "object" ? body.item : null;
+        const fields = typeof item === "object" && item !== null ? Object.entries(item)[0] : undefined;
+        if (
+          code !== "redundant-dependency" ||
+          fields === undefined ||
+          !["add", "edit"].includes(fields[0]) ||
+          typeof fields[1] !== "object" ||
+          fields[1] === null ||
+          !window.confirm(
+            "This task already waits for that dependency through other tasks. Add the direct dependency anyway?",
+          )
+        )
+          throw err;
+        body = {
+          ...(body as Record<string, unknown>),
+          item: { [fields[0]]: { ...fields[1], "allow-redundant": true } },
+        };
+        await command(body, fetcher, expected, observed);
+      }
       // Saved: what it drew stays drawn until a read started from now is shown, whatever reads still out say.
       if (drawn !== null) reads = answered(reads, drawn);
       try {

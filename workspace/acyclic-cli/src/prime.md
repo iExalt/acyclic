@@ -45,8 +45,9 @@ machines recorded and pushes yours.
 ## Waits for
 
 `acyclic item edit 'Plant' --waits-for 'Beds'` means Plant waits for Beds: it can't start until Beds is done.
-`--no-waits-for 'Beds'` undoes it, and `acyclic item add` takes `--waits-for` too. An edit that would make items wait
-for each other in a circle is refused.
+`--no-waits-for 'Beds'` undoes it, and `acyclic item add` takes `--waits-for` too. A new direct dependency already
+reachable through other tasks is refused; pass `--allow-redundant` to add it deliberately. An edit that would make items
+wait for each other in a circle is refused.
 
 Only waits-for orders work: ids, titles and thread membership never do, so say every dependency you mean.
 
