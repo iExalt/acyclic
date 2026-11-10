@@ -22,32 +22,62 @@
     U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
     U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
-/* The palettes: palette.ts's, which a unit test holds these to, each as light-dark(light, dark), so the scheme follows
-   the system's unless the menu's Theme sets one on the root. A control's edge is stronger than a rule, so an outlined
-   button reads as one. */
+/* Explicit palettes keep colour extensions from rewriting light-dark() fallback switches into invalid colours. */
 /* palettes */
 :root {
-  --ground: light-dark(#f3f4f6, #121417);
-  --chrome: light-dark(#eceef1, #16191d);
-  --box: light-dark(#f9fafb, #181b1f);
-  --tile: light-dark(#ffffff, #23282e);
-  --sheet: light-dark(#ffffff, #1c2025);
-  --rule: light-dark(#d0d5db, #2b3138);
-  --edge: light-dark(#aab0b9, #4a535e);
-  --field: light-dark(#80878f, #6c7580);
-  --ink: light-dark(#1a1c20, #e8eaed);
-  --muted: light-dark(#5b626c, #a2aab4);
-  --link: light-dark(#878e98, #6c7580);
-  --signal: light-dark(#8f5100, #f2b33d);
-  --danger: light-dark(#b3261e, #ff8a80);
-  --accent: light-dark(#1a1c20, #e8eaed);
-  --accent-ink: light-dark(#ffffff, #121417);
-  color-scheme: light dark;
-}
-:root[data-theme="light"] {
+  --ground: #f3f4f6;
+  --chrome: #eceef1;
+  --box: #f9fafb;
+  --tile: #ffffff;
+  --sheet: #ffffff;
+  --rule: #d0d5db;
+  --edge: #aab0b9;
+  --field: #80878f;
+  --ink: #1a1c20;
+  --muted: #5b626c;
+  --link: #878e98;
+  --signal: #8f5100;
+  --danger: #b3261e;
+  --accent: #1a1c20;
+  --accent-ink: #ffffff;
   color-scheme: light;
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #121417;
+    --chrome: #16191d;
+    --box: #181b1f;
+    --tile: #23282e;
+    --sheet: #1c2025;
+    --rule: #2b3138;
+    --edge: #4a535e;
+    --field: #6c7580;
+    --ink: #e8eaed;
+    --muted: #a2aab4;
+    --link: #6c7580;
+    --signal: #f2b33d;
+    --danger: #ff8a80;
+    --accent: #e8eaed;
+    --accent-ink: #121417;
+    color-scheme: dark;
+  }
+}
 :root[data-theme="dark"] {
+  --ground: #121417;
+  --chrome: #16191d;
+  --box: #181b1f;
+  --tile: #23282e;
+  --sheet: #1c2025;
+  --rule: #2b3138;
+  --edge: #4a535e;
+  --field: #6c7580;
+  --ink: #e8eaed;
+  --muted: #a2aab4;
+  --link: #6c7580;
+  --signal: #f2b33d;
+  --danger: #ff8a80;
+  --accent: #e8eaed;
+  --accent-ink: #121417;
   color-scheme: dark;
 }
 :root {

@@ -3966,6 +3966,62 @@ def settled_control(page, selector, prop, value):
 
 
 @timed
+def colour_extension_journey(browser, link):
+    """Native schemes are detectable; forced recolouring leaves an opaque Overview over the Map."""
+    # The API uses page scripts where the extension uses isolated content scripts. Bypass CSP only in this context.
+    context = browser.new_context(**VIEWS["desktop"], bypass_csp=True)
+    page = context.new_page()
+    origin = "{0.scheme}://{0.netloc}".format(urlsplit(link))
+    page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(origin) else route.abort())
+    page.goto(link)
+    overview = page.get_by_test_id("overview")
+    overview.wait_for()
+    meta = page.locator('meta[name="color-scheme"]')
+    expect(meta).to_have_attribute("content", "dark")
+    page.emulate_media(color_scheme="light")
+    expect(meta).to_have_attribute("content", "light")
+    from_menu(page, lambda: page.get_by_test_id("theme").select_option("dark"))
+    expect(meta).to_have_attribute("content", "dark")
+    page.emulate_media(color_scheme="dark")
+    page.emulate_media(color_scheme="light")
+    expect(meta).to_have_attribute("content", "dark")
+    page.reload()
+    expect(meta).to_have_attribute("content", "dark")
+    page.evaluate(Path("workspace/acyclic-app/node_modules/darkreader/darkreader.js").read_text())
+    for scheme in ("dark", "light"):
+        from_menu(page, lambda: page.get_by_test_id("theme").select_option(scheme))
+        expect(meta).to_have_attribute("content", scheme)
+        page.evaluate("DarkReader.enable({brightness: 100, contrast: 100, sepia: 0})")
+        page.wait_for_function("document.documentElement.dataset.darkreaderMode === 'dynamic'")
+        page.wait_for_function("getComputedStyle(document.documentElement).getPropertyValue('--darkreader-bg--ground').trim() !== ''")
+        # An invalid rewritten colour becomes transparent, exposing the still-mounted Map under this view.
+        expect(overview).not_to_have_css("background-color", "rgba(0, 0, 0, 0)")
+        page.screenshot(path=SHOTS / f"app-darkreader-{scheme}.png")
+        to_map(page)
+        settled_map(page)
+        page.wait_for_function("""() => {
+          const cy = document.querySelector('[data-testid=map]')?.cy;
+          const box = cy?.nodes('.box').first();
+          return box?.nonempty() && box.style('background-color') === 'rgb(24,27,31)';
+        }""")
+        page.screenshot(path=SHOTS / f"app-darkreader-{scheme}-map.png")
+        page.evaluate("DarkReader.disable()")
+        expected_box = "rgb(24,27,31)" if scheme == "dark" else "rgb(249,250,251)"
+        page.wait_for_function("""colour => {
+          const box = document.querySelector('[data-testid=map]')?.cy?.nodes('.box').first();
+          return box?.nonempty() && box.style('background-color') === colour;
+        }""", arg=expected_box)
+        page.locator('[data-view=overview]').click()
+        overview.wait_for()
+    from_menu(page, lambda: page.get_by_test_id("theme").select_option("system"))
+    expect(meta).to_have_attribute("content", "light")
+    page.emulate_media(color_scheme="dark")
+    expect(meta).to_have_attribute("content", "dark")
+    context.close()
+    print("colour extension: both schemes stay opaque with Dark Reader; detection follows system, choice and reload")
+
+
+@timed
 def thread_journey(page, env, plan, thread, name, failures):
     """Opens the thread's panel, which lists its items, and picks a Theme on the way."""
     panel = page.get_by_test_id("thread-panel")
@@ -4779,6 +4835,8 @@ def shard_run(shard):
                         failures.append(
                             f"{name}: the page lists {count} items, expected {total}"
                         )
+                    if name == "desktop":
+                        colour_extension_journey(chromium, link)
                     hover_tints_journey(page, view, name)
                     installable(context, page, origin, name, failures)
                     overview_journey(page, view, name, failures)
