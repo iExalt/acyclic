@@ -98,6 +98,7 @@ export interface PlanMapProps {
   /** The colours to draw in, which change with the system's scheme. */
   palette: Palette;
   selected: string | null;
+  preview?: string | null;
   onSelect: (item: string | null) => void;
   /**
    * An item to bring into view, expanding the boxes above it. Writes can preserve its existing root frame and zoom;
@@ -136,6 +137,7 @@ export default function PlanMap({
   lines,
   palette,
   selected,
+  preview = null,
   onSelect,
   focus,
   framed,
@@ -635,9 +637,9 @@ export default function PlanMap({
 
   const drawn = useMemo(() => {
     if (placed === null) return null;
-    const selection: Selection = { item: selected, thread, hovered };
+    const selection: Selection = { item: selected, thread, hovered, preview };
     return scene(view, placed, selection, (id) => model.items.get(id)?.thread ?? null, fonts, labelMetrics);
-  }, [view, placed, selected, thread, hovered, model, fonts, labelMetrics]);
+  }, [view, placed, selected, thread, hovered, preview, model, fonts, labelMetrics]);
   drawnNow.current = drawn;
   function sceneIsApplied() {
     const last = applied.current;

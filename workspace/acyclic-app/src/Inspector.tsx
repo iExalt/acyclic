@@ -27,6 +27,7 @@ export interface InspectorProps {
   /** A linked item's stage, to show beside it. */
   stageOf: (id: string) => Stage | undefined;
   onSelect: (id: string) => void;
+  onPreview: (id: string | null) => void;
   /** The keyboard's ask to edit: each new one opens the editor, as Edit does. */
   edit?: object | undefined;
   /** Whether single-key shortcuts are on, so the buttons say their keys. */
@@ -66,6 +67,7 @@ export function Inspector({
   titleOf,
   stageOf,
   onSelect,
+  onPreview,
   edit,
   shortcuts,
   onPickThread,
@@ -86,6 +88,28 @@ export function Inspector({
   needs,
   busy,
 }: InspectorProps) {
+  const [pointed, setPointed] = useState<string | null>(null);
+  const [focused, setFocused] = useState<string | null>(null);
+  const references = [item.parent, ...item.links.waits_for, ...item.links.waited_on_by];
+  const preview =
+    (pointed !== null && references.includes(pointed) ? pointed : null) ??
+    (focused !== null && references.includes(focused) ? focused : null);
+  useEffect(() => {
+    onPreview(preview);
+    return () => onPreview(null);
+  }, [onPreview, preview]);
+  useEffect(() => {
+    if (pointed !== null && !references.includes(pointed)) setPointed(null);
+    if (focused !== null && !references.includes(focused)) setFocused(null);
+  });
+  const previewEvents = (id: string) => ({
+    onPointerEnter: (event: React.PointerEvent) => {
+      if (event.pointerType !== "touch" && matchMedia("(hover: hover)").matches) setPointed(id);
+    },
+    onPointerLeave: () => setPointed(null),
+    onFocus: () => setFocused(id),
+    onBlur: () => setFocused(null),
+  });
   const [editing, setEditing] = useState(false);
   // An ask from the keyboard, made after the panel opened; one made before belongs to an earlier panel.
   const asked = useRef(edit);
@@ -140,7 +164,7 @@ export function Inspector({
   const chip = (id: string) => {
     const stage = stageOf(id);
     return (
-      <button type="button" className="chip" data-select={id} onClick={() => onSelect(id)}>
+      <button type="button" className="chip" data-select={id} onClick={() => onSelect(id)} {...previewEvents(id)}>
         {stage === undefined ? null : <StageIcon stage={stage} />}
         <Prose text={titleOf(id)} />
       </button>
@@ -163,6 +187,7 @@ export function Inspector({
                   className="link-row"
                   data-select={id}
                   title={titleOf(id)}
+                  {...previewEvents(id)}
                   onClick={() => onSelect(id)}
                 >
                   {stage === undefined ? null : <StageIcon stage={stage} />}

@@ -426,3 +426,24 @@ describe("a stub", () => {
     expect(diff(new Map(next.map((one) => [one.data.id, one])), shot(false)).remove).toEqual(["stub a"]);
   });
 });
+
+it("outlines a preview in both palettes while preserving the selected ring and thread border", () => {
+  for (const palette of [PALETTES.dark, PALETTES.light]) {
+    const core = cytoscape({ headless: true, styleEnabled: true, style: styleFor(palette) });
+    let drawn = new Map<string, Drawn>();
+    const value = (id: string, property: string) =>
+      (core.getElementById(id) as unknown as { pstyle(name: string): { strValue: string } }).pstyle(property).strValue;
+    try {
+      for (const preview of ["tools", "dig", null]) {
+        drawn = apply(core, drawn, elements({ items: base, selection: { item: "dig", thread: null, preview } }));
+        expect(core.nodes(".preview").map((node) => node.id())).toEqual(preview === null ? [] : [preview]);
+        expect(parseFloat(value("dig", "border-width"))).toBe(3);
+        expect(parseFloat(value("dig", "outline-width"))).toBe(0);
+        expect(parseFloat(value("tools", "outline-width"))).toBe(preview === "tools" ? 1 : 0);
+        expect(core.getElementById("tools").hasClass("lit")).toBe(true);
+      }
+    } finally {
+      core.destroy();
+    }
+  }
+});

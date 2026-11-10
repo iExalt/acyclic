@@ -1936,6 +1936,64 @@ def stages_drawn(page, plan, name, failures):
         failures.append(f"{name}: tiles drawn with the wrong stage: {wrong}")
 
 
+
+@timed
+def sidebar_preview_journey(context, origin, plan):
+    """References preview on hover and focus without navigating, reframing or changing edges."""
+    chosen = next(id for id, row in plan.items.items()
+                  if row["parent"] in plan.items and row["links"]["waits_for"]
+                  and row["links"]["waited_on_by"] and not plan.children(id)
+                  and all(plan.parent.get(target) == row["parent"] and not plan.children(target)
+                          for target in [row["links"]["waits_for"][0], row["links"]["waited_on_by"][0]]))
+    page = context.new_page()
+    try:
+        page.goto(f"{origin}/?item={quote(chosen)}")
+        panel = page.get_by_test_id("inspector")
+        panel.wait_for()
+        drawn = settled_map(page)
+        read = """m => ({ url: location.href, pan: m.cy.pan(), zoom: m.cy.zoom(), layouts: m.dataset.layouts,
+            selected: m.cy.nodes('.selected').map(n => n.id()), edges: m.cy.edges().map(e => e.json()),
+            positions: m.cy.nodes().map(n => [n.id(), n.position()]) })"""
+        # Moving to the panel first clears the canvas's own edge-hover behavior.
+        panel.locator("h2").hover()
+        page.wait_for_function("() => document.querySelector('[data-testid=map]').cy.edges('.hovered').length === 0")
+        baseline = drawn.evaluate(read)
+        refs = [panel.locator(".chip[data-select]"),
+                panel.get_by_test_id("waits-for").locator(".link-row").first,
+                panel.get_by_test_id("waited-on-by").locator(".link-row").first]
+
+        def preview(id):
+            page.wait_for_function("id => { const nodes = document.querySelector('[data-testid=map]').cy.nodes('.preview');"
+                                   " return id === null ? nodes.length === 0 : nodes.length === 1 && nodes[0].id() === id; }", arg=id)
+
+        for ref in refs:
+            id = ref.get_attribute("data-select")
+            assert id and drawn.evaluate("(m, id) => m.cy.getElementById(id).nonempty()", id)
+            ref.hover()
+            preview(id)
+            assert drawn.evaluate(read) == baseline
+            ref.focus()
+            panel.locator("h2").hover()
+            preview(id)  # Pointer leave preserves the focused reference.
+            panel.get_by_role("button", name="Edit", exact=True).focus()
+            preview(None)
+            ref.hover()
+            ref.focus()
+            panel.get_by_role("button", name="Edit", exact=True).focus()
+            preview(id)  # Blur preserves the hovered reference.
+            assert drawn.evaluate(read) == baseline
+            page.screenshot(path=SHOTS / f"app-desktop-sidebar-preview-{len(id)}-{refs.index(ref)}.png")
+            panel.locator("h2").hover()
+            preview(None)
+        refs[-1].focus()
+        preview(refs[-1].get_attribute("data-select"))
+        page.keyboard.press("Escape")
+        expect(panel).to_have_count(0)
+        preview(None)
+        print("sidebar preview: parent, both dependency directions, pointer/focus handoffs and close cleanup passed")
+    finally:
+        page.close()
+
 @timed
 def map_journey(page, view, plan, name, failures, hint=None):
     """Drives the Map, and returns the box it found the layout moves, for the next run to try first."""
@@ -5020,6 +5078,8 @@ def shard_run(shard):
                     to_map(page)
                     # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
                     initiative_framing_journey(page, view, plan, name, failures)
+                    if name == "desktop":
+                        sidebar_preview_journey(context, origin, plan)
                     hint = map_journey(page, view, plan, name, failures, hint)
                     outline_journey(page, view, env, plan, name, failures)
                     threads_journey(page, view, env, plan, name, failures)

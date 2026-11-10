@@ -28,7 +28,7 @@ export function elementsOf(
   const layers = new Map(scene.nodes.map((node) => [node.id, node.layer]));
   const line = colour ?? palette.ink;
   return [
-    ...scene.nodes.map(({ lit, selected, ...node }) => ({
+    ...scene.nodes.map(({ lit, selected, preview, ...node }) => ({
       group: "nodes" as const,
       data: {
         ...node,
@@ -44,6 +44,7 @@ export function elementsOf(
         node.kind,
         lit ? "lit" : "",
         selected ? "selected" : "",
+        preview ? "preview" : "",
         node.stage === null ? "" : `stage-${node.stage}`,
         node.kind !== "leaf" && node.stage !== null && QUIET.has(node.stage) ? "quiet" : "",
         node.kind === "box" && !node.label.includes("\n") ? "one-line" : "",

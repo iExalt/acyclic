@@ -56,6 +56,9 @@ two in step.
 - **Accent:** the same as `ink`. It fills the primary action and draws the focus ring.
 - **Signal:** amber in the dark scheme, a dark brown that reads at 4.5:1 in the light; text and dashes only. What
   needs the user, conflicts, threads that wait on each other, and links that cross boxes.
+- **Sidebar preview:** hovering or focusing a parent or dependency reference outlines its visible Map node with a
+  thin ink ring. Selection keeps its thicker ring; preview never moves the camera, opens boxes, or changes links.
+  It clears when the reference loses hover and focus, or its panel closes.
 - **Link:** the Map's links, quieter than text so the items lead, at 3:1 on the ground and boxes. Hover and selection
   highlight related items and links while other Map elements keep their usual colour and opacity.
 - **Danger:** red, as text only.
