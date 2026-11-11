@@ -76,13 +76,18 @@ export const UNDOING: Notice = { text: "Undoing…", offer: null, retry: null, l
 /** Where the Undo on offer is kept in this tab over a reload. */
 export const UNDO_KEY = "acyclic.undo";
 
-/** Where the last plan shown is kept in this tab, so the next start has one to show while the first read is out. */
+/** Where the last plan shown is kept on this device, so the next start has one to show while the first read is out. */
 export const PLAN_KEY = "acyclic.plan.v1";
+
+/** The server's refusals of a user it doesn't serve: whoever they are, the plan kept from before isn't theirs to see. */
+const NOT_THE_USER = ["no-identity", "wrong-identity"];
 
 export interface Ports {
   fetcher: Fetch;
   /** The tab's storage, or null where there is none. Any call may throw, as a full or blocked one does. */
   storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
+  /** Where the last plan shown is kept over the app's closing, or null where there is none; as `storage`, it may throw. */
+  planStorage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
   nav: {
     go(intent: Intent): void;
     /** The item selected now, which an undo that moves nothing brings back into view. */
@@ -135,7 +140,7 @@ export interface Tracker {
 
 const planOf = (found: Item[]): Plan => ({ items: new Map(found.map((one) => [one.id, one])) });
 
-export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
+export function createTracker({ fetcher, storage, planStorage, nav }: Ports): Tracker {
   const listeners = new Set<() => void>();
   let reads: Reads = NO_READS;
   /** Set from a write's start to its end, so a second can't start before a render disables what sends it. */
@@ -158,7 +163,7 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
   /** The plan the last start showed, or null when there is none, or it can't be read as this version's. */
   function cachedPlan(): Extract<Load, { state: "loaded" }> | null {
     try {
-      const raw = storage?.getItem(PLAN_KEY) ?? null;
+      const raw = planStorage?.getItem(PLAN_KEY) ?? null;
       const was = raw === null ? null : JSON.parse(raw);
       if (typeof was !== "object" || was === null || was.items === undefined) return null;
       const { items, threads, needs, initiatives, noInitiative } = was;
@@ -221,7 +226,10 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
       threads(fetcher),
       needs(fetcher),
       initiatives(fetcher),
-    ]);
+    ]).catch((err: unknown) => {
+      if (NOT_THE_USER.includes(failure(err).code)) forget();
+      throw err;
+    });
     const next = show(reads, n, found);
     if (next === null) return null;
     reads = next;
@@ -235,12 +243,20 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
       unread: next.unread,
     };
   }
+  /** Drops the plan kept, as a server that won't serve this user says it isn't theirs. */
+  function forget() {
+    try {
+      planStorage?.removeItem(PLAN_KEY);
+    } catch {
+      // Nothing kept that can be reached.
+    }
+  }
   /** Shows a read: the plan, and the latest read the server gave. */
   const shown = (next: Extract<Load, { state: "loaded" }>) => {
     set({ load: next, plan: planOf(next.items), reads: reads.shown, stale: false });
     const { unread: _, ...plan } = next;
     try {
-      storage?.setItem(PLAN_KEY, JSON.stringify(plan));
+      planStorage?.setItem(PLAN_KEY, JSON.stringify(plan));
     } catch {
       // Too big for the tab's storage, or none: the next start shows nothing until its first read, as without it.
     }
@@ -254,7 +270,8 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
     } catch (err: unknown) {
       const { code, message } = failure(err);
       // Only a first read leaves nothing to show; a later one, or one after the kept plan, keeps it, out of date.
-      if (reads.shown === 0 && !snap.stale) set({ load: { state: "failed", code, message } });
+      if (NOT_THE_USER.includes(code)) set({ load: { state: "failed", code, message }, stale: false, plan: null });
+      else if (reads.shown === 0 && !snap.stale) set({ load: { state: "failed", code, message } });
       else tell({ text: `Couldn't refresh: ${message}`, offer: "refresh", retry: null, lasts: "stale", at: null });
       return;
     }

@@ -724,12 +724,12 @@ MAP_SNAPS = """() => {
 @timed
 def open_app(browser, view, link, failures, name, glide=False, kept_plan=False):
     """Opens the app. The Map's tiles snap to their places, so a journey reads where they are without waiting out a
-    glide; `glide` leaves them gliding, for the journeys that are about that. The tab forgets the plan it kept at each
-    load, so a journey that changes the plan from outside never acts on a stale one; `kept_plan` keeps it."""
+    glide; `glide` leaves them gliding, for the journeys that are about that. The browser forgets the plan it kept at
+    each load, so a journey that changes the plan from outside never acts on a stale one; `kept_plan` keeps it."""
     origin = "{0.scheme}://{0.netloc}".format(urlsplit(link))
     context = browser.new_context(**view)
     if not kept_plan:
-        context.add_init_script("try { sessionStorage.removeItem('acyclic.plan.v1'); } catch {}")
+        context.add_init_script("try { localStorage.removeItem('acyclic.plan.v1'); } catch {}")
     if not glide:
         context.add_init_script(f"({MAP_SNAPS})()")
     page = context.new_page()

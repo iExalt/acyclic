@@ -138,6 +138,15 @@ function storageOrNull(): Storage | null {
   }
 }
 
+/** The device's storage, where the last plan is kept over the app's closing, or null where the browser blocks it. */
+function planStorageOrNull(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 /** Whether a form holds what the user typed, which nothing closes unasked. */
 const dirtyForm = () => document.querySelector("form[data-dirty='true']") !== null;
 
@@ -211,6 +220,7 @@ export function App() {
     createTracker({
       fetcher: (input, init) => fetch(input, init),
       storage: storageOrNull(),
+      planStorage: planStorageOrNull(),
       nav: { go: (intent) => goNow.current(intent), item: () => placeNow.current.item },
     }),
   );

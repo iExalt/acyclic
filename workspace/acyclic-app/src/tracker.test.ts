@@ -3,7 +3,15 @@ import { addCommand } from "./edits";
 import type { Intent } from "./nav";
 import { createTracker, type Notice, PLAN_KEY, type Ports, UNDO_KEY, UNDOING } from "./tracker";
 
-type Fault = "redundant-dependency" | "busy" | "self-link" | "changed-since" | "lost" | "lost-applied" | "500";
+type Fault =
+  | "redundant-dependency"
+  | "busy"
+  | "self-link"
+  | "changed-since"
+  | "lost"
+  | "lost-applied"
+  | "500"
+  | "wrong-identity";
 
 /** A command's name, as the server's tests name it: `needs`, `item list`, `item edit`. */
 function nameOf(body: unknown): string {
@@ -54,7 +62,13 @@ function server(titles: Record<string, string> = { a: "A" }) {
       throw new TypeError("Failed to fetch");
     }
     if (fault === "500") return new Response("oops", { status: 500 });
-    if (fault === "redundant-dependency" || fault === "busy" || fault === "self-link" || fault === "changed-since")
+    if (
+      fault === "redundant-dependency" ||
+      fault === "busy" ||
+      fault === "self-link" ||
+      fault === "changed-since" ||
+      fault === "wrong-identity"
+    )
       return new Response(JSON.stringify({ ok: false, error: { code: fault, message: fault, details: null } }));
     const conditions = (request as { expect?: { kind: string; item?: string; field?: string; value?: unknown }[] })
       .expect;
@@ -116,11 +130,12 @@ function memory(throws = false) {
 }
 
 /** A tracker over `backend`, with its moves of where the user is recorded. */
-function open(backend = server(), storage: Ports["storage"] = memory()) {
+function open(backend = server(), storage: Ports["storage"] = memory(), planStorage: Ports["planStorage"] = memory()) {
   const moves: Intent[] = [];
   const tracker = createTracker({
     fetcher: backend.fetcher,
     storage,
+    planStorage,
     nav: { go: (intent) => void moves.push(intent), item: () => null },
   });
   return { tracker, moves, backend };
@@ -389,15 +404,15 @@ it.each([false, true])("keeps confirmed link Undo across reload, busy retry: %s"
 
 describe("a tracker's kept plan", () => {
   it("keeps the plan once a read is shown, and shows it at the next start as stale, read-only, until a read lands", async () => {
-    const storage = memory();
-    const first = open(server({ a: "A" }), storage);
+    const plans = memory();
+    const first = open(server({ a: "A" }), memory(), plans);
     expect(first.tracker.snapshot()).toMatchObject({ load: { state: "loading" }, stale: false });
     await first.tracker.refresh();
-    expect(storage.kept.has(PLAN_KEY)).toBe(true);
-    expect(JSON.parse(storage.kept.get(PLAN_KEY) ?? "")).not.toHaveProperty("unread");
+    expect(plans.kept.has(PLAN_KEY)).toBe(true);
+    expect(JSON.parse(plans.kept.get(PLAN_KEY) ?? "")).not.toHaveProperty("unread");
 
     const backend = server({ a: "B" });
-    const again = open(backend, storage);
+    const again = open(backend, memory(), plans);
     const { load, stale, reads } = again.tracker.snapshot();
     expect(stale).toBe(true);
     expect(reads).toBe(0);
@@ -407,14 +422,14 @@ describe("a tracker's kept plan", () => {
 
     await again.tracker.refresh();
     expect(again.tracker.snapshot()).toMatchObject({ stale: false, reads: 1, load: { items: [{ title: "B" }] } });
-    expect(JSON.parse(storage.kept.get(PLAN_KEY) ?? "").items[0].title).toBe("B");
+    expect(JSON.parse(plans.kept.get(PLAN_KEY) ?? "").items[0].title).toBe("B");
   });
 
   it("stays shown and read-only, offering a refresh, when the first read fails", async () => {
-    const storage = memory();
-    await open(server(), storage).tracker.refresh();
+    const plans = memory();
+    await open(server(), memory(), plans).tracker.refresh();
     const backend = server();
-    const again = open(backend, storage);
+    const again = open(backend, memory(), plans);
     backend.fail("item list", "500");
     await again.tracker.refresh();
     expect(again.tracker.snapshot()).toMatchObject({
@@ -426,14 +441,28 @@ describe("a tracker's kept plan", () => {
     expect(again.tracker.snapshot()).toMatchObject({ stale: false, reads: 2 });
   });
 
+  it("is dropped, and not shown, when the server says it isn't serving this user", async () => {
+    const plans = memory();
+    await open(server(), memory(), plans).tracker.refresh();
+    const backend = server();
+    const again = open(backend, memory(), plans);
+    backend.fail("item list", "wrong-identity");
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot()).toMatchObject({ load: { state: "failed", code: "wrong-identity" }, stale: false });
+    expect(plans.kept.has(PLAN_KEY)).toBe(false);
+  });
+
   it.each([
     ["unparseable", "{"],
     ["of another shape", JSON.stringify({ items: "no" })],
     ["empty", "null"],
   ])("is ignored when %s, and when storage throws", async (_, raw) => {
-    const storage = memory();
-    storage.kept.set(PLAN_KEY, raw);
-    expect(open(server(), storage).tracker.snapshot()).toMatchObject({ load: { state: "loading" }, stale: false });
-    expect(open(server(), memory(true)).tracker.snapshot().load.state).toBe("loading");
+    const plans = memory();
+    plans.kept.set(PLAN_KEY, raw);
+    expect(open(server(), memory(), plans).tracker.snapshot()).toMatchObject({
+      load: { state: "loading" },
+      stale: false,
+    });
+    expect(open(server(), memory(), memory(true)).tracker.snapshot().load.state).toBe("loading");
   });
 });
