@@ -15,6 +15,11 @@
 - Use the `acyclic` CLI for project management: finding, claiming and finishing work. Run `acyclic prime` first.
 - Use mise for tools: `mise run check` is the routine check (format, Clippy, unit tests, and the doc fence, Markdown and
   workflow lints) and must stay under 60 seconds on a warm cache.
+- The app has a separate `mise run check:app` (typecheck, lint, format and unit tests; 20 seconds warm). Run it
+  alongside the routine check whenever the app changes.
+- To compare timings, prime the cache, then run the same command twice without competing builds. Record the full command
+  and browser journey times separately. The warm reference on idle 8-core Linux with four Cargo build jobs and Rust
+  1.99.1 is 10.9 seconds for `check`, 4.0 for `check:app`, and 51.8 for browser journeys (60.8 for the full task).
 - Most behaviour is covered by unit tests in the core library. The CLI's contract against one tracker runs in its
   unit tests, in process; integration tests cover what needs several tracker clones syncing; browser journeys run in
   `mise run check:browser`, outside the routine check.
@@ -24,6 +29,9 @@
 - Before opening a pull request, run `mise run check:integration` as well as the routine check: it holds the tests that
   guard these rules and multi-clone sync, and CI runs it. Run `mise run check:browser` too when the change touches the
   app or the server.
+- Integration fixtures use `git init --ref-format`; the Git on the check's PATH must support it.
+- Mise must also be on subprocess PATH: the check tasks invoke it from shell scripts, where a shell function is
+  unavailable.
 - Commit messages follow Conventional Commits.
 - Pull requests are squash-merged, and release-please reads only the squashed commit: its title, from the pull
   request's title, and its body, from the description. Title a pull request as a Conventional Commit that covers
