@@ -1,28 +1,32 @@
 #!/bin/sh
-# Installs the system libraries the browsers of check:browser need, which is what `playwright install-deps chromium webkit`
-# installs: 181 packages and 114 MB on the CI image, from an apt mirror that took minutes for single packages on a bad day.
-# With the packages of an earlier run in $BROWSER_DEPS_CACHE the install needs no network. Without them it downloads, as
-# before, and then keeps the .deb files that apt left in its archive for the next run, which CI caches by Playwright version
-# and runner image.
+# Ask the pinned browser installer what is missing before changing the system. Only apt's requested packages use the
+# dedicated archive cache; a cached .deb must never become an install request merely because it is in the directory.
 set -eu
-cache="${BROWSER_DEPS_CACHE:-$HOME/.cache/acyclic/browser-debs}"
+cache="${BROWSER_DEPS_CACHE:-$HOME/.cache/acyclic/browser-debs}/v2"
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT INT TERM
 start=$(date +%s)
-took() { echo "browser deps: $1 in $(( $(date +%s) - start )) s"; }
-
-if ls "$cache"/*.deb >/dev/null 2>&1; then
-  # dpkg, not apt-get: with --no-download, apt-get install of these files failed in CI ("Unable to fetch some archives"):
-  # it resolves dependencies afresh against the image's package lists, and the cache is already the exact set to install.
-  if sudo dpkg --install "$cache"/*.deb; then
-    took "installed $(ls "$cache"/*.deb | wc -l) cached packages"
-    exit 0
-  fi
-  echo "::warning::browser deps: the cached packages don't install here; repairing and downloading instead" >&2
-  # A failed dpkg leaves packages unpacked but unconfigured, which the install-deps below cannot repair on its own: it names
-  # only the top-level packages, so apt would call the unconfigured ones' dependencies unmet.
-  sudo apt-get install -y --fix-broken --no-install-recommends || true
+result=0
+uv run --no-project --with playwright==1.64.0 python -m playwright install-deps --dry-run chromium webkit >"$log" || result=$?
+if [ "$result" -eq 0 ] && [ "$(cat "$log")" = 'All system dependencies are installed.' ]; then
+  echo "browser deps: already installed in $(( $(date +%s) - start )) s"
+  exit 0
 fi
-
-uv run --no-project --with playwright==1.64.0 python -m playwright install-deps chromium webkit
-mkdir -p "$cache"
-cp /var/cache/apt/archives/*.deb "$cache"/ 2>/dev/null || echo "browser deps: apt kept no packages to cache" >&2
-took "downloaded and installed, kept $(ls "$cache"/*.deb 2>/dev/null | wc -l) packages"
+[ "$result" -eq 1 ] || { cat "$log" >&2; exit 1; }
+# Parse data, never a shell command. Refuse changed installer output before invoking sudo.
+packages=$(awk '
+  NR == 1 && /^Missing system dependencies \([1-9][0-9]*\):$/ {
+    expected = $0; sub(/^.*\(/, "", expected); sub(/\):$/, "", expected); next
+  }
+  NR > 1 && /^  [a-z0-9][a-z0-9+.-]*(:[a-z0-9][a-z0-9-]*)?$/ {
+    sub(/^  /, ""); print; count++; next
+  }
+  { bad = 1 }
+  END { if (bad || !expected || count != expected) exit 1 }
+' "$log") || { cat "$log" >&2; exit 1; }
+mkdir -p "$cache/partial"
+sudo apt-get update
+# Word splitting is intentional: every package name has passed the grammar above.
+# shellcheck disable=SC2086
+sudo apt-get -o "Dir::Cache::archives=$cache" install -y --no-install-recommends $packages
+echo "browser deps: installed missing packages in $(( $(date +%s) - start )) s"

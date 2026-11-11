@@ -4430,7 +4430,7 @@ def colour_extension_journey(browser, link):
     expect(meta).to_have_attribute("content", "dark")
     page.evaluate(Path("workspace/acyclic-app/node_modules/darkreader/darkreader.js").read_text())
     for scheme in ("dark", "light"):
-        from_menu(page, lambda: page.get_by_test_id("theme").select_option(scheme))
+        from_menu(page, lambda scheme=scheme: page.get_by_test_id("theme").select_option(scheme))
         expect(meta).to_have_attribute("content", scheme)
         page.evaluate("DarkReader.enable({brightness: 100, contrast: 100, sepia: 0})")
         page.wait_for_function("document.documentElement.dataset.darkreaderMode === 'dynamic'")
@@ -4802,9 +4802,8 @@ def push_journey(context, page, env, origin, name, failures):
     )
 
 
-# Each shard builds its own tracker and server, so none waits on another: the desktop journeys and WebKit's desktop, the
-# phone journeys with the notifying browser and WebKit's phone, the two small ones, and the 3,500-item one, whose tracker
-# takes a third of its time to build.
+# Each shard owns its trackers and servers: desktop; phone edits, push and WebKit; small fixtures; and the large Map
+# followed by independent phone navigation. Navigation needs the same 350-item fixture, but none of the edit journey's state.
 SHARDS = ("desktop", "phone", "small", "large")
 
 
@@ -5299,6 +5298,22 @@ def shard_run(shard):
                         f"3,500 items: the page threw or logged errors: {errors}"
                     )
                 context.close()
+                # These scenarios own their navigation history and never save edits. Keep them off the phone edit
+                # chain, using the same fixture and motion settings, without starting another worker.
+                plan, link, _, _ = serve(350)
+                view = VIEWS["phone"]
+                context, page, origin, errors = open_app(
+                    chromium, view, link, failures, "phone"
+                )
+                try:
+                    to_map(page)
+                    initiative_framing_journey(page, view, plan, "phone", failures)
+                    deep_link_journey(context, origin, view, plan, "phone", failures)
+                    history_journey(context, origin, view, plan, "phone", failures)
+                    if errors:
+                        failures.append(f"phone navigation: the page threw or logged errors: {errors}")
+                finally:
+                    context.close()
                 chromium.close()
             else:
                 plan, link, env, remote = serve(350)
@@ -5328,14 +5343,21 @@ def shard_run(shard):
                     overview_journey(page, view, name, failures)
                     to_map(page)
                     # Both sizes lay the plan out alike, so a box one finds the layout moves, the next tries first.
-                    initiative_framing_journey(page, view, plan, name, failures)
                     if name == "desktop":
+                        initiative_framing_journey(page, view, plan, name, failures)
                         sidebar_preview_journey(context, origin, plan)
+                    else:
+                        # Framing used to leave this fresh Map for the gesture checks that follow.
+                        page.goto(f"{origin}/?view=map&initiative={plan.initiative}")
+                        to_map(page)
+                        wait_drawn(page, len(plan.default()))
+                        settled_map(page)
                     hint = map_journey(page, view, plan, name, failures, hint)
                     outline_journey(page, view, env, plan, name, failures)
                     threads_journey(page, view, env, plan, name, failures)
-                    deep_link_journey(context, origin, view, plan, name, failures)
-                    history_journey(context, origin, view, plan, name, failures)
+                    if name == "desktop":
+                        deep_link_journey(context, origin, view, plan, name, failures)
+                        history_journey(context, origin, view, plan, name, failures)
                     command_journey(page, view, origin, plan, name, failures)
                     if name == "desktop":
                         cross_origin_journey(context, origin, env, name, failures)

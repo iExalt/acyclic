@@ -32,6 +32,7 @@ run = [
   '"$(mise where github:nextest-rs/nextest)/cargo-nextest" nextest run --workspace --lib --bins --locked --no-tests=pass',
   "sh scripts/check-doc-fences.sh",
   "sh scripts/pre-push-test.sh",
+  "python scripts/test_browser_deps.py",
   "rumdl check .",
   "actionlint",
 ]
