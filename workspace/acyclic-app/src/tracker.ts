@@ -158,7 +158,9 @@ function isItem(one: unknown): boolean {
     orNull(one.notes) &&
     orNull(one.initiative) &&
     isList(one.links.waits_for, isString) &&
-    isList(one.links.waited_on_by, isString)
+    isList(one.links.waited_on_by, isString) &&
+    // The Map and the Inspector read a progress's counts whenever it has one.
+    (one.progress === undefined || (isObject(one.progress) && isObject(one.progress.counts)))
   );
 }
 
