@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { addCommand } from "./edits";
 import type { Intent } from "./nav";
-import { createTracker, type Notice, type Ports, UNDO_KEY, UNDOING } from "./tracker";
+import { createTracker, type Notice, PLAN_KEY, type Ports, UNDO_KEY, UNDOING } from "./tracker";
 
-type Fault = "redundant-dependency" | "busy" | "self-link" | "changed-since" | "lost" | "lost-applied" | "500";
+type Fault =
+  | "redundant-dependency"
+  | "busy"
+  | "self-link"
+  | "changed-since"
+  | "lost"
+  | "lost-applied"
+  | "500"
+  | "wrong-identity";
 
 /** A command's name, as the server's tests name it: `needs`, `item list`, `item edit`. */
 function nameOf(body: unknown): string {
@@ -54,7 +62,13 @@ function server(titles: Record<string, string> = { a: "A" }) {
       throw new TypeError("Failed to fetch");
     }
     if (fault === "500") return new Response("oops", { status: 500 });
-    if (fault === "redundant-dependency" || fault === "busy" || fault === "self-link" || fault === "changed-since")
+    if (
+      fault === "redundant-dependency" ||
+      fault === "busy" ||
+      fault === "self-link" ||
+      fault === "changed-since" ||
+      fault === "wrong-identity"
+    )
       return new Response(JSON.stringify({ ok: false, error: { code: fault, message: fault, details: null } }));
     const conditions = (request as { expect?: { kind: string; item?: string; field?: string; value?: unknown }[] })
       .expect;
@@ -116,11 +130,12 @@ function memory(throws = false) {
 }
 
 /** A tracker over `backend`, with its moves of where the user is recorded. */
-function open(backend = server(), storage: Ports["storage"] = memory()) {
+function open(backend = server(), storage: Ports["storage"] = memory(), planStorage: Ports["planStorage"] = memory()) {
   const moves: Intent[] = [];
   const tracker = createTracker({
     fetcher: backend.fetcher,
     storage,
+    planStorage,
     nav: { go: (intent) => void moves.push(intent), item: () => null },
   });
   return { tracker, moves, backend };
@@ -385,4 +400,112 @@ it.each([false, true])("keeps confirmed link Undo across reload, busy retry: %s"
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+describe("a tracker's kept plan", () => {
+  it("keeps the plan once a read is shown, and shows it at the next start as stale, read-only, until a read lands", async () => {
+    const plans = memory();
+    const first = open(server({ a: "A" }), memory(), plans);
+    expect(first.tracker.snapshot()).toMatchObject({ load: { state: "loading" }, stale: false });
+    await first.tracker.refresh();
+    expect(plans.kept.has(PLAN_KEY)).toBe(true);
+    expect(JSON.parse(plans.kept.get(PLAN_KEY) ?? "").plan).not.toHaveProperty("unread");
+
+    const backend = server({ a: "B" });
+    const again = open(backend, memory(), plans);
+    const { load, stale, reads } = again.tracker.snapshot();
+    expect(stale).toBe(true);
+    expect(reads).toBe(0);
+    expect(load).toMatchObject({ state: "loaded", items: [{ id: "a", title: "A" }] });
+    expect(await again.tracker.send(rename("a", "Z"), { select: null, pin: null })).toBe(false);
+    expect(backend.writes).toEqual([]);
+
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot()).toMatchObject({ stale: false, reads: 1, load: { items: [{ title: "B" }] } });
+    expect(JSON.parse(plans.kept.get(PLAN_KEY) ?? "").plan.items[0].title).toBe("B");
+  });
+
+  it("stays shown and read-only, offering a refresh, when the first read fails", async () => {
+    const plans = memory();
+    await open(server(), memory(), plans).tracker.refresh();
+    const backend = server();
+    const again = open(backend, memory(), plans);
+    backend.fail("item list", "500");
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot()).toMatchObject({
+      load: { state: "loaded" },
+      stale: true,
+      notice: { offer: "refresh" },
+    });
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot()).toMatchObject({ stale: false, reads: 2 });
+  });
+
+  it("is dropped, and not shown, when the server says it isn't serving this user", async () => {
+    const plans = memory();
+    await open(server(), memory(), plans).tracker.refresh();
+    const backend = server();
+    const again = open(backend, memory(), plans);
+    backend.fail("item list", "wrong-identity");
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot()).toMatchObject({ load: { state: "failed", code: "wrong-identity" }, stale: false });
+    expect(plans.kept.has(PLAN_KEY)).toBe(false);
+  });
+
+  it("is ignored whole when an item, or the schema, is not what this build draws", async () => {
+    const plans = memory();
+    await open(server(), memory(), plans).tracker.refresh();
+    const kept = JSON.parse(plans.kept.get(PLAN_KEY) ?? "");
+    const old = structuredClone(kept);
+    delete old.plan.items[0].links;
+    plans.kept.set(PLAN_KEY, JSON.stringify(old));
+    expect(open(server(), memory(), plans).tracker.snapshot()).toMatchObject({ load: { state: "loading" } });
+    plans.kept.set(PLAN_KEY, JSON.stringify({ ...kept, v: kept.v + 1 }));
+    expect(open(server(), memory(), plans).tracker.snapshot()).toMatchObject({ load: { state: "loading" } });
+    plans.kept.set(PLAN_KEY, JSON.stringify(kept));
+    expect(open(server(), memory(), plans).tracker.snapshot()).toMatchObject({ load: { state: "loaded" } });
+  });
+
+  it("starts the read again when the offer to refresh it is dismissed, so the plan isn't left read-only", async () => {
+    const plans = memory();
+    await open(server(), memory(), plans).tracker.refresh();
+    const backend = server();
+    const again = open(backend, memory(), plans);
+    backend.fail("item list", "500");
+    await again.tracker.refresh();
+    again.tracker.dismiss();
+    await vi.waitFor(() => expect(again.tracker.snapshot()).toMatchObject({ stale: false, notice: null }));
+  });
+
+  it("keeps a restored Undo over a first read that fails, and offers it once a later read confirms it", async () => {
+    const storage = memory();
+    const plans = memory();
+    const first = open(server(), storage);
+    await first.tracker.refresh();
+    await first.tracker.send(rename("a", "B"), { select: "a", pin: null, undo: true });
+    await open(server({ a: "B" }), memory(), plans).tracker.refresh();
+    const backend = server({ a: "B" });
+    const again = open(backend, storage, plans);
+    backend.fail("item list", "500");
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot().notice?.offer).toBe("refresh");
+    expect(storage.kept.has(UNDO_KEY)).toBe(true);
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot().notice).toMatchObject({ offer: "undo", text: "Edited B" });
+    expect(again.tracker.snapshot().notice?.restored).toBeUndefined();
+  });
+
+  it.each([
+    ["unparseable", "{"],
+    ["of another shape", JSON.stringify({ items: "no" })],
+    ["empty", "null"],
+  ])("is ignored when %s, and when storage throws", async (_, raw) => {
+    const plans = memory();
+    plans.kept.set(PLAN_KEY, raw);
+    expect(open(server(), memory(), plans).tracker.snapshot()).toMatchObject({
+      load: { state: "loading" },
+      stale: false,
+    });
+    expect(open(server(), memory(), memory(true)).tracker.snapshot().load.state).toBe("loading");
+  });
 });

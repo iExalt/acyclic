@@ -722,11 +722,14 @@ MAP_SNAPS = """() => {
 
 
 @timed
-def open_app(browser, view, link, failures, name, glide=False):
+def open_app(browser, view, link, failures, name, glide=False, kept_plan=False):
     """Opens the app. The Map's tiles snap to their places, so a journey reads where they are without waiting out a
-    glide; `glide` leaves them gliding, for the journeys that are about that."""
+    glide; `glide` leaves them gliding, for the journeys that are about that. The browser forgets the plan it kept at
+    each load, so a journey that changes the plan from outside never acts on a stale one; `kept_plan` keeps it."""
     origin = "{0.scheme}://{0.netloc}".format(urlsplit(link))
     context = browser.new_context(**view)
+    if not kept_plan:
+        context.add_init_script("try { localStorage.removeItem('acyclic.plan'); } catch {}")
     if not glide:
         context.add_init_script(f"({MAP_SNAPS})()")
     page = context.new_page()
@@ -4863,6 +4866,35 @@ def server_origin(server):
 
 
 @timed
+def kept_plan_journey(browser, link, failures):
+    """A tab that has loaded the plan before shows it at once on the next load, read-only and saying it is updating,
+    until the fresh read lands."""
+    context, page, _, errors = open_app(browser, VIEWS["phone"], link, failures, "kept plan", kept_plan=True)
+    try:
+        held = []
+        page.route("**/api/command", lambda route: held.append(route))
+        page.reload()
+        page.locator(".shell").wait_for(timeout=10_000)
+        page.get_by_text("Updating the plan…").wait_for(timeout=5_000)
+        page.locator("main.stage[data-busy=true]").wait_for(timeout=5_000)
+        # Routes are delivered asynchronously: the read is out once the first one arrives.
+        deadline = time.monotonic() + 5
+        while not held and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
+        if not held:
+            failures.append("kept plan: the plan was shown before any read was sent")
+        page.unroute("**/api/command")
+        for route in held:
+            route.continue_()
+        page.locator("main.stage[data-busy=false]").wait_for(timeout=10_000)
+        page.get_by_text("Updating the plan…").wait_for(state="detached", timeout=5_000)
+        if errors:
+            failures.append(f"kept plan: logged unexpected errors: {errors}")
+    finally:
+        context.close()
+
+
+@timed
 def labels_journey(browser, link, ids, titles):
     """Measured labels fit their nodes; a failed font settles on the face that was measured."""
     origin = link.rstrip("/")
@@ -5232,6 +5264,7 @@ def shard_run(shard):
                             failures.append(f"{deletion_name}: deletion logged unexpected errors: {errors}")
                     finally:
                         context.close()
+                kept_plan_journey(chromium, deletion_link, failures)
                 label_link, label_ids, label_titles = serve_labels()
                 labels_journey(chromium, label_link, label_ids, label_titles)
                 # Only these two roots share the packing, so a shrink can be measured without other roots obscuring it.

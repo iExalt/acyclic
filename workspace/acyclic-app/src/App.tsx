@@ -138,6 +138,15 @@ function storageOrNull(): Storage | null {
   }
 }
 
+/** The device's storage, where the last plan is kept over the app's closing, or null where the browser blocks it. */
+function planStorageOrNull(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 /** Whether a form holds what the user typed, which nothing closes unasked. */
 const dirtyForm = () => document.querySelector("form[data-dirty='true']") !== null;
 
@@ -211,10 +220,21 @@ export function App() {
     createTracker({
       fetcher: (input, init) => fetch(input, init),
       storage: storageOrNull(),
+      planStorage: planStorageOrNull(),
       nav: { go: (intent) => goNow.current(intent), item: () => placeNow.current.item },
     }),
   );
-  const { load, notice, busy, pending, version, reads } = useSyncExternalStore(tracker.subscribe, tracker.snapshot);
+  const {
+    load,
+    notice,
+    busy: writing,
+    stale,
+    pending,
+    version,
+    reads,
+  } = useSyncExternalStore(tracker.subscribe, tracker.snapshot);
+  // The plan kept from before holds writes back as one still out does.
+  const busy = writing || stale;
   const { refresh, send, tell } = tracker;
   /**
    * An address to open: the one the app was opened at, one a notification sent the app already open, or the place a
@@ -600,7 +620,8 @@ export function App() {
   // waits, said so, until the form is saved or cancelled.
   const wantedOpens = useRef<(link: Opening) => void>(() => undefined);
   wantedOpens.current = (link) => {
-    if (model === null) return;
+    // Not against the plan kept from before, which may lack what the link names.
+    if (model === null || stale) return;
     const name =
       link.item !== null
         ? (model.items.get(link.item)?.title ?? link.item)
@@ -675,7 +696,7 @@ export function App() {
   // Tried again as the plan loads and as each form closes.
   useEffect(() => {
     if (wanted !== null) wantedOpens.current(wanted);
-  }, [wanted, model, formsClosed]);
+  }, [wanted, model, stale, formsClosed]);
 
   /**
    * Copies the address of what `link` names, or, where there's no clipboard (a plain-http address away from this
@@ -862,13 +883,7 @@ export function App() {
           </button>
         ) : null}
         {notice.offer === "refresh" ? (
-          <button
-            type="button"
-            onClick={() => {
-              tracker.dismiss();
-              refresh();
-            }}
-          >
+          <button type="button" onClick={() => refresh()}>
             Refresh
           </button>
         ) : null}
@@ -982,6 +997,11 @@ export function App() {
       </p>
       {/* The plan reads shown, for browser journeys to know a refresh has landed. */}
       <main ref={noticeStage} className="stage" data-busy={busy} aria-busy={busy} data-reads={reads}>
+        {stale && notice?.offer !== "refresh" ? (
+          <p className="status updating" role="status">
+            Updating the plan…
+          </p>
+        ) : null}
         <Suspense
           fallback={
             <p className="status" role="status">
