@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { addCommand } from "./edits";
 import type { Intent } from "./nav";
-import { createTracker, type Notice, type Ports, UNDO_KEY, UNDOING } from "./tracker";
+import { createTracker, type Notice, PLAN_KEY, type Ports, UNDO_KEY, UNDOING } from "./tracker";
 
 type Fault = "redundant-dependency" | "busy" | "self-link" | "changed-since" | "lost" | "lost-applied" | "500";
 
@@ -385,4 +385,55 @@ it.each([false, true])("keeps confirmed link Undo across reload, busy retry: %s"
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+describe("a tracker's kept plan", () => {
+  it("keeps the plan once a read is shown, and shows it at the next start as stale, read-only, until a read lands", async () => {
+    const storage = memory();
+    const first = open(server({ a: "A" }), storage);
+    expect(first.tracker.snapshot()).toMatchObject({ load: { state: "loading" }, stale: false });
+    await first.tracker.refresh();
+    expect(storage.kept.has(PLAN_KEY)).toBe(true);
+    expect(JSON.parse(storage.kept.get(PLAN_KEY) ?? "")).not.toHaveProperty("unread");
+
+    const backend = server({ a: "B" });
+    const again = open(backend, storage);
+    const { load, stale, reads } = again.tracker.snapshot();
+    expect(stale).toBe(true);
+    expect(reads).toBe(0);
+    expect(load).toMatchObject({ state: "loaded", items: [{ id: "a", title: "A" }] });
+    expect(await again.tracker.send(rename("a", "Z"), { select: null, pin: null })).toBe(false);
+    expect(backend.writes).toEqual([]);
+
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot()).toMatchObject({ stale: false, reads: 1, load: { items: [{ title: "B" }] } });
+    expect(JSON.parse(storage.kept.get(PLAN_KEY) ?? "").items[0].title).toBe("B");
+  });
+
+  it("stays shown and read-only, offering a refresh, when the first read fails", async () => {
+    const storage = memory();
+    await open(server(), storage).tracker.refresh();
+    const backend = server();
+    const again = open(backend, storage);
+    backend.fail("item list", "500");
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot()).toMatchObject({
+      load: { state: "loaded" },
+      stale: true,
+      notice: { offer: "refresh" },
+    });
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot()).toMatchObject({ stale: false, reads: 2 });
+  });
+
+  it.each([
+    ["unparseable", "{"],
+    ["of another shape", JSON.stringify({ items: "no" })],
+    ["empty", "null"],
+  ])("is ignored when %s, and when storage throws", async (_, raw) => {
+    const storage = memory();
+    storage.kept.set(PLAN_KEY, raw);
+    expect(open(server(), storage).tracker.snapshot()).toMatchObject({ load: { state: "loading" }, stale: false });
+    expect(open(server(), memory(true)).tracker.snapshot().load.state).toBe("loading");
+  });
 });

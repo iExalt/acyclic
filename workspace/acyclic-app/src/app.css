@@ -1555,6 +1555,16 @@ code {
   padding: 16px;
   color: var(--muted);
 }
+/* Said over the Map's corner while the plan kept from before is replaced. */
+.status.updating {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 12px;
+  pointer-events: none;
+}
 /* Over the Map until it is first drawn. */
 .map-status {
   position: absolute;

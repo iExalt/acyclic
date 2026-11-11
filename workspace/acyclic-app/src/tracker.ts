@@ -76,6 +76,9 @@ export const UNDOING: Notice = { text: "Undoing…", offer: null, retry: null, l
 /** Where the Undo on offer is kept in this tab over a reload. */
 export const UNDO_KEY = "acyclic.undo";
 
+/** Where the last plan shown is kept in this tab, so the next start has one to show while the first read is out. */
+export const PLAN_KEY = "acyclic.plan.v1";
+
 export interface Ports {
   fetcher: Fetch;
   /** The tab's storage, or null where there is none. Any call may throw, as a full or blocked one does. */
@@ -92,6 +95,8 @@ export interface Snapshot {
   notice: Notice | null;
   /** A write is out: what sends one is held. */
   busy: boolean;
+  /** The plan shown is the one kept from before, until the first read of this start lands: read-only, as `busy` is. */
+  stale: boolean;
   /** A write drawn before the server answers, until the plan read after it holds it. */
   pending: Pending | null;
   /** The latest read shown, as the server had it: what an undo's guard is checked against. */
@@ -136,10 +141,12 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
   /** Set from a write's start to its end, so a second can't start before a render disables what sends it. */
   let sending = false;
   let undoing = false;
+  const cached = cachedPlan();
   let snap: Snapshot = {
-    load: { state: "loading" },
+    load: cached ?? { state: "loading" },
     notice: restore(),
     busy: false,
+    stale: cached !== null,
     pending: null,
     plan: null,
     reads: 0,
@@ -147,6 +154,22 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
   };
   /** The Undo stored, written once each rather than as the notice moves with the user, as a large plan is slow. */
   let kept = snap.notice?.kept;
+
+  /** The plan the last start showed, or null when there is none, or it can't be read as this version's. */
+  function cachedPlan(): Extract<Load, { state: "loaded" }> | null {
+    try {
+      const raw = storage?.getItem(PLAN_KEY) ?? null;
+      const was = raw === null ? null : JSON.parse(raw);
+      if (typeof was !== "object" || was === null || was.items === undefined) return null;
+      const { items, threads, needs, initiatives, noInitiative } = was;
+      if (!Array.isArray(items) || !Array.isArray(needs) || !Array.isArray(initiatives) || !Array.isArray(noInitiative))
+        return null;
+      if (typeof threads !== "object" || threads === null || !Array.isArray(threads.threads)) return null;
+      return { state: "loaded", items, threads, needs, initiatives, noInitiative, unread: [] };
+    } catch {
+      return null;
+    }
+  }
 
   /** The Undo a reload left on offer in this tab, offered again once a read says it still holds; or none. */
   function restore(): Notice | null {
@@ -213,8 +236,15 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
     };
   }
   /** Shows a read: the plan, and the latest read the server gave. */
-  const shown = (next: Extract<Load, { state: "loaded" }>) =>
-    set({ load: next, plan: planOf(next.items), reads: reads.shown });
+  const shown = (next: Extract<Load, { state: "loaded" }>) => {
+    set({ load: next, plan: planOf(next.items), reads: reads.shown, stale: false });
+    const { unread: _, ...plan } = next;
+    try {
+      storage?.setItem(PLAN_KEY, JSON.stringify(plan));
+    } catch {
+      // Too big for the tab's storage, or none: the next start shows nothing until its first read, as without it.
+    }
+  };
 
   async function refresh() {
     bump();
@@ -223,8 +253,8 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
       next = await fetchAll();
     } catch (err: unknown) {
       const { code, message } = failure(err);
-      // Only a first read leaves nothing to show; a later one keeps the plan, out of date, and offers another.
-      if (reads.shown === 0) set({ load: { state: "failed", code, message } });
+      // Only a first read leaves nothing to show; a later one, or one after the kept plan, keeps it, out of date.
+      if (reads.shown === 0 && !snap.stale) set({ load: { state: "failed", code, message } });
       else tell({ text: `Couldn't refresh: ${message}`, offer: "refresh", retry: null, lasts: "stale", at: null });
       return;
     }
@@ -249,7 +279,8 @@ export function createTracker({ fetcher, storage, nav }: Ports): Tracker {
     previouslyObserved?: readonly string[],
   ): Promise<boolean> {
     // Any write sent while one is out was made through a control the busy state forgot to hold: dropped.
-    if (sending) return false;
+    // The kept plan is read-only until a read of this start replaces it.
+    if (sending || snap.stale) return false;
     sending = true;
     set({ busy: true });
     tell(after.undone === undefined ? noticeAfter(snap.notice, { kind: "write" }) : UNDOING);
