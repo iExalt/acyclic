@@ -409,7 +409,7 @@ describe("a tracker's kept plan", () => {
     expect(first.tracker.snapshot()).toMatchObject({ load: { state: "loading" }, stale: false });
     await first.tracker.refresh();
     expect(plans.kept.has(PLAN_KEY)).toBe(true);
-    expect(JSON.parse(plans.kept.get(PLAN_KEY) ?? "")).not.toHaveProperty("unread");
+    expect(JSON.parse(plans.kept.get(PLAN_KEY) ?? "").plan).not.toHaveProperty("unread");
 
     const backend = server({ a: "B" });
     const again = open(backend, memory(), plans);
@@ -422,7 +422,7 @@ describe("a tracker's kept plan", () => {
 
     await again.tracker.refresh();
     expect(again.tracker.snapshot()).toMatchObject({ stale: false, reads: 1, load: { items: [{ title: "B" }] } });
-    expect(JSON.parse(plans.kept.get(PLAN_KEY) ?? "").items[0].title).toBe("B");
+    expect(JSON.parse(plans.kept.get(PLAN_KEY) ?? "").plan.items[0].title).toBe("B");
   });
 
   it("stays shown and read-only, offering a refresh, when the first read fails", async () => {
@@ -450,6 +450,49 @@ describe("a tracker's kept plan", () => {
     await again.tracker.refresh();
     expect(again.tracker.snapshot()).toMatchObject({ load: { state: "failed", code: "wrong-identity" }, stale: false });
     expect(plans.kept.has(PLAN_KEY)).toBe(false);
+  });
+
+  it("is ignored whole when an item, or the schema, is not what this build draws", async () => {
+    const plans = memory();
+    await open(server(), memory(), plans).tracker.refresh();
+    const kept = JSON.parse(plans.kept.get(PLAN_KEY) ?? "");
+    const old = structuredClone(kept);
+    delete old.plan.items[0].links;
+    plans.kept.set(PLAN_KEY, JSON.stringify(old));
+    expect(open(server(), memory(), plans).tracker.snapshot()).toMatchObject({ load: { state: "loading" } });
+    plans.kept.set(PLAN_KEY, JSON.stringify({ ...kept, v: kept.v + 1 }));
+    expect(open(server(), memory(), plans).tracker.snapshot()).toMatchObject({ load: { state: "loading" } });
+    plans.kept.set(PLAN_KEY, JSON.stringify(kept));
+    expect(open(server(), memory(), plans).tracker.snapshot()).toMatchObject({ load: { state: "loaded" } });
+  });
+
+  it("starts the read again when the offer to refresh it is dismissed, so the plan isn't left read-only", async () => {
+    const plans = memory();
+    await open(server(), memory(), plans).tracker.refresh();
+    const backend = server();
+    const again = open(backend, memory(), plans);
+    backend.fail("item list", "500");
+    await again.tracker.refresh();
+    again.tracker.dismiss();
+    await vi.waitFor(() => expect(again.tracker.snapshot()).toMatchObject({ stale: false, notice: null }));
+  });
+
+  it("keeps a restored Undo over a first read that fails, and offers it once a later read confirms it", async () => {
+    const storage = memory();
+    const plans = memory();
+    const first = open(server(), storage);
+    await first.tracker.refresh();
+    await first.tracker.send(rename("a", "B"), { select: "a", pin: null, undo: true });
+    await open(server({ a: "B" }), memory(), plans).tracker.refresh();
+    const backend = server({ a: "B" });
+    const again = open(backend, storage, plans);
+    backend.fail("item list", "500");
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot().notice?.offer).toBe("refresh");
+    expect(storage.kept.has(UNDO_KEY)).toBe(true);
+    await again.tracker.refresh();
+    expect(again.tracker.snapshot().notice).toMatchObject({ offer: "undo", text: "Edited B" });
+    expect(again.tracker.snapshot().notice?.restored).toBeUndefined();
   });
 
   it.each([

@@ -77,7 +77,10 @@ export const UNDOING: Notice = { text: "Undoing…", offer: null, retry: null, l
 export const UNDO_KEY = "acyclic.undo";
 
 /** Where the last plan shown is kept on this device, so the next start has one to show while the first read is out. */
-export const PLAN_KEY = "acyclic.plan.v1";
+export const PLAN_KEY = "acyclic.plan";
+
+/** The shape the plan is kept in: bumped whenever `Load`, or what any item or thread holds, changes. */
+export const PLAN_SCHEMA = 1;
 
 /** The server's refusals of a user it doesn't serve: whoever they are, the plan kept from before isn't theirs to see. */
 const NOT_THE_USER = ["no-identity", "wrong-identity"];
@@ -138,6 +141,33 @@ export interface Tracker {
   event(event: NoticeEvent): void;
 }
 
+const isObject = (one: unknown): one is Record<string, unknown> => typeof one === "object" && one !== null;
+const isString = (one: unknown): one is string => typeof one === "string";
+const isList = (one: unknown, each: (one: unknown) => boolean) => Array.isArray(one) && one.every(each);
+const orNull = (one: unknown) => one === null || isString(one);
+
+/** Whether a kept item has what drawing it reads unconditionally: one from an older build may not. */
+function isItem(one: unknown): boolean {
+  if (!isObject(one) || !isObject(one.links) || !isObject(one.conflicts)) return false;
+  return (
+    isString(one.id) &&
+    isString(one.title) &&
+    isString(one.state) &&
+    orNull(one.parent) &&
+    orNull(one.thread) &&
+    orNull(one.notes) &&
+    orNull(one.initiative) &&
+    isList(one.links.waits_for, isString) &&
+    isList(one.links.waited_on_by, isString)
+  );
+}
+
+function isThread(one: unknown): boolean {
+  return (
+    isObject(one) && isString(one.id) && isString(one.title) && isList(one.waitsFor, isString) && isObject(one.counts)
+  );
+}
+
 const planOf = (found: Item[]): Plan => ({ items: new Map(found.map((one) => [one.id, one])) });
 
 export function createTracker({ fetcher, storage, planStorage, nav }: Ports): Tracker {
@@ -157,20 +187,35 @@ export function createTracker({ fetcher, storage, planStorage, nav }: Ports): Tr
     reads: 0,
     version: 0,
   };
+  /** A restored Undo a failed read put aside, until a read says whether it still holds. */
+  let shelved: Notice | null = null;
   /** The Undo stored, written once each rather than as the notice moves with the user, as a large plan is slow. */
   let kept = snap.notice?.kept;
 
-  /** The plan the last start showed, or null when there is none, or it can't be read as this version's. */
+  /** The plan the last start showed, or null when there is none, or it isn't whole and of this schema. */
   function cachedPlan(): Extract<Load, { state: "loaded" }> | null {
     try {
       const raw = planStorage?.getItem(PLAN_KEY) ?? null;
       const was = raw === null ? null : JSON.parse(raw);
-      if (typeof was !== "object" || was === null || was.items === undefined) return null;
-      const { items, threads, needs, initiatives, noInitiative } = was;
-      if (!Array.isArray(items) || !Array.isArray(needs) || !Array.isArray(initiatives) || !Array.isArray(noInitiative))
-        return null;
-      if (typeof threads !== "object" || threads === null || !Array.isArray(threads.threads)) return null;
-      return { state: "loaded", items, threads, needs, initiatives, noInitiative, unread: [] };
+      if (!isObject(was) || was.v !== PLAN_SCHEMA || !isObject(was.plan)) return null;
+      const { items, threads, needs, initiatives, noInitiative } = was.plan;
+      if (!isObject(threads) || !Array.isArray(threads.threads)) return null;
+      const whole =
+        Array.isArray(items) &&
+        items.every(isItem) &&
+        threads.threads.every(isThread) &&
+        isList(threads.waves, Array.isArray) &&
+        isList(threads.anytime, isString) &&
+        isList(needs, (one) => isObject(one) && isString(one.kind)) &&
+        isList(initiatives, (one) => isObject(one) && isString(one.id) && isString(one.title)) &&
+        isList(noInitiative, isString);
+      if (!whole) return null;
+      // Checked as far as drawing reads them above.
+      return {
+        state: "loaded",
+        unread: [],
+        ...(was.plan as Omit<Extract<Load, { state: "loaded" }>, "state" | "unread">),
+      };
     } catch {
       return null;
     }
@@ -192,6 +237,8 @@ export function createTracker({ fetcher, storage, planStorage, nav }: Ports): Tr
   // Kept while it is on offer, and dropped once anything else takes its place; "Undoing…" passes it on to what follows.
   function persist(notice: Notice | null) {
     const next = notice?.kept;
+    // A restored one put aside by a read that failed is offered again once a read confirms it.
+    if (next === undefined && shelved !== null && notice?.offer === "refresh") return;
     if (next === kept || (next === undefined && notice === UNDOING)) return;
     kept = next;
     try {
@@ -256,7 +303,7 @@ export function createTracker({ fetcher, storage, planStorage, nav }: Ports): Tr
     set({ load: next, plan: planOf(next.items), reads: reads.shown, stale: false });
     const { unread: _, ...plan } = next;
     try {
-      planStorage?.setItem(PLAN_KEY, JSON.stringify(plan));
+      planStorage?.setItem(PLAN_KEY, JSON.stringify({ v: PLAN_SCHEMA, plan }));
     } catch {
       // Too big for the tab's storage, or none: the next start shows nothing until its first read, as without it.
     }
@@ -272,12 +319,17 @@ export function createTracker({ fetcher, storage, planStorage, nav }: Ports): Tr
       // Only a first read leaves nothing to show; a later one, or one after the kept plan, keeps it, out of date.
       if (NOT_THE_USER.includes(code)) set({ load: { state: "failed", code, message }, stale: false, plan: null });
       else if (reads.shown === 0 && !snap.stale) set({ load: { state: "failed", code, message } });
-      else tell({ text: `Couldn't refresh: ${message}`, offer: "refresh", retry: null, lasts: "stale", at: null });
+      else {
+        if (snap.notice?.restored === true) shelved = snap.notice;
+        tell({ text: `Couldn't refresh: ${message}`, offer: "refresh", retry: null, lasts: "stale", at: null });
+      }
       return;
     }
     if (next === null) return;
     shown(next);
-    const now = noticeAfter(snap.notice, { kind: "read" });
+    const put = shelved !== null && snap.notice?.offer === "refresh" ? shelved : snap.notice;
+    shelved = null;
+    const now = noticeAfter(put, { kind: "read" });
     if (now?.restored !== true) tell(now);
     else {
       // A tab brought back hours later offers an Undo only while it can still take its write back.
@@ -469,7 +521,12 @@ export function createTracker({ fetcher, storage, planStorage, nav }: Ports): Tr
     },
     undo,
     tell,
-    dismiss: () => tell(null),
+    // Nothing to act on while the plan kept is the one shown, so dismissing the offer to refresh it makes the read.
+    dismiss() {
+      const offered = snap.notice?.offer === "refresh";
+      tell(null);
+      if (offered && snap.stale) void refresh();
+    },
     event: (event) => tell(noticeAfter(snap.notice, event)),
   };
 }

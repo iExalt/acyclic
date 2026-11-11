@@ -729,7 +729,7 @@ def open_app(browser, view, link, failures, name, glide=False, kept_plan=False):
     origin = "{0.scheme}://{0.netloc}".format(urlsplit(link))
     context = browser.new_context(**view)
     if not kept_plan:
-        context.add_init_script("try { localStorage.removeItem('acyclic.plan.v1'); } catch {}")
+        context.add_init_script("try { localStorage.removeItem('acyclic.plan'); } catch {}")
     if not glide:
         context.add_init_script(f"({MAP_SNAPS})()")
     page = context.new_page()
@@ -4877,6 +4877,10 @@ def kept_plan_journey(browser, link, failures):
         page.locator(".shell").wait_for(timeout=10_000)
         page.get_by_text("Updating the plan…").wait_for(timeout=5_000)
         page.locator("main.stage[data-busy=true]").wait_for(timeout=5_000)
+        # Routes are delivered asynchronously: the read is out once the first one arrives.
+        deadline = time.monotonic() + 5
+        while not held and time.monotonic() < deadline:
+            page.wait_for_timeout(50)
         if not held:
             failures.append("kept plan: the plan was shown before any read was sent")
         page.unroute("**/api/command")

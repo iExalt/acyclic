@@ -883,13 +883,7 @@ export function App() {
           </button>
         ) : null}
         {notice.offer === "refresh" ? (
-          <button
-            type="button"
-            onClick={() => {
-              tracker.dismiss();
-              refresh();
-            }}
-          >
+          <button type="button" onClick={() => refresh()}>
             Refresh
           </button>
         ) : null}
