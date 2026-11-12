@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.13.0](https://github.com/iExalt/acyclic/compare/v0.12.0...v0.13.0) (2026-11-12)
+
+
+### Features
+
+* **app:** show the last plan at once while a fresh one loads ([#278](https://github.com/iExalt/acyclic/issues/278)) ([1b6e734](https://github.com/iExalt/acyclic/commit/1b6e734d7d1b9cd4a9e4ef0a7a72b8f9daa542f8))
+
+
+### Bug Fixes
+
+* **app:** never draw implied links on the Map ([#281](https://github.com/iExalt/acyclic/issues/281)) ([e718ca0](https://github.com/iExalt/acyclic/commit/e718ca023afb578963cc1049796bc6855903168d))
+
+
+### Performance Improvements
+
+* balance browser journeys and narrow dependency installs ([#280](https://github.com/iExalt/acyclic/issues/280)) ([d7c9a1d](https://github.com/iExalt/acyclic/commit/d7c9a1d8979d10250bdbda83ee64a4f8db6b6700))
+
 ## [0.12.0](https://github.com/iExalt/acyclic/compare/v0.11.0...v0.12.0) (2026-11-10)
 
 
