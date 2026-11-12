@@ -37,7 +37,7 @@ describe("scene", () => {
     ]);
   });
 
-  it("draws a link another way implies only for its ends or its thread, and a routed link along its route", () => {
+  it("never draws a link another way implies, and draws a routed link along its route", () => {
     const chain = buildModel([
       item("top"),
       item("a", "top", [], { thread: "t" }),
@@ -66,13 +66,12 @@ describe("scene", () => {
       ["a->b", "0.5"],
       ["b->d", null],
     ]);
-    const picked = scene(open, routed, { item: "d", thread: "u" }, thread);
-    expect(picked.edges.find((edge) => edge.id === "a->d")).toMatchObject({
-      implied: true,
-      crossing: false,
-      route: null,
-    });
-    expect(scene(open, routed, { item: null, thread: "t" }, thread).edges.map((edge) => edge.id)).toContain("a->d");
+    // Not for its selected end, its hovered end, or the lit thread it joins.
+    expect(scene(open, routed, { item: "d", thread: "u" }, thread).edges.map((edge) => edge.id)).not.toContain("a->d");
+    expect(
+      scene(open, routed, { item: null, thread: null, hovered: "a" }, thread).edges.map((e) => e.id),
+    ).not.toContain("a->d");
+    expect(scene(open, routed, { item: null, thread: "t" }, thread).edges.map((edge) => edge.id)).not.toContain("a->d");
   });
 
   it("draws the lit thread's links as its route, across boxes too", () => {
