@@ -63,11 +63,6 @@ export interface SceneEdge {
   target: string;
   /** An edge that crosses boxes, drawn only because its end is selected or it joins the lit thread. */
   crossing: boolean;
-  /**
-   * A link inside one box that a longer way through items in the box already implies, drawn, straight, only for the
-   * same reasons as one that crosses boxes.
-   */
-  implied: boolean;
   /** Its way around the box's other nodes, as the layout routed it; null to draw it straight. */
   route: Segments | null;
   /** Joins two of the lit thread's nodes, so the thread reads as a route in its line's colour. */
@@ -195,13 +190,14 @@ export function scene(
   for (const edge of view.edges) {
     const id = `${edge.source}->${edge.target}`;
     const crossing = !within(edge);
-    const implied = !crossing && placed.redundant.has(id);
+    // A link a longer way through items in its box already implies is never drawn, not even for the selection: the
+    // way already shows the order, and the link, drawn straight, would cut across the items between.
+    if (!crossing && placed.redundant.has(id)) continue;
     const touches = selection.item !== null && (edge.source === selection.item || edge.target === selection.item);
     const joins = lit.has(edge.source) && lit.has(edge.target);
-    // Not one a drawn way already implies: drawn straight, it would cut across the items between.
-    const shows = hovered !== null && !implied && (edge.source === hovered || edge.target === hovered);
-    if ((crossing || implied) && !touches && !joins && !shows) continue;
-    const way = crossing || implied ? undefined : placed.routes.get(id);
+    const shows = hovered !== null && (edge.source === hovered || edge.target === hovered);
+    if (crossing && !touches && !joins && !shows) continue;
+    const way = crossing ? undefined : placed.routes.get(id);
     const source = centre.get(edge.source);
     const target = centre.get(edge.target);
     edges.push({
@@ -209,7 +205,6 @@ export function scene(
       source: edge.source,
       target: edge.target,
       crossing,
-      implied,
       route: way === undefined || source === undefined || target === undefined ? null : segmentsOf(way, source, target),
       lit: joins,
       hovered: shows,

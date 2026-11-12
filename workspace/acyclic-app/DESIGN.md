@@ -414,9 +414,8 @@ before what went wrong.
 - **A join sits between what it waits on.** Inside a box, an item waiting on two sits centred under them, each pulling
   it equally (the balanced placement), not under whichever came first.
 - **Hover shows an item's links**, as hovering a tile on the Threads view does: its own, in ink, across boxes too;
-  other links and tiles keep their usual appearance. A folded box shows its items' links; the links a drawn way
-  already implies stay out, since drawn straight they would cut across items. Touch has no hover; a tap selects, which
-  shows them all.
+  other links and tiles keep their usual appearance. A folded box shows its items' links. Touch has no hover; a tap
+  selects, which shows them all.
 - **Unlinked comes first.** Items with no link inside their box (the glossary's Unlinked; Any time is the Threads
   view's word, for threads) stand in columns on its left, before its graph. A dashed
   line, in the links' colour, runs down between the columns and the graph, so where one ends and the other starts reads
@@ -448,9 +447,12 @@ before what went wrong.
   any others packs them again; a chevron fold still holds their places. Undo restores the earlier source's packing.
 - **A press leaves no mark.** Cytoscape's grey press disc and node shade are off: a tap selects, and the selection
   shows it.
-- **No link hidden without cause.** Inside a box, a link is left out only when a longer way through items in the same
-  box already implies it. A link across boxes shows only for the item selected or hovered, or a lit thread's, as all of
-  them at once crossed the Map; selecting an item, or lighting its thread, shows every link it has.
+- **No link hidden without cause.** Inside a box, a link is left out when a longer way through items in the same box
+  already implies it, always, even for the item selected or hovered or a lit thread: the way already shows the order,
+  and the link, drawn straight, cut across the items between (the user: "These connections are completely
+  unnecessary"). The item's panel still lists it. A link across boxes shows only for the item selected or hovered, or a
+  lit thread's, as all of them at once crossed the Map; selecting an item, or lighting its thread, shows every other
+  link it has.
 - **Out as one trunk, in one by one.** A node's outgoing links leave as one trunk that splits, marked by a dot; each
   arrives at its own point with its own arrowhead. Sharing both ends would let an outgoing trunk and an incoming one
   run as one line, and a link would seem to join items it doesn't. A dot marks only where a trunk splits; links that
@@ -545,6 +547,8 @@ before what went wrong.
   next fits the first view at 1280 x 800, and New item defaults to the initiative in context; the user chose them. The
   Map, Threads view and outline are scoped to it. Proposed: the initiative in context is kept in the address and the
   navigation place, orders the groups with the one in context first, and the Overview's Needs you rows keep wrapping.
+- 2026-11-12: implied links are never drawn on the Map, selection and hover included, after the user found the
+  straight lines selection drew to an item's further descendants "completely unnecessary".
 - 2026-11-06: top-level tasks with no dependency links stand in columns on the left of the packed boxes, with the
   same dashed separator as inside an epic. Thread membership and stage do not affect placement. Folded boxes stay
   with the boxes. The user approved the left-lane proposal and clarified that the rule is unlinked, not unthreaded.
