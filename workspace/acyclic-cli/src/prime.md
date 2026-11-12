@@ -49,7 +49,8 @@ machines recorded and pushes yours.
 reachable through other tasks is refused; pass `--allow-redundant` to add it deliberately. An edit that would make items
 wait for each other in a circle is refused.
 
-Only waits-for orders work: ids, titles and thread membership never do, so say every dependency you mean.
+Only waits-for orders work: ids, titles and thread membership never do. Say what each item directly waits for and let
+the chain carry the rest: if Plant waits for Beds and Beds waits for Dig, Plant already waits for Dig.
 
 ## Shaping the plan
 
