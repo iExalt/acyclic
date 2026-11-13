@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/iExalt/acyclic/compare/v0.13.0...v0.13.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* honor the Cargo target directory in browser checks ([#283](https://github.com/iExalt/acyclic/issues/283)) ([ca326e1](https://github.com/iExalt/acyclic/commit/ca326e19afb7a44a25a1735f9ad54f281c30544c))
+
 ## [0.13.0](https://github.com/iExalt/acyclic/compare/v0.12.0...v0.13.0) (2026-11-12)
 
 
