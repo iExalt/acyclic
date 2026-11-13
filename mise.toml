@@ -83,7 +83,7 @@ env = { ACYCLIC_REQUIRE_APP = "1", PYTHONUNBUFFERED = "1" }
 run = [
   "cargo build --quiet --locked --profile journeys -p acyclic -p acyclic-fixtures",
   "uv run --no-project --with playwright==1.64.0 python -m playwright install chromium webkit",
-  "uv run --no-project --with playwright==1.64.0 python workspace/acyclic-app/tests/browser/app.py target/journeys/acyclic target/journeys/acyclic-fixtures",
+  'uv run --no-project --with playwright==1.64.0 python workspace/acyclic-app/tests/browser/app.py "${CARGO_TARGET_DIR:-target}/journeys/acyclic" "${CARGO_TARGET_DIR:-target}/journeys/acyclic-fixtures"',
 ]
 
 [tasks."deps:browser"]
