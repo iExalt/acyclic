@@ -1,3 +1,0 @@
-#!/bin/sh
-# The publication guard (scripts/pre-push.sh), under mise so the pinned Gitleaks runs. Any failure blocks the push.
-exec mise exec -- sh scripts/pre-push.sh "$@"

@@ -1,2 +1,0 @@
-# The scripts import each other, so the local `app` module sorts as first-party wherever ruff runs from.
-src = ["."]
